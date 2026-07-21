@@ -177,7 +177,12 @@ struct HistoryPanel: View {
                     Text(entry.createdAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
                 }
                 Text(entry.instruction).lineLimit(2).font(.caption)
-                Text(entry.providerName).font(.caption2).foregroundStyle(.secondary)
+                HStack {
+                    Text(entry.providerName).font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L10n.text("history.prepareRestore")) { model.prepareRevert(entry) }
+                        .buttonStyle(.borderless)
+                }
             }
             .padding(.vertical, 4)
         }

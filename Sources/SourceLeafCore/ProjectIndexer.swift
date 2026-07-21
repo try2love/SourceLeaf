@@ -78,9 +78,7 @@ public enum ProjectIndexer {
             var score = 10
             if text.contains("\\begin{document}") { score += 5 }
             if file.url.lastPathComponent.lowercased().contains("main") { score += 3 }
-            if file.url.deletingLastPathComponent().path == file.url.deletingLastPathComponent().deletingLastPathComponent().path {
-                score += 1
-            }
+            if !file.relativePath.contains("/") { score += 1 }
             return (file, score)
         }
         return candidates.max { $0.1 < $1.1 }?.0

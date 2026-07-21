@@ -24,14 +24,17 @@ final class AppModel: ObservableObject {
     @Published var proposalValidation: [UUID: LaTeXValidationResult] = [:]
     @Published var instruction = ""
     @Published var contextScope: ContextScope = .section
+    @Published var customContextPaths: Set<String> = []
     @Published var providerProfiles: [ProviderProfile] = [.localCodex]
     @Published var selectedProviderID: UUID?
     @Published var generating = false
+    @Published var validatingReplacementID: UUID?
     @Published var lastError: String?
     @Published var history: [AIEditHistoryEntry] = []
     @Published var promptTemplates: [PromptTemplate] = BuiltInPrompts.all
     @Published var selectedPromptID: String?
     @Published var statusText = ""
+    @Published var appLanguage: AppLanguage
 
     private let compiler = CompilerService()
     private let keychain = KeychainStore()
@@ -43,19 +46,36 @@ final class AppModel: ObservableObject {
     private var historyStore: JSONFileStore<[AIEditHistoryEntry]>?
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
     private var chatStore: JSONFileStore<[ChatMessage]>?
+    private var promptsStore: JSONFileStore<[PromptTemplate]>?
 
     init() {
+        appLanguage = L10n.selectedLanguage
         do {
             let support = try ApplicationDirectories.supportDirectory()
             profilesStore = JSONFileStore(url: support.appendingPathComponent("settings/providers.json"))
+            promptsStore = JSONFileStore(url: support.appendingPathComponent("settings/prompts.json"))
             providerProfiles = try profilesStore?.load(default: [.localCodex]) ?? [.localCodex]
             if !providerProfiles.contains(where: { $0.kind == .localCodex }) {
                 providerProfiles.insert(.localCodex, at: 0)
             }
             selectedProviderID = providerProfiles.first?.id
+            let savedPrompts = try promptsStore?.load(default: []) ?? []
+            var savedBuiltIns: [String: PromptTemplate] = [:]
+            for prompt in savedPrompts where prompt.builtIn { savedBuiltIns[prompt.id] = prompt }
+            promptTemplates = BuiltInPrompts.all.map { builtIn in
+                var merged = builtIn
+                merged.enabled = savedBuiltIns[builtIn.id]?.enabled ?? builtIn.enabled
+                return merged
+            } + savedPrompts.filter { !$0.builtIn }
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    func setAppLanguage(_ language: AppLanguage) {
+        appLanguage = language
+        UserDefaults.standard.set(language.rawValue, forKey: L10n.languageDefaultsKey)
+        objectWillChange.send()
     }
 
     func presentOpenProjectPanel() {
@@ -205,7 +225,7 @@ final class AppModel: ObservableObject {
         selectedPromptID = template.id
         let rendered = BuiltInPrompts.render(
             template,
-            language: Locale.current.language.languageCode?.identifier ?? "en",
+            language: appLanguage.isChinese ? "zh" : "en",
             variables: ["user_goal": instruction]
         )
         instruction = rendered
@@ -215,6 +235,8 @@ final class AppModel: ObservableObject {
         guard !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let root = projectRoot else { return }
         attachLineReferencesFromInstruction()
+        configuration.defaultContextScope = contextScope
+        persistConfiguration()
         let userInstruction = instruction
         let targets = editTargets
         messages.append(ChatMessage(role: .user, text: userInstruction))
@@ -292,6 +314,49 @@ final class AppModel: ObservableObject {
         } catch { report(error) }
     }
 
+    func validateAndAccept(_ replacement: ProposedReplacement) {
+        guard configuration.build.trialCompileBeforeAccept else {
+            accept(replacement)
+            return
+        }
+        guard proposalValidation[replacement.id]?.hasErrors != true else {
+            report(AIProviderError.invalidResponse("Resolve the static LaTeX errors or use Force Accept."))
+            return
+        }
+        guard let root = projectRoot,
+              let rootDocument = configuration.rootDocument,
+              let target = editTargets.first(where: { $0.id == replacement.targetID }) else { return }
+        validatingReplacementID = replacement.id
+        Task {
+            do {
+                let url = try SourceTargetService.validatedURL(relativePath: target.relativePath, projectRoot: root)
+                let current = try String(contentsOf: url, encoding: .utf8)
+                let candidate = try SourceTargetService.apply(
+                    proposal: replacement,
+                    targets: editTargets,
+                    currentText: current
+                )
+                let managed = try? ApplicationDirectories.supportDirectory().appendingPathComponent("Engines/tectonic")
+                let result = try await compiler.trialBuild(
+                    projectRoot: root,
+                    rootDocument: rootDocument,
+                    editedRelativePath: target.relativePath,
+                    editedText: candidate,
+                    configuration: configuration.build,
+                    managedTectonicURL: managed
+                )
+                buildLog = result.log
+                guard result.status == .succeeded else {
+                    buildSucceeded = false
+                    layout.show(.buildLog, in: .bottom)
+                    throw AIProviderError.invalidResponse("The candidate did not compile. The original source was not changed; inspect the build log or use Force Accept.")
+                }
+                accept(replacement)
+            } catch { report(error) }
+            validatingReplacementID = nil
+        }
+    }
+
     func reject(_ replacement: ProposedReplacement) {
         pendingProposal?.replacements.removeAll { $0.id == replacement.id }
         if pendingProposal?.replacements.isEmpty == true { pendingProposal = nil }
@@ -343,6 +408,47 @@ final class AppModel: ObservableObject {
         do { try profilesStore?.save(providerProfiles) } catch { report(error) }
     }
 
+    func addPrompt() -> PromptTemplate {
+        let prompt = PromptTemplate(
+            id: "user.\(UUID().uuidString.lowercased())",
+            name: "New Prompt",
+            nameZH: "新提示词",
+            body: "Describe how the selected LaTeX should be revised.",
+            bodyZH: "说明应如何修改选中的 LaTeX 内容。",
+            variables: ["selected_text", "section_context", "user_goal"],
+            builtIn: false
+        )
+        promptTemplates.append(prompt)
+        savePromptTemplates()
+        return prompt
+    }
+
+    func duplicatePrompt(_ source: PromptTemplate) -> PromptTemplate {
+        let prompt = PromptTemplate(
+            id: "user.\(UUID().uuidString.lowercased())",
+            name: source.name + " Copy",
+            nameZH: source.nameZH + "（副本）",
+            body: source.body,
+            bodyZH: source.bodyZH,
+            variables: source.variables,
+            builtIn: false,
+            enabled: true
+        )
+        promptTemplates.append(prompt)
+        savePromptTemplates()
+        return prompt
+    }
+
+    func deletePrompt(_ prompt: PromptTemplate) {
+        guard !prompt.builtIn else { return }
+        promptTemplates.removeAll { $0.id == prompt.id }
+        savePromptTemplates()
+    }
+
+    func savePromptTemplates() {
+        do { try promptsStore?.save(promptTemplates) } catch { report(error) }
+    }
+
     func setSecret(_ secret: String, for profile: ProviderProfile) {
         do { try keychain.set(secret, account: profile.id.uuidString) } catch { report(error) }
     }
@@ -363,6 +469,48 @@ final class AppModel: ObservableObject {
     func clearAIHistory() {
         history = []
         do { try historyStore?.remove() } catch { report(error) }
+    }
+
+    func prepareRevert(_ entry: AIEditHistoryEntry) {
+        guard let root = projectRoot else { return }
+        do {
+            guard !entry.replacementText.isEmpty else {
+                throw AIProviderError.invalidResponse("A deleted range cannot be located safely from history alone.")
+            }
+            let url = try SourceTargetService.validatedURL(relativePath: entry.relativePath, projectRoot: root)
+            let current = try String(contentsOf: url, encoding: .utf8)
+            let nsCurrent = current as NSString
+            let first = nsCurrent.range(of: entry.replacementText)
+            guard first.location != NSNotFound else { throw SourceTargetError.staleTarget }
+            let searchStart = NSMaxRange(first)
+            let remainder = NSRange(location: searchStart, length: nsCurrent.length - searchStart)
+            guard nsCurrent.range(of: entry.replacementText, options: [], range: remainder).location == NSNotFound else {
+                throw AIProviderError.invalidResponse("The historical replacement occurs more than once, so SourceLeaf cannot identify a safe restore target.")
+            }
+            let target = try SourceTargetService.target(
+                in: current,
+                relativePath: entry.relativePath,
+                utf16Range: first
+            )
+            let replacement = ProposedReplacement(
+                targetID: target.id,
+                replacement: entry.originalText,
+                explanation: "Restore the source text recorded before this accepted AI edit."
+            )
+            editTargets = [target]
+            pendingProposal = AIProposal(
+                summary: "Review this history restoration before it changes the source file.",
+                replacements: [replacement],
+                providerName: "SourceLeaf History"
+            )
+            proposalValidation = [replacement.id: LaTeXValidator.validate(
+                original: target.originalText,
+                replacement: replacement.replacement
+            )]
+            layout.show(.codex, in: .trailing)
+            configuration.layout = layout
+            persistConfiguration()
+        } catch { report(error) }
     }
 
     private func scheduleSave() {
@@ -418,7 +566,14 @@ final class AppModel: ObservableObject {
             }
             return result
         case .custom:
-            return [:]
+            var result: [String: String] = [:]
+            for path in customContextPaths.sorted() {
+                let url = try SourceTargetService.validatedURL(relativePath: path, projectRoot: root)
+                if let text = try? String(contentsOf: url, encoding: .utf8) {
+                    result["custom:\(path)"] = text
+                }
+            }
+            return result
         }
     }
 

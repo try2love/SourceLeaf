@@ -153,19 +153,38 @@ public struct BuildConfiguration: Codable, Equatable, Sendable {
     public var autoBuild: Bool
     public var debounceSeconds: Double
     public var shellEscape: Bool
+    public var trialCompileBeforeAccept: Bool
 
     public init(
         engine: BuildEngine = .automatic,
         customCommand: String = "",
         autoBuild: Bool = true,
         debounceSeconds: Double = 1.5,
-        shellEscape: Bool = false
+        shellEscape: Bool = false,
+        trialCompileBeforeAccept: Bool = true
     ) {
         self.engine = engine
         self.customCommand = customCommand
         self.autoBuild = autoBuild
         self.debounceSeconds = min(5, max(0.5, debounceSeconds))
         self.shellEscape = shellEscape
+        self.trialCompileBeforeAccept = trialCompileBeforeAccept
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case engine, customCommand, autoBuild, debounceSeconds, shellEscape, trialCompileBeforeAccept
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            engine: try container.decodeIfPresent(BuildEngine.self, forKey: .engine) ?? .automatic,
+            customCommand: try container.decodeIfPresent(String.self, forKey: .customCommand) ?? "",
+            autoBuild: try container.decodeIfPresent(Bool.self, forKey: .autoBuild) ?? true,
+            debounceSeconds: try container.decodeIfPresent(Double.self, forKey: .debounceSeconds) ?? 1.5,
+            shellEscape: try container.decodeIfPresent(Bool.self, forKey: .shellEscape) ?? false,
+            trialCompileBeforeAccept: try container.decodeIfPresent(Bool.self, forKey: .trialCompileBeforeAccept) ?? true
+        )
     }
 }
 

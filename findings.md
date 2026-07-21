@@ -18,6 +18,7 @@
 - Episteme 使用 Swift Package 构建原生 `.app`，脚本安装到 `~/Applications` 并进行本地签名验证；其仓库未附带可复用许可证，因此 SourceLeaf 全新实现。
 - OSI 开源定义要求允许商业使用；禁止商用的软件应称为 source-available。
 - PolyForm Noncommercial 允许非商业修改和分发，并明确覆盖个人、教育和公共研究用途。
+- Tectonic 官方说明：默认不会启用 shell escape；`--untrusted` 会强制禁用危险能力，而明确启用应使用 `-Z shell-escape`。SourceLeaf 因此在开关关闭时默认传入 `--untrusted`，只有用户主动开启时才传入 shell-escape 参数。
 
 ## 技术决策
 | 决策 | 理由 |

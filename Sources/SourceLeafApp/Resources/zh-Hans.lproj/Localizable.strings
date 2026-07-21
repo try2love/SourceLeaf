@@ -19,6 +19,8 @@
 "action.hide" = "隐藏";
 "action.detach" = "移到独立窗口";
 "action.accept" = "接受";
+"action.validateAccept" = "验证并接受";
+"action.forceAccept" = "不编译，强制接受";
 "action.reject" = "拒绝";
 "action.adjust" = "继续调整";
 "source.noFile" = "尚未选择源码文件";
@@ -27,8 +29,10 @@
 "pdf.compileHint" = "编译主文档后，这里会保留最后一次成功的 PDF。";
 "pdf.sendSelection" = "发送给 Codex";
 "history.none" = "尚无已接受的 AI 修改";
+"history.prepareRestore" = "审阅恢复";
 "ai.provider" = "提供方";
 "ai.context" = "上下文";
+"ai.customContextFiles" = "选择自定义只读上下文文件";
 "ai.prompts" = "提示词";
 "ai.thinking" = "正在生成可审阅的修改建议……";
 "ai.chatOnlyHint" = "尚未附加可写目标；本条消息仅用于分析。";
@@ -49,6 +53,9 @@
 "context.project" = "整个项目";
 "context.custom" = "自定义";
 "settings.general" = "通用";
+"settings.language" = "语言";
+"settings.interfaceLanguage" = "界面语言";
+"language.system" = "跟随系统";
 "settings.providers" = "模型";
 "settings.prompts" = "提示词";
 "settings.storage" = "存储";
@@ -61,6 +68,7 @@
 "settings.engine" = "引擎";
 "settings.compileDelay" = "停止输入后编译";
 "settings.shellEscape" = "允许 shell escape";
+"settings.trialCompile" = "接受 AI 修改前先编译临时项目副本";
 "settings.context" = "AI 上下文";
 "settings.defaultContext" = "默认上下文范围";
 "provider.select" = "选择一个模型提供方";
@@ -81,6 +89,15 @@
 "provider.lmStudio" = "LM Studio";
 "provider.customCLI" = "自定义 CLI";
 "prompt.builtIn" = "内置";
+"prompt.select" = "选择一个提示词";
+"prompt.enabled" = "启用";
+"prompt.nameEnglish" = "英文名称";
+"prompt.nameChinese" = "中文名称";
+"prompt.bodyEnglish" = "英文提示词";
+"prompt.bodyChinese" = "中文提示词";
+"prompt.variables" = "可用变量";
+"prompt.readOnlyHint" = "内置提示词带版本且只读；复制为自定义提示词后即可个性化修改。";
+"prompt.duplicateToEdit" = "复制后编辑";
 "storage.cache" = "缓存";
 "storage.clearBuild" = "清理编译缓存";
 "storage.history" = "本地历史";

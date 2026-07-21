@@ -50,9 +50,25 @@ struct CodexPanel: View {
                 }
             }
             .labelsHidden()
+            if model.contextScope == .custom {
+                Menu {
+                    ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
+                        Toggle(file.relativePath, isOn: Binding(
+                            get: { model.customContextPaths.contains(file.relativePath) },
+                            set: { enabled in
+                                if enabled { model.customContextPaths.insert(file.relativePath) }
+                                else { model.customContextPaths.remove(file.relativePath) }
+                            }
+                        ))
+                    }
+                } label: {
+                    Label("\(model.customContextPaths.count)", systemImage: "doc.badge.plus")
+                }
+                .help(L10n.text("ai.customContextFiles"))
+            }
             Menu {
                 ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
-                    Button(Locale.current.language.languageCode?.identifier == "zh" ? prompt.nameZH : prompt.name) {
+                    Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
                         model.usePrompt(prompt)
                     }
                 }
@@ -164,8 +180,24 @@ private struct ProposalCard: View {
                 Button(L10n.text("action.adjust")) {
                     model.instruction = "Adjust the proposed change for \(target?.relativePath ?? "the target"): "
                 }
-                Button(L10n.text("action.accept")) { model.accept(replacement) }
+                Menu {
+                    Button(L10n.text("action.forceAccept")) { model.accept(replacement) }
+                } label: {
+                    Label("", systemImage: "chevron.down")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Button {
+                    model.validateAndAccept(replacement)
+                } label: {
+                    if model.validatingReplacementID == replacement.id {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(model.configuration.build.trialCompileBeforeAccept ? L10n.text("action.validateAccept") : L10n.text("action.accept"))
+                    }
+                }
                     .buttonStyle(.borderedProminent)
+                    .disabled(model.validatingReplacementID != nil)
             }
         }
         .padding(10)

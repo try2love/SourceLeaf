@@ -46,9 +46,13 @@ The current `0.1.0` build is a functional technical preview. Its central workflo
 
 已经可用的核心流程是：打开 LaTeX 项目、选中源码、附加为严格可写目标、选择上下文范围、让本机 Codex 或 API 生成建议、审阅 Diff 后再决定是否写入。
 
-Still in development: SyncTeX source/PDF navigation, trial compilation before accepting a proposal, one-click history restoration, managed Tectonic download UI, and the safety review for custom CLI providers. External `latexmk` or `tectonic` already works when installed.
+Before acceptance, SourceLeaf now compiles the proposal in an isolated temporary project copy by default. A failed candidate leaves the real source untouched; the user can inspect the build log or explicitly force acceptance. History restoration is routed back through the same reviewable diff instead of silently overwriting source.
 
-仍在开发：SyncTeX 双向定位、接受前候选编译、历史一键恢复、受管理 Tectonic 下载界面，以及自定义 CLI 的安全校验。若系统已有 `latexmk` 或 `tectonic`，当前版本已经可以调用。
+Still in development: SyncTeX source/PDF navigation, managed Tectonic download UI, and the safety review for custom CLI providers. External `latexmk` or `tectonic` already works when installed.
+
+接受修改前，SourceLeaf 现在默认在隔离的临时项目副本中试编译。失败时真实源码保持不变；用户可以检查日志，也可以明确选择强制接受。历史恢复同样会先回到 Diff 审阅，不会静默覆盖源码。
+
+仍在开发：SyncTeX 双向定位、受管理 Tectonic 下载界面，以及自定义 CLI 的安全校验。若系统已有 `latexmk` 或 `tectonic`，当前版本已经可以调用。
 
 ## Privacy boundary / 隐私边界
 
@@ -56,6 +60,14 @@ Still in development: SyncTeX source/PDF navigation, trial compilation before ac
 - API providers receive the same explicit targets and selected read-only context, with no filesystem or tool access.
 - API keys are stored in macOS Keychain. SourceLeaf never reads or copies Codex `auth.json`.
 - Chat, layout, AI history, and generated files live outside the paper project by default.
+
+## Language and prompts / 语言与提示词
+
+The General settings page can switch the interface immediately between Follow System, English, and Simplified Chinese. Localization keys are checked in the test suite so the two translations stay aligned.
+
+The Prompts page supports creating, duplicating, editing, enabling/disabling, and deleting personal prompts. Versioned built-in prompts are read-only; duplicate one to personalize it. Personal prompts are stored globally in SourceLeaf Application Support and never inside the paper project.
+
+“通用”设置可在“跟随系统、English、简体中文”之间即时切换。提示词页支持新增、复制、修改、启用/停用和删除个性化提示词；内置提示词保持只读，复制后即可编辑。自定义提示词保存在 SourceLeaf 的 Application Support 中，不会写入论文目录。
 
 ## License / 许可证
 

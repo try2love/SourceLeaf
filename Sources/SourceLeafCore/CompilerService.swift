@@ -89,6 +89,40 @@ public actor CompilerService {
         return try await task.value
     }
 
+    public func trialBuild(
+        projectRoot: URL,
+        rootDocument: String,
+        editedRelativePath: String,
+        editedText: String,
+        configuration: BuildConfiguration,
+        managedTectonicURL: URL? = nil
+    ) async throws -> BuildResult {
+        let cache = try ApplicationDirectories.cacheDirectory()
+        let trialRoot = cache
+            .appendingPathComponent("Trials", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        var generatedOutput: URL?
+        defer {
+            try? fileManager.removeItem(at: trialRoot)
+            if let generatedOutput { try? fileManager.removeItem(at: generatedOutput) }
+        }
+
+        try copyProject(from: projectRoot, to: trialRoot)
+        let candidateURL = try SourceTargetService.validatedURL(
+            relativePath: editedRelativePath,
+            projectRoot: trialRoot
+        )
+        try Data(editedText.utf8).write(to: candidateURL, options: [.atomic])
+        let result = try await build(
+            projectRoot: trialRoot,
+            rootDocument: rootDocument,
+            configuration: configuration,
+            managedTectonicURL: managedTectonicURL
+        )
+        generatedOutput = result.outputDirectory
+        return result
+    }
+
     private func performBuild(
         projectRoot: URL,
         rootDocument: String,
@@ -160,7 +194,11 @@ public actor CompilerService {
         case .tectonic:
             guard let tectonic else { throw CompilerError.engineUnavailable }
             var arguments = ["--synctex", "--keep-logs", "--outdir", outputDirectory.path]
-            if configuration.shellEscape { arguments.append("--untrusted") }
+            if configuration.shellEscape {
+                arguments += ["-Z", "shell-escape", "-Z", "shell-escape-cwd=\(projectRoot.path)"]
+            } else {
+                arguments.append("--untrusted")
+            }
             arguments.append(relativeRoot)
             return (tectonic, arguments)
         case .latexmkPDFLaTeX, .latexmkXeLaTeX, .latexmkLuaLaTeX:
@@ -188,6 +226,34 @@ public actor CompilerService {
         let cacheRoot = try ApplicationDirectories.cacheDirectory()
         let key = SourceTargetService.hash(projectRoot.standardizedFileURL.path)
         return cacheRoot.appendingPathComponent("Build", isDirectory: true).appendingPathComponent(String(key.prefix(16)), isDirectory: true)
+    }
+
+    private func copyProject(from sourceRoot: URL, to destinationRoot: URL) throws {
+        try fileManager.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+        guard let enumerator = fileManager.enumerator(
+            at: sourceRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsPackageDescendants]
+        ) else { return }
+        let excludedDirectories: Set<String> = [".git", ".build", "build", "DerivedData", "临时文件"]
+        let sourcePrefix = sourceRoot.path.hasSuffix("/") ? sourceRoot.path : sourceRoot.path + "/"
+
+        for case let sourceURL as URL in enumerator {
+            let values = try sourceURL.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey])
+            if values.isDirectory == true, excludedDirectories.contains(sourceURL.lastPathComponent) {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard sourceURL.path.hasPrefix(sourcePrefix) else { continue }
+            let relativePath = String(sourceURL.path.dropFirst(sourcePrefix.count))
+            let destinationURL = destinationRoot.appendingPathComponent(relativePath)
+            if values.isDirectory == true {
+                try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            } else if values.isRegularFile == true || values.isSymbolicLink == true {
+                try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            }
+        }
     }
 
     private func shellQuoted(_ value: String) -> String {

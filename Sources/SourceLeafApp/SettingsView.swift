@@ -24,6 +24,16 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
+            Section(L10n.text("settings.language")) {
+                Picker(L10n.text("settings.interfaceLanguage"), selection: Binding(
+                    get: { model.appLanguage },
+                    set: { model.setAppLanguage($0) }
+                )) {
+                    Text(L10n.text("language.system")).tag(AppLanguage.system)
+                    Text("English").tag(AppLanguage.english)
+                    Text("简体中文").tag(AppLanguage.simplifiedChinese)
+                }
+            }
             Section(L10n.text("settings.editor")) {
                 Toggle(L10n.text("settings.autoSave"), isOn: $model.configuration.autoSave)
                 LabeledContent(L10n.text("settings.autoSaveDelay")) {
@@ -45,6 +55,7 @@ private struct GeneralSettingsView: View {
                     }
                 }
                 Toggle(L10n.text("settings.shellEscape"), isOn: $model.configuration.build.shellEscape)
+                Toggle(L10n.text("settings.trialCompile"), isOn: $model.configuration.build.trialCompileBeforeAccept)
                 if model.configuration.build.engine == .custom {
                     TextField("latexmk {{root}} -outdir={{output}}", text: $model.configuration.build.customCommand)
                         .font(.body.monospaced())
@@ -152,21 +163,102 @@ private struct ProviderEditor: View {
 
 private struct PromptSettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var selectedID: String?
+
+    private var selectedIndex: Int? { model.promptTemplates.firstIndex { $0.id == selectedID } }
 
     var body: some View {
-        List {
-            ForEach($model.promptTemplates) { $prompt in
-                HStack {
-                    Toggle("", isOn: $prompt.enabled).labelsHidden()
-                    VStack(alignment: .leading) {
-                        Text(Locale.current.language.languageCode?.identifier == "zh" ? prompt.nameZH : prompt.name)
-                        Text(prompt.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+        HSplitView {
+            VStack(spacing: 0) {
+                List(model.promptTemplates, selection: $selectedID) { prompt in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.appLanguage.isChinese ? prompt.nameZH : prompt.name)
+                        HStack {
+                            Text(prompt.id).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            if prompt.builtIn {
+                                Text(L10n.text("prompt.builtIn"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
+                    .tag(prompt.id)
+                }
+                HStack {
+                    Button {
+                        selectedID = model.addPrompt().id
+                    } label: { Image(systemName: "plus") }
+                    Button {
+                        guard let index = selectedIndex else { return }
+                        selectedID = model.duplicatePrompt(model.promptTemplates[index]).id
+                    } label: { Image(systemName: "doc.on.doc") }
+                    .disabled(selectedIndex == nil)
+                    Button {
+                        guard let index = selectedIndex else { return }
+                        let prompt = model.promptTemplates[index]
+                        model.deletePrompt(prompt)
+                        selectedID = model.promptTemplates.first?.id
+                    } label: { Image(systemName: "trash") }
+                    .disabled(selectedIndex.map { model.promptTemplates[$0].builtIn } ?? true)
                     Spacer()
-                    if prompt.builtIn { Text(L10n.text("prompt.builtIn")).font(.caption).foregroundStyle(.secondary) }
+                }
+                .buttonStyle(.borderless)
+                .padding(7)
+            }
+            .frame(minWidth: 220)
+
+            if let index = selectedIndex {
+                PromptEditor(index: index)
+                    .frame(minWidth: 360)
+            } else {
+                ContentUnavailableView(L10n.text("prompt.select"), systemImage: "text.badge.star")
+            }
+        }
+        .onAppear { selectedID = model.promptTemplates.first?.id }
+        .onChange(of: model.promptTemplates) { _, _ in model.savePromptTemplates() }
+    }
+}
+
+private struct PromptEditor: View {
+    @EnvironmentObject private var model: AppModel
+    let index: Int
+
+    private var prompt: PromptTemplate { model.promptTemplates[index] }
+
+    var body: some View {
+        Form {
+            Toggle(L10n.text("prompt.enabled"), isOn: $model.promptTemplates[index].enabled)
+            TextField(L10n.text("prompt.nameEnglish"), text: $model.promptTemplates[index].name)
+                .disabled(prompt.builtIn)
+            TextField(L10n.text("prompt.nameChinese"), text: $model.promptTemplates[index].nameZH)
+                .disabled(prompt.builtIn)
+            LabeledContent(L10n.text("prompt.bodyEnglish")) {
+                TextEditor(text: $model.promptTemplates[index].body)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 100)
+                    .disabled(prompt.builtIn)
+            }
+            LabeledContent(L10n.text("prompt.bodyChinese")) {
+                TextEditor(text: $model.promptTemplates[index].bodyZH)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 100)
+                    .disabled(prompt.builtIn)
+            }
+            LabeledContent(L10n.text("prompt.variables")) {
+                Text(prompt.variables.map { "{{\($0)}}" }.joined(separator: ", "))
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+            if prompt.builtIn {
+                Label(L10n.text("prompt.readOnlyHint"), systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L10n.text("prompt.duplicateToEdit")) {
+                    _ = model.duplicatePrompt(prompt)
                 }
             }
         }
+        .formStyle(.grouped)
     }
 }
 

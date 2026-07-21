@@ -19,6 +19,8 @@
 "action.hide" = "Hide";
 "action.detach" = "Move to Separate Window";
 "action.accept" = "Accept";
+"action.validateAccept" = "Validate & Accept";
+"action.forceAccept" = "Force Accept Without Compiling";
 "action.reject" = "Reject";
 "action.adjust" = "Continue Adjusting";
 "source.noFile" = "No source file selected";
@@ -27,8 +29,10 @@
 "pdf.compileHint" = "Compile the root document to preview the last successful PDF.";
 "pdf.sendSelection" = "Send to Codex";
 "history.none" = "No accepted AI edits yet";
+"history.prepareRestore" = "Review Restore";
 "ai.provider" = "Provider";
 "ai.context" = "Context";
+"ai.customContextFiles" = "Choose custom read-only context files";
 "ai.prompts" = "Prompts";
 "ai.thinking" = "Preparing a reviewable proposal…";
 "ai.chatOnlyHint" = "No writable target attached. This message is analysis-only.";
@@ -49,6 +53,9 @@
 "context.project" = "Project";
 "context.custom" = "Custom";
 "settings.general" = "General";
+"settings.language" = "Language";
+"settings.interfaceLanguage" = "Interface language";
+"language.system" = "Follow System";
 "settings.providers" = "Providers";
 "settings.prompts" = "Prompts";
 "settings.storage" = "Storage";
@@ -61,6 +68,7 @@
 "settings.engine" = "Engine";
 "settings.compileDelay" = "Compile after typing stops";
 "settings.shellEscape" = "Allow shell escape";
+"settings.trialCompile" = "Compile a temporary project copy before accepting AI edits";
 "settings.context" = "AI Context";
 "settings.defaultContext" = "Default context scope";
 "provider.select" = "Select a provider";
@@ -81,6 +89,15 @@
 "provider.lmStudio" = "LM Studio";
 "provider.customCLI" = "Custom CLI";
 "prompt.builtIn" = "Built-in";
+"prompt.select" = "Select a prompt";
+"prompt.enabled" = "Enabled";
+"prompt.nameEnglish" = "English name";
+"prompt.nameChinese" = "Chinese name";
+"prompt.bodyEnglish" = "English prompt";
+"prompt.bodyChinese" = "Chinese prompt";
+"prompt.variables" = "Available variables";
+"prompt.readOnlyHint" = "Built-in prompts are versioned and read-only. Duplicate one to personalize it.";
+"prompt.duplicateToEdit" = "Duplicate to Edit";
 "storage.cache" = "Caches";
 "storage.clearBuild" = "Clear Build Cache";
 "storage.history" = "Local History";

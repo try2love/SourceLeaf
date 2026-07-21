@@ -9,6 +9,7 @@ struct SourceLeafApplication: App {
         WindowGroup {
             WorkspaceView()
                 .environmentObject(model)
+                .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowStyle(.titleBar)
@@ -20,6 +21,7 @@ struct SourceLeafApplication: App {
             if let panel = panel.wrappedValue {
                 FloatingPanelView(panel: panel)
                     .environmentObject(model)
+                    .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                     .frame(minWidth: 420, minHeight: 360)
             }
         }
@@ -28,6 +30,7 @@ struct SourceLeafApplication: App {
         Settings {
             SettingsView()
                 .environmentObject(model)
+                .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                 .frame(width: 680, height: 540)
         }
     }
