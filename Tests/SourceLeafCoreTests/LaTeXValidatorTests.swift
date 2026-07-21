@@ -21,5 +21,5 @@ import Testing
 
 @Test func validatesEnvironmentStack() {
     let issues = LaTeXValidator.validateStructure("\\begin{itemize}\n\\item A")
-    #expect(issues.contains { $0.message.contains("end{itemize}") })
+    #expect(issues.contains { $0.kind == .missingEnvironmentEnd("itemize") })
 }

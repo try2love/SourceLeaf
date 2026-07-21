@@ -54,6 +54,32 @@ public enum CompilerError: Error, LocalizedError {
     }
 }
 
+public enum ManagedTectonicLocator {
+    public static func resolve(
+        bundleResourceURL: URL?,
+        supportDirectory: URL?,
+        architecture: String
+    ) -> URL? {
+        let bundleCandidate = bundleResourceURL?
+            .appendingPathComponent("Engines", isDirectory: true)
+            .appendingPathComponent(architecture, isDirectory: true)
+            .appendingPathComponent("tectonic")
+        if let bundleCandidate,
+           FileManager.default.isExecutableFile(atPath: bundleCandidate.path) {
+            return bundleCandidate
+        }
+
+        let supportCandidate = supportDirectory?
+            .appendingPathComponent("Engines", isDirectory: true)
+            .appendingPathComponent("tectonic")
+        if let supportCandidate,
+           FileManager.default.isExecutableFile(atPath: supportCandidate.path) {
+            return supportCandidate
+        }
+        return nil
+    }
+}
+
 public actor CompilerService {
     private let runner: ProcessRunner
     private let fileManager: FileManager

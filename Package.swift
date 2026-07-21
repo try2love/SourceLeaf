@@ -26,6 +26,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("PDFKit"),
+                .linkedFramework("QuickLookUI"),
                 .linkedFramework("Security")
             ]
         ),

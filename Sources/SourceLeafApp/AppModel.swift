@@ -7,7 +7,9 @@ import SourceLeafCore
 final class AppModel: ObservableObject {
     @Published var projectRoot: URL?
     @Published var projectFiles: [ProjectFile] = []
+    @Published var projectTree: [ProjectTreeNode] = []
     @Published var selectedFile: ProjectFile?
+    @Published var selectedImageFile: ProjectFile?
     @Published var sourceText = ""
     @Published var selectedRange = NSRange(location: 0, length: 0)
     @Published var outline: [DocumentOutlineItem] = []
@@ -35,6 +37,7 @@ final class AppModel: ObservableObject {
     @Published var selectedPromptID: String?
     @Published var statusText = ""
     @Published var appLanguage: AppLanguage
+    @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
 
     private let compiler = CompilerService()
     private let keychain = KeychainStore()
@@ -47,6 +50,8 @@ final class AppModel: ObservableObject {
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
     private var chatStore: JSONFileStore<[ChatMessage]>?
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
+    private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
+    private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
 
     init() {
         appLanguage = L10n.selectedLanguage
@@ -68,8 +73,9 @@ final class AppModel: ObservableObject {
                 return merged
             } + savedPrompts.filter { !$0.builtIn }
         } catch {
-            lastError = error.localizedDescription
+            lastError = L10n.userMessage(for: error)
         }
+        restoreLastProjectIfAvailable()
     }
 
     func setAppLanguage(_ language: AppLanguage) {
@@ -93,6 +99,7 @@ final class AppModel: ObservableObject {
             try saveCurrentFileIfNeeded()
             projectRoot = root.standardizedFileURL
             projectFiles = ProjectIndexer.discoverFiles(root: root)
+            projectTree = ProjectIndexer.tree(files: projectFiles)
             let support = try ApplicationDirectories.supportDirectory()
             let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
             let stateRoot = support.appendingPathComponent("Projects/\(key)", isDirectory: true)
@@ -105,12 +112,16 @@ final class AppModel: ObservableObject {
             history = try historyStore?.load(default: []) ?? []
             messages = configuration.privateChatMode ? [] : (try chatStore?.load(default: []) ?? [])
 
-            let detected = configuration.rootDocument.flatMap { path in projectFiles.first { $0.relativePath == path } }
+            let lastFileKey = "SourceLeaf.lastFile.\(key)"
+            let lastFile = UserDefaults.standard.string(forKey: lastFileKey)
+                .flatMap { path in projectFiles.first { $0.relativePath == path } }
+            let rootDocumentFile = configuration.rootDocument.flatMap { path in projectFiles.first { $0.relativePath == path } }
                 ?? ProjectIndexer.detectRootDocument(files: projectFiles)
                 ?? projectFiles.first(where: { $0.kind == .tex })
-            if configuration.rootDocument == nil { configuration.rootDocument = detected?.relativePath }
-            if let detected { openFile(detected) }
+            if configuration.rootDocument == nil { configuration.rootDocument = rootDocumentFile?.relativePath }
+            if let initialFile = lastFile ?? rootDocumentFile { openFile(initialFile) }
             persistConfiguration()
+            UserDefaults.standard.set(root.standardizedFileURL.path, forKey: Self.lastProjectPathKey)
             statusText = root.lastPathComponent
         } catch {
             report(error)
@@ -118,21 +129,40 @@ final class AppModel: ObservableObject {
     }
 
     func openFile(_ file: ProjectFile) {
+        if file.kind == .image {
+            openImage(file)
+            return
+        }
         do {
             try saveCurrentFileIfNeeded()
             let text = try String(contentsOf: file.url, encoding: .utf8)
             suppressTextChange = true
             selectedFile = file
+            selectedImageFile = nil
             sourceText = text
             selectedRange = NSRange(location: 0, length: 0)
             outline = ProjectIndexer.outline(for: text)
             suppressTextChange = false
             layout.show(.source, in: .center)
+            if let zone = layout.zone(containing: .source) { layout.selected[zone] = .source }
+            rememberLastOpenedFile(file)
             objectWillChange.send()
         } catch {
             suppressTextChange = false
             report(error)
         }
+    }
+
+    func openImage(_ file: ProjectFile) {
+        do {
+            try saveCurrentFileIfNeeded()
+            selectedImageFile = file
+            layout.show(.image, in: .center)
+            if let zone = layout.zone(containing: .image) { layout.selected[zone] = .image }
+            configuration.layout = layout
+            rememberLastOpenedFile(file)
+            persistConfiguration()
+        } catch { report(error) }
     }
 
     func sourceChanged(_ text: String) {
@@ -144,7 +174,7 @@ final class AppModel: ObservableObject {
     }
 
     func saveCurrentFileIfNeeded() throws {
-        guard let selectedFile else { return }
+        guard let selectedFile, [.tex, .bibliography, .style].contains(selectedFile.kind) else { return }
         let currentDisk = (try? String(contentsOf: selectedFile.url, encoding: .utf8)) ?? ""
         guard currentDisk != sourceText else { return }
         try Data(sourceText.utf8).write(to: selectedFile.url, options: [.atomic])
@@ -158,9 +188,51 @@ final class AppModel: ObservableObject {
     }
 
     func togglePanel(_ panel: WorkspacePanel) {
+        if floatingPanels.contains(panel) { return }
         if layout.contains(panel) { layout.close(panel) } else { layout.show(panel) }
         configuration.layout = layout
         persistConfiguration()
+    }
+
+    func activatePanel(_ panel: WorkspacePanel) {
+        guard !floatingPanels.contains(panel) else { return }
+        if let zone = layout.zone(containing: panel) {
+            if layout.selected[zone] == panel { layout.close(panel) }
+            else { layout.selected[zone] = panel }
+        } else {
+            layout.show(panel)
+        }
+        configuration.layout = layout
+        persistConfiguration()
+    }
+
+    func revealPanel(_ panel: WorkspacePanel, in preferredZone: DockZone? = nil) {
+        guard !floatingPanels.contains(panel) else { return }
+        if let zone = layout.zone(containing: panel) { layout.selected[zone] = panel }
+        else { layout.show(panel, in: preferredZone) }
+        configuration.layout = layout
+        persistConfiguration()
+    }
+
+    func detachPanel(_ panel: WorkspacePanel) {
+        floatingOrigins[panel] = layout.zone(containing: panel) ?? DockLayout.defaultZone(for: panel)
+        floatingPanels.insert(panel)
+        layout.close(panel)
+        configuration.layout = layout
+        persistConfiguration()
+    }
+
+    func restoreFloatingPanel(_ panel: WorkspacePanel) {
+        guard floatingPanels.remove(panel) != nil else { return }
+        layout.restore(panel, to: floatingOrigins.removeValue(forKey: panel))
+        configuration.layout = layout
+        persistConfiguration()
+    }
+
+    func jumpToOutline(_ item: DocumentOutlineItem) {
+        let location = SourceLineMap.utf16Location(in: sourceText, line: item.line)
+        selectedRange = NSRange(location: location, length: 0)
+        revealPanel(.source, in: .center)
     }
 
     func movePanel(_ panel: WorkspacePanel, to zone: DockZone) {
@@ -258,7 +330,7 @@ final class AppModel: ObservableObject {
                 )
                 let proposal = try await provider.generateProposal(for: request)
                 guard Set(proposal.replacements.map(\.targetID)).isSubset(of: Set(targets.map(\.id))) else {
-                    throw AIProviderError.invalidResponse("The provider returned an unknown target ID.")
+                    throw AppPresentationError.unknownProposalTarget
                 }
                 pendingProposal = proposal
                 for replacement in proposal.replacements {
@@ -273,7 +345,7 @@ final class AppModel: ObservableObject {
                 persistMessages()
             } catch {
                 report(error)
-                messages.append(ChatMessage(role: .assistant, text: error.localizedDescription))
+                messages.append(ChatMessage(role: .assistant, text: L10n.userMessage(for: error)))
             }
             generating = false
         }
@@ -320,7 +392,7 @@ final class AppModel: ObservableObject {
             return
         }
         guard proposalValidation[replacement.id]?.hasErrors != true else {
-            report(AIProviderError.invalidResponse("Resolve the static LaTeX errors or use Force Accept."))
+            report(AppPresentationError.staticValidationFailed)
             return
         }
         guard let root = projectRoot,
@@ -336,7 +408,7 @@ final class AppModel: ObservableObject {
                     targets: editTargets,
                     currentText: current
                 )
-                let managed = try? ApplicationDirectories.supportDirectory().appendingPathComponent("Engines/tectonic")
+                let managed = managedTectonicURL()
                 let result = try await compiler.trialBuild(
                     projectRoot: root,
                     rootDocument: rootDocument,
@@ -349,7 +421,7 @@ final class AppModel: ObservableObject {
                 guard result.status == .succeeded else {
                     buildSucceeded = false
                     layout.show(.buildLog, in: .bottom)
-                    throw AIProviderError.invalidResponse("The candidate did not compile. The original source was not changed; inspect the build log or use Force Accept.")
+                    throw AppPresentationError.candidateCompilationFailed
                 }
                 accept(replacement)
             } catch { report(error) }
@@ -376,7 +448,7 @@ final class AppModel: ObservableObject {
         activeCompileTask = Task {
             do {
                 try saveCurrentFileIfNeeded()
-                let managed = try? ApplicationDirectories.supportDirectory().appendingPathComponent("Engines/tectonic")
+                let managed = managedTectonicURL()
                 let result = try await compiler.build(
                     projectRoot: root,
                     rootDocument: rootDocument,
@@ -392,7 +464,7 @@ final class AppModel: ObservableObject {
                 return
             } catch {
                 buildSucceeded = false
-                buildLog += "\n" + error.localizedDescription
+                buildLog += "\n" + L10n.userMessage(for: error)
                 report(error)
             }
             buildRunning = false
@@ -402,6 +474,21 @@ final class AppModel: ObservableObject {
     func persistConfiguration() {
         configuration.layout = layout
         do { try projectConfigStore?.save(configuration) } catch { report(error) }
+    }
+
+    private func managedTectonicURL() -> URL? {
+        #if arch(arm64)
+        let architecture = "arm64"
+        #elseif arch(x86_64)
+        let architecture = "x86_64"
+        #else
+        let architecture = "unknown"
+        #endif
+        return ManagedTectonicLocator.resolve(
+            bundleResourceURL: Bundle.main.resourceURL,
+            supportDirectory: try? ApplicationDirectories.supportDirectory(),
+            architecture: architecture
+        )
     }
 
     func saveProviderProfiles() {
@@ -475,7 +562,7 @@ final class AppModel: ObservableObject {
         guard let root = projectRoot else { return }
         do {
             guard !entry.replacementText.isEmpty else {
-                throw AIProviderError.invalidResponse("A deleted range cannot be located safely from history alone.")
+                throw AppPresentationError.deletedHistoryRange
             }
             let url = try SourceTargetService.validatedURL(relativePath: entry.relativePath, projectRoot: root)
             let current = try String(contentsOf: url, encoding: .utf8)
@@ -485,7 +572,7 @@ final class AppModel: ObservableObject {
             let searchStart = NSMaxRange(first)
             let remainder = NSRange(location: searchStart, length: nsCurrent.length - searchStart)
             guard nsCurrent.range(of: entry.replacementText, options: [], range: remainder).location == NSNotFound else {
-                throw AIProviderError.invalidResponse("The historical replacement occurs more than once, so SourceLeaf cannot identify a safe restore target.")
+                throw AppPresentationError.ambiguousHistoryRange
             }
             let target = try SourceTargetService.target(
                 in: current,
@@ -495,13 +582,13 @@ final class AppModel: ObservableObject {
             let replacement = ProposedReplacement(
                 targetID: target.id,
                 replacement: entry.originalText,
-                explanation: "Restore the source text recorded before this accepted AI edit."
+                explanation: L10n.text("history.restoreExplanation")
             )
             editTargets = [target]
             pendingProposal = AIProposal(
-                summary: "Review this history restoration before it changes the source file.",
+                summary: L10n.text("history.restoreSummary"),
                 replacements: [replacement],
-                providerName: "SourceLeaf History"
+                providerName: L10n.text("history.providerName")
             )
             proposalValidation = [replacement.id: LaTeXValidator.validate(
                 original: target.originalText,
@@ -522,6 +609,22 @@ final class AppModel: ObservableObject {
             guard !Task.isCancelled else { return }
             saveNow()
         }
+    }
+
+    private func restoreLastProjectIfAvailable() {
+        guard let path = UserDefaults.standard.string(forKey: Self.lastProjectPathKey) else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            UserDefaults.standard.removeObject(forKey: Self.lastProjectPathKey)
+            return
+        }
+        openProject(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    private func rememberLastOpenedFile(_ file: ProjectFile) {
+        guard let root = projectRoot else { return }
+        let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
+        UserDefaults.standard.set(file.relativePath, forKey: "SourceLeaf.lastFile.\(key)")
     }
 
     private func scheduleCompile() {
@@ -585,7 +688,7 @@ final class AppModel: ObservableObject {
         case .openAI, .openAICompatible, .anthropic, .gemini, .ollama, .lmStudio:
             return HTTPAIProvider(profile: profile, apiKey: try keychain.get(account: profile.id.uuidString))
         case .customCLI:
-            throw AIProviderError.invalidResponse("Custom CLI profiles will be available after a command passes the local safety check.")
+            throw AppPresentationError.customCLIUnavailable
         }
     }
 
@@ -595,7 +698,8 @@ final class AppModel: ObservableObject {
     }
 
     private func report(_ error: Error) {
-        lastError = error.localizedDescription
-        statusText = error.localizedDescription
+        let message = L10n.userMessage(for: error)
+        lastError = message
+        statusText = message
     }
 }

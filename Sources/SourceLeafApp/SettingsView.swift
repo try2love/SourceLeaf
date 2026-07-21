@@ -92,7 +92,7 @@ private struct ProviderSettingsView: View {
                 }
                 HStack {
                     Button {
-                        let profile = ProviderProfile(name: "New Provider", kind: .openAICompatible)
+                        let profile = ProviderProfile(name: L10n.text("provider.newName"), kind: .openAICompatible)
                         model.providerProfiles.append(profile)
                         selectedID = profile.id
                     } label: { Image(systemName: "plus") }

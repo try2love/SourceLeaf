@@ -10,6 +10,7 @@ public enum DockZone: String, Codable, CaseIterable, Hashable, Sendable {
 public enum WorkspacePanel: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
     case project
     case source
+    case image
     case pdf
     case codex
     case buildLog
@@ -69,9 +70,22 @@ public struct DockLayout: Codable, Equatable, Sendable {
     public static func defaultZone(for panel: WorkspacePanel) -> DockZone {
         switch panel {
         case .project: .leading
-        case .source: .center
+        case .source, .image: .center
         case .pdf, .codex, .history: .trailing
         case .buildLog: .bottom
+        }
+    }
+
+    public func zone(containing panel: WorkspacePanel) -> DockZone? {
+        DockZone.allCases.first { zones[$0]?.contains(panel) == true }
+    }
+
+    public mutating func restore(_ panel: WorkspacePanel, to zone: DockZone?) {
+        let target = zone ?? Self.defaultZone(for: panel)
+        if contains(panel) { move(panel, to: target) }
+        else {
+            zones[target, default: []].append(panel)
+            selected[target] = panel
         }
     }
 }
@@ -238,6 +252,81 @@ public struct ProjectFile: Identifiable, Hashable, Sendable {
         self.relativePath = relativePath
         self.url = url
         self.kind = kind
+    }
+}
+
+public struct ProjectTreeNode: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var relativePath: String
+    public var file: ProjectFile?
+    public var children: [ProjectTreeNode]?
+
+    public var isDirectory: Bool { file == nil }
+
+    public init(
+        id: String,
+        name: String,
+        relativePath: String,
+        file: ProjectFile? = nil,
+        children: [ProjectTreeNode]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.relativePath = relativePath
+        self.file = file
+        self.children = children
+    }
+}
+
+public struct SourceLineLocation: Equatable, Sendable {
+    public var line: Int
+    public var utf16Location: Int
+
+    public init(line: Int, utf16Location: Int) {
+        self.line = line
+        self.utf16Location = utf16Location
+    }
+}
+
+public enum SourceLineMap {
+    public static func utf16Location(in source: String, line requestedLine: Int) -> Int {
+        guard requestedLine > 1 else { return 0 }
+        let text = source as NSString
+        var location = 0
+        var line = 1
+        while location < text.length, line < requestedLine {
+            var end = 0
+            text.getLineStart(nil, end: &end, contentsEnd: nil, for: NSRange(location: location, length: 0))
+            guard end > location else { break }
+            location = end
+            line += 1
+        }
+        return min(location, text.length)
+    }
+
+    public static func visibleLineStarts(in source: String, utf16Range: NSRange) -> [SourceLineLocation] {
+        let text = source as NSString
+        guard text.length > 0 else { return [SourceLineLocation(line: 1, utf16Location: 0)] }
+        let safeLocation = min(max(0, utf16Range.location), text.length - 1)
+        let safeEnd = min(text.length, max(safeLocation, NSMaxRange(utf16Range)))
+        var lineStart = 0
+        var lineEnd = 0
+        text.getLineStart(&lineStart, end: &lineEnd, contentsEnd: nil, for: NSRange(location: safeLocation, length: 0))
+        let prefix = text.substring(to: lineStart)
+        var lineNumber = 1 + prefix.reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        var result: [SourceLineLocation] = []
+        while lineStart <= safeEnd, lineStart < text.length {
+            result.append(SourceLineLocation(line: lineNumber, utf16Location: lineStart))
+            var nextEnd = 0
+            text.getLineStart(nil, end: &nextEnd, contentsEnd: nil, for: NSRange(location: lineStart, length: 0))
+            guard nextEnd > lineStart else { break }
+            lineStart = nextEnd
+            lineNumber += 1
+        }
+        return result
     }
 }
 

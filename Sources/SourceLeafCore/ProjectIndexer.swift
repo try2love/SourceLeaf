@@ -84,6 +84,29 @@ public enum ProjectIndexer {
         return candidates.max { $0.1 < $1.1 }?.0
     }
 
+    public static func tree(files: [ProjectFile]) -> [ProjectTreeNode] {
+        let root = ProjectTreeBuilder(name: "", relativePath: "")
+        for file in files {
+            let components = file.relativePath.split(separator: "/").map(String.init)
+            guard !components.isEmpty else { continue }
+            var current = root
+            var pathComponents: [String] = []
+            for component in components.dropLast() {
+                pathComponents.append(component)
+                let path = pathComponents.joined(separator: "/")
+                if let existing = current.directories[component] {
+                    current = existing
+                } else {
+                    let directory = ProjectTreeBuilder(name: component, relativePath: path)
+                    current.directories[component] = directory
+                    current = directory
+                }
+            }
+            current.files.append(file)
+        }
+        return root.nodes()
+    }
+
     public static func outline(for source: String) -> [DocumentOutlineItem] {
         let pattern = #"\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*\{([^}]*)\}"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -126,5 +149,41 @@ public enum ProjectIndexer {
         case "png", "jpg", "jpeg", "pdf", "eps", "svg": .image
         default: .other
         }
+    }
+}
+
+private final class ProjectTreeBuilder {
+    let name: String
+    let relativePath: String
+    var directories: [String: ProjectTreeBuilder] = [:]
+    var files: [ProjectFile] = []
+
+    init(name: String, relativePath: String) {
+        self.name = name
+        self.relativePath = relativePath
+    }
+
+    func nodes() -> [ProjectTreeNode] {
+        let directoryNodes = directories.values
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map { directory in
+                ProjectTreeNode(
+                    id: "directory:\(directory.relativePath)",
+                    name: directory.name,
+                    relativePath: directory.relativePath,
+                    children: directory.nodes()
+                )
+            }
+        let fileNodes = files
+            .sorted { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }
+            .map { file in
+                ProjectTreeNode(
+                    id: "file:\(file.relativePath)",
+                    name: file.url.lastPathComponent,
+                    relativePath: file.relativePath,
+                    file: file
+                )
+            }
+        return directoryNodes + fileNodes
     }
 }

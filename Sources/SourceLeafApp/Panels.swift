@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import QuickLookUI
 import SwiftUI
 import SourceLeafCore
 
@@ -7,7 +8,7 @@ struct ProjectPanel: View {
     @EnvironmentObject private var model: AppModel
     @State private var query = ""
 
-    private var files: [ProjectFile] {
+    private var filteredFiles: [ProjectFile] {
         guard !query.isEmpty else { return model.projectFiles }
         return model.projectFiles.filter { $0.relativePath.localizedCaseInsensitiveContains(query) }
     }
@@ -17,21 +18,20 @@ struct ProjectPanel: View {
             TextField(L10n.text("project.filter"), text: $query)
                 .textFieldStyle(.roundedBorder)
                 .padding(8)
-            List(files, selection: Binding(
-                get: { model.selectedFile?.id },
-                set: { id in if let file = files.first(where: { $0.id == id }) { model.openFile(file) } }
-            )) { file in
-                Label(file.relativePath, systemImage: file.symbolName)
-                    .font(file.kind == .tex ? .caption.monospaced() : .caption)
-                    .tag(file.id)
-                    .contextMenu {
-                        if file.kind == .tex {
-                            Button(L10n.text("project.setRoot")) {
-                                model.configuration.rootDocument = file.relativePath
-                                model.persistConfiguration()
-                            }
-                        }
+            if query.isEmpty {
+                List {
+                    OutlineGroup(model.projectTree, children: \.children) { node in
+                        ProjectTreeRow(node: node)
                     }
+                }
+            } else {
+                List(filteredFiles) { file in
+                    Button { model.openFile(file) } label: {
+                        Label(file.relativePath, systemImage: file.symbolName)
+                            .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             if !model.outline.isEmpty {
                 Divider()
@@ -40,13 +40,89 @@ struct ProjectPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
                 List(model.outline) { item in
-                    Text(item.title)
+                    Button { model.jumpToOutline(item) } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "number")
+                                .foregroundStyle(.tertiary)
+                            Text(item.title)
+                            Spacer()
+                            Text("\(item.line)").foregroundStyle(.tertiary)
+                        }
                         .font(.caption)
                         .padding(.leading, CGFloat(max(0, item.level - 1)) * 9)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .frame(minHeight: 100)
             }
         }
+    }
+}
+
+private struct ProjectTreeRow: View {
+    @EnvironmentObject private var model: AppModel
+    let node: ProjectTreeNode
+
+    var body: some View {
+        if let file = node.file {
+            Button { model.openFile(file) } label: {
+                Label(node.name, systemImage: file.symbolName)
+                    .font(file.kind == .tex ? .caption.monospaced() : .caption)
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                if file.kind == .tex {
+                    Button(L10n.text("project.setRoot")) {
+                        model.configuration.rootDocument = file.relativePath
+                        model.persistConfiguration()
+                    }
+                }
+            }
+        } else {
+            Label(node.name, systemImage: "folder")
+                .font(.caption)
+        }
+    }
+}
+
+struct ImagePanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "photo")
+                Text(model.selectedImageFile?.relativePath ?? L10n.text("image.none"))
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.bar)
+
+            if let url = model.selectedImageFile?.url {
+                QuickLookPreview(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(L10n.text("image.none"), systemImage: "photo")
+            }
+        }
+    }
+}
+
+private struct QuickLookPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> QLPreviewView {
+        let view = QLPreviewView(frame: .zero, style: .normal)
+        view?.autostarts = true
+        view?.previewItem = url as NSURL
+        return view ?? QLPreviewView(frame: .zero, style: .normal)!
+    }
+
+    func updateNSView(_ view: QLPreviewView, context: Context) {
+        if (view.previewItem as? NSURL)?.filePathURL != url { view.previewItem = url as NSURL }
     }
 }
 
@@ -74,7 +150,9 @@ struct PDFPanel: View {
             .background(.bar)
 
             if let url = model.pdfURL {
-                PDFKitView(url: url, selection: $model.pdfSelection)
+                ZStack(alignment: .bottom) {
+                    PDFKitView(url: url, selection: $model.pdfSelection)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if !model.pdfSelection.isEmpty {
                     HStack {
                         Text(model.pdfSelection)
@@ -82,12 +160,16 @@ struct PDFPanel: View {
                             .font(.caption)
                         Spacer()
                         Button(L10n.text("pdf.sendSelection")) {
-                            model.instruction = "Analyze this PDF selection and identify the corresponding source change. Do not modify source until the mapping is confirmed:\n\n\(model.pdfSelection)"
-                            model.layout.show(.codex, in: .trailing)
+                            model.instruction = L10n.text("pdf.selectionInstruction") + "\n\n\(model.pdfSelection)"
+                            model.revealPanel(.codex, in: .trailing)
                         }
                     }
                     .padding(8)
-                    .background(Color.accentColor.opacity(0.08))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 5)
+                    .padding(10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 }
             } else {
                 ContentUnavailableView(

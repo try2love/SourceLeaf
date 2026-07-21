@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SourceLeafCore
 
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
@@ -53,7 +54,7 @@ struct SourceTextView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        let textView = NSTextView(frame: .zero)
+        let textView = NSTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
@@ -62,13 +63,22 @@ struct SourceTextView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.textColor = .labelColor
+        textView.backgroundColor = .textBackgroundColor
+        textView.drawsBackground = true
+        textView.insertionPointColor = .labelColor
+        textView.selectedTextAttributes = [
+            .backgroundColor: NSColor.selectedTextBackgroundColor,
+            .foregroundColor: NSColor.selectedTextColor
+        ]
         textView.textContainerInset = NSSize(width: 12, height: 10)
-        textView.textContainer?.widthTracksTextView = false
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
         textView.string = text
         scrollView.documentView = textView
 
@@ -98,6 +108,7 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.ruler = ruler
         context.coordinator.askButton = askButton
+        context.coordinator.observeScrollView(scrollView)
         context.coordinator.applyHighlighting()
         return container
     }
@@ -113,7 +124,11 @@ struct SourceTextView: NSViewRepresentable {
         }
         if textView.selectedRange() != selection, NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
+            textView.scrollRangeToVisible(selection)
         }
+        textView.backgroundColor = .textBackgroundColor
+        textView.textColor = .labelColor
+        context.coordinator.askButton?.title = L10n.text("selection.askAI")
         context.coordinator.updateAskButton()
         context.coordinator.ruler?.needsDisplay = true
     }
@@ -127,6 +142,20 @@ struct SourceTextView: NSViewRepresentable {
         private var highlighting = false
 
         init(parent: SourceTextView) { self.parent = parent }
+
+        func observeScrollView(_ scrollView: NSScrollView) {
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(scrollBoundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView
+            )
+        }
+
+        @objc private func scrollBoundsDidChange(_ notification: Notification) {
+            ruler?.needsDisplay = true
+        }
 
         func textDidChange(_ notification: Notification) {
             guard !highlighting, let textView else { return }
@@ -150,6 +179,7 @@ struct SourceTextView: NSViewRepresentable {
         func applyHighlighting() {
             guard let textView, let storage = textView.textStorage else { return }
             highlighting = true
+            let selectedRange = textView.selectedRange()
             let source = textView.string as NSString
             let full = NSRange(location: 0, length: source.length)
             storage.beginEditing()
@@ -162,6 +192,11 @@ struct SourceTextView: NSViewRepresentable {
             apply(#"\$[^$\n]*\$"#, color: .systemPurple, storage: storage, source: textView.string)
             apply(#"\{[^{}\n]*\}"#, color: .systemOrange, storage: storage, source: textView.string)
             storage.endEditing()
+            if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
+            textView.typingAttributes = [
+                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                .foregroundColor: NSColor.labelColor
+            ]
             highlighting = false
         }
 
@@ -197,31 +232,25 @@ final class LineNumberRulerView: NSRulerView {
         guard let textView,
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
-        NSColor.windowBackgroundColor.setFill()
+        NSColor.textBackgroundColor.setFill()
         rect.fill()
 
         let visible = textView.enclosingScrollView?.contentView.bounds ?? textView.visibleRect
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
-        let source = textView.string as NSString
-        var line = 1
-        if glyphRange.location > 0 {
-            let character = layoutManager.characterIndexForGlyph(at: glyphRange.location)
-            line += source.substring(to: min(character, source.length)).reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
-        }
-        var glyph = glyphRange.location
-        while glyph < NSMaxRange(glyphRange) {
-            var lineGlyphRange = NSRange()
-            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &lineGlyphRange)
+        let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let source = textView.string
+        for item in SourceLineMap.visibleLineStarts(in: source, utf16Range: characterRange) {
+            guard item.utf16Location < (source as NSString).length else { continue }
+            let glyph = layoutManager.glyphIndexForCharacter(at: item.utf16Location)
+            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             let y = fragment.minY - visible.minY + textView.textContainerOrigin.y
-            let string = "\(line)" as NSString
+            let string = "\(item.line)" as NSString
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
             let size = string.size(withAttributes: attributes)
             string.draw(at: NSPoint(x: ruleThickness - size.width - 7, y: y + 2), withAttributes: attributes)
-            glyph = NSMaxRange(lineGlyphRange)
-            line += 1
         }
     }
 }

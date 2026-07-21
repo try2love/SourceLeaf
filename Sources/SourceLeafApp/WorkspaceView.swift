@@ -24,7 +24,7 @@ struct WorkspaceView: View {
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
         )) {
-            Button("OK", role: .cancel) { model.lastError = nil }
+            Button(L10n.text("action.ok"), role: .cancel) { model.lastError = nil }
         } message: {
             Text(model.lastError ?? "")
         }
@@ -36,12 +36,12 @@ struct WorkspaceView: View {
             Menu {
                 ForEach(WorkspacePanel.allCases) { panel in
                     Toggle(L10n.panel(panel), isOn: Binding(
-                        get: { model.layout.contains(panel) },
+                        get: { model.layout.contains(panel) || model.floatingPanels.contains(panel) },
                         set: { _ in model.togglePanel(panel) }
                     ))
                 }
             } label: {
-                Label(L10n.workspace, systemImage: "sidebar.left")
+                Label(L10n.workspace, systemImage: "rectangle.3.group")
             }
         }
         ToolbarItemGroup {
@@ -57,11 +57,8 @@ struct WorkspaceView: View {
             .toggleStyle(.button)
 
             Button { model.compile() } label: {
-                if model.buildRunning {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label(L10n.compile, systemImage: "play.fill")
-                }
+                if model.buildRunning { ProgressView().controlSize(.small) }
+                else { Label(L10n.compile, systemImage: "play.fill") }
             }
             .disabled(model.projectRoot == nil || model.buildRunning)
         }
@@ -75,22 +72,74 @@ struct WorkspaceView: View {
 }
 
 struct DockWorkspaceView: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            ActivityBarView()
+            Divider()
+            DockCanvasView()
+        }
+    }
+}
+
+private struct ActivityBarView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(WorkspacePanel.allCases) { panel in
+                Button {
+                    if model.floatingPanels.contains(panel) { openWindow(value: panel) }
+                    else { model.activatePanel(panel) }
+                } label: {
+                    Image(systemName: panel.symbolName)
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                        .background(activityBackground(for: panel), in: RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                .help(L10n.panel(panel))
+                .accessibilityLabel(L10n.panel(panel))
+            }
+            Spacer()
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 4)
+        .frame(width: 44)
+        .background(.bar)
+    }
+
+    private func activityBackground(for panel: WorkspacePanel) -> Color {
+        if model.floatingPanels.contains(panel) { return Color.orange.opacity(0.2) }
+        return model.layout.contains(panel) ? Color.accentColor.opacity(0.18) : Color.clear
+    }
+}
+
+private struct DockCanvasView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         VSplitView {
             HSplitView {
                 ForEach([DockZone.leading, .center, .trailing], id: \.self) { zone in
-                    if !(model.layout.zones[zone] ?? []).isEmpty {
+                    if (model.layout.zones[zone] ?? []).isEmpty {
                         DockZoneView(zone: zone)
-                            .frame(minWidth: zone == .center ? 360 : 260)
+                            .frame(minWidth: 38, idealWidth: 44, maxWidth: 64)
+                    } else {
+                        DockZoneView(zone: zone)
+                            .frame(minWidth: zone == .center ? 320 : 210)
                     }
                 }
             }
-            if !(model.layout.zones[.bottom] ?? []).isEmpty {
-                DockZoneView(zone: .bottom)
-                    .frame(minHeight: 150, idealHeight: 220)
-            }
+            .frame(minHeight: 420)
+
+            DockZoneView(zone: .bottom)
+                .frame(
+                    minHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 72,
+                    idealHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 104,
+                    maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 220
+                )
         }
     }
 }
@@ -108,53 +157,78 @@ struct DockZoneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                ForEach(panels) { panel in
-                    HStack(spacing: 5) {
-                        Button {
-                            model.selectPanel(panel, in: zone)
-                        } label: {
-                            Label(L10n.panel(panel), systemImage: panel.symbolName)
-                                .font(.caption)
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                        Button {
-                            openWindow(value: panel)
-                            model.closePanel(panel)
-                        } label: {
-                            Image(systemName: "macwindow.on.rectangle")
-                        }
-                        .buttonStyle(.plain)
-                        .help(L10n.text("action.detach"))
-                        Button { model.closePanel(panel) } label: {
-                            Image(systemName: "xmark")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(selected == panel ? Color.accentColor.opacity(0.15) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .draggable(panel.rawValue)
+            if panels.isEmpty {
+                emptyDropTarget
+            } else {
+                tabBar
+                Divider()
+                if let selected {
+                    PanelContentView(panel: selected)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 5)
-            .background(.bar)
-
-            Divider()
-
-            if let selected {
-                PanelContentView(panel: selected)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(panels.isEmpty ? 0.35 : 0))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let panel = WorkspacePanel(rawValue: raw) else { return false }
             model.movePanel(panel, to: zone)
             return true
         }
+    }
+
+    private var emptyDropTarget: some View {
+        VStack(spacing: 5) {
+            Image(systemName: "rectangle.dashed")
+            if zone == .bottom { Text(L10n.text("dock.dropBottom")) }
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(panels) { panel in
+                HStack(spacing: 5) {
+                    Button { model.selectPanel(panel, in: zone) } label: {
+                        Label(L10n.panel(panel), systemImage: panel.symbolName)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+
+                    Menu {
+                        Section(L10n.text("dock.moveTo")) {
+                            ForEach(DockZone.allCases, id: \.self) { destination in
+                                let title = L10n.dockZone(destination)
+                                Button(title) { model.movePanel(panel, to: destination) }
+                                    .disabled(destination == zone)
+                            }
+                        }
+                        Divider()
+                        Button(L10n.text("action.detach")) {
+                            openWindow(value: panel)
+                            model.detachPanel(panel)
+                        }
+                        Button(L10n.text("action.hide")) { model.closePanel(panel) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(selected == panel ? Color.accentColor.opacity(0.15) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .draggable(panel.rawValue)
+                .help(L10n.text("dock.dragHint"))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 5)
+        .background(.bar)
     }
 }
 
@@ -166,6 +240,7 @@ struct PanelContentView: View {
         switch panel {
         case .project: ProjectPanel()
         case .source: SourcePanel()
+        case .image: ImagePanel()
         case .pdf: PDFPanel()
         case .codex: CodexPanel()
         case .buildLog: BuildLogPanel()
@@ -175,15 +250,21 @@ struct PanelContentView: View {
 }
 
 struct FloatingPanelView: View {
+    @EnvironmentObject private var model: AppModel
     let panel: WorkspacePanel
-    var body: some View { PanelContentView(panel: panel) }
+
+    var body: some View {
+        PanelContentView(panel: panel)
+            .onDisappear { model.restoreFloatingPanel(panel) }
+    }
 }
 
-private extension WorkspacePanel {
+extension WorkspacePanel {
     var symbolName: String {
         switch self {
         case .project: "folder"
         case .source: "chevron.left.forwardslash.chevron.right"
+        case .image: "photo"
         case .pdf: "doc.richtext"
         case .codex: "sparkles"
         case .buildLog: "terminal"

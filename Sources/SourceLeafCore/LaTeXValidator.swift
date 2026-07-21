@@ -6,14 +6,24 @@ public enum ValidationSeverity: String, Codable, Sendable {
     case error
 }
 
+public enum ValidationIssueKind: Equatable, Sendable {
+    case sensitiveCommandChange
+    case unmatchedClosingBrace
+    case unclosedOpeningBrace
+    case unexpectedEnvironmentEnd(String)
+    case missingEnvironmentEnd(String)
+}
+
 public struct ValidationIssue: Identifiable, Equatable, Sendable {
     public var id = UUID()
     public var severity: ValidationSeverity
+    public var kind: ValidationIssueKind
     public var message: String
     public var line: Int?
 
-    public init(severity: ValidationSeverity, message: String, line: Int? = nil) {
+    public init(severity: ValidationSeverity, kind: ValidationIssueKind, message: String, line: Int? = nil) {
         self.severity = severity
+        self.kind = kind
         self.message = message
         self.line = line
     }
@@ -46,6 +56,7 @@ public enum LaTeXValidator {
         if !sensitiveChanges.isEmpty {
             issues.append(ValidationIssue(
                 severity: .warning,
+                kind: .sensitiveCommandChange,
                 message: "The proposal changes citation, reference, label, or environment commands."
             ))
         }
@@ -80,7 +91,7 @@ public enum LaTeXValidator {
                 braceStack.append((line, character))
             } else if character == "}", !escaped {
                 if braceStack.isEmpty {
-                    issues.append(ValidationIssue(severity: .error, message: "Unmatched closing brace.", line: line))
+                    issues.append(ValidationIssue(severity: .error, kind: .unmatchedClosingBrace, message: "Unmatched closing brace.", line: line))
                 } else {
                     braceStack.removeLast()
                 }
@@ -89,7 +100,7 @@ public enum LaTeXValidator {
         }
 
         for item in braceStack {
-            issues.append(ValidationIssue(severity: .error, message: "Unclosed opening brace.", line: item.line))
+            issues.append(ValidationIssue(severity: .error, kind: .unclosedOpeningBrace, message: "Unclosed opening brace.", line: item.line))
         }
 
         var environments: [(name: String, line: Int)] = []
@@ -112,6 +123,7 @@ public enum LaTeXValidator {
                 } else {
                     issues.append(ValidationIssue(
                         severity: .error,
+                        kind: .unexpectedEnvironmentEnd(name),
                         message: "Unexpected \\end{\(name)}.",
                         line: commandLine
                     ))
@@ -122,6 +134,7 @@ public enum LaTeXValidator {
         for environment in environments {
             issues.append(ValidationIssue(
                 severity: .error,
+                kind: .missingEnvironmentEnd(environment.name),
                 message: "Missing \\end{\(environment.name)}.",
                 line: environment.line
             ))

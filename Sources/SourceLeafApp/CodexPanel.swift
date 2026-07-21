@@ -147,7 +147,7 @@ private struct ProposalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Label(target.map { "\($0.relativePath):\($0.startLine)-\($0.endLine)" } ?? "Diff", systemImage: "arrow.left.arrow.right")
+                Label(target.map { "\($0.relativePath):\($0.startLine)-\($0.endLine)" } ?? L10n.text("diff.untitled"), systemImage: "arrow.left.arrow.right")
                     .font(.caption.monospaced()).bold()
                 Spacer()
                 if validation?.hasErrors == true {
@@ -169,7 +169,7 @@ private struct ProposalCard: View {
             .frame(minHeight: 100, maxHeight: 260)
             if let validation, !validation.issues.isEmpty {
                 ForEach(validation.issues) { issue in
-                    Label(issue.message, systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle")
+                    Label(L10n.validationMessage(issue), systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(issue.severity == .error ? .red : .orange)
                 }
@@ -178,7 +178,10 @@ private struct ProposalCard: View {
                 Button(L10n.text("action.reject"), role: .destructive) { model.reject(replacement) }
                 Spacer()
                 Button(L10n.text("action.adjust")) {
-                    model.instruction = "Adjust the proposed change for \(target?.relativePath ?? "the target"): "
+                    model.instruction = String(
+                        format: L10n.text("ai.adjustInstruction"),
+                        target?.relativePath ?? L10n.text("ai.attachedTarget")
+                    )
                 }
                 Menu {
                     Button(L10n.text("action.forceAccept")) { model.accept(replacement) }

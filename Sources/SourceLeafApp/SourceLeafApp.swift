@@ -17,7 +17,7 @@ struct SourceLeafApplication: App {
             SourceLeafCommands(model: model)
         }
 
-        WindowGroup("SourceLeaf Panel", for: WorkspacePanel.self) { panel in
+        WindowGroup(L10n.text("window.panelTitle"), for: WorkspacePanel.self) { panel in
             if let panel = panel.wrappedValue {
                 FloatingPanelView(panel: panel)
                     .environmentObject(model)
