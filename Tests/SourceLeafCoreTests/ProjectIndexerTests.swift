@@ -1,0 +1,28 @@
+import Testing
+@testable import SourceLeafCore
+
+@Test func buildsDocumentOutlineAndSectionContext() {
+    let source = """
+    Intro
+    \\section{Method}
+    Method body.
+    \\subsection{Details}
+    Details body.
+    \\section{Results}
+    Results body.
+    """
+    let outline = ProjectIndexer.outline(for: source)
+    #expect(outline.map(\.title) == ["Method", "Details", "Results"])
+    let context = ProjectIndexer.sectionContext(source: source, containingLine: 5)
+    #expect(context.contains("Details body."))
+    #expect(!context.contains("Results body."))
+}
+
+@Test func nearbyContextIsBounded() throws {
+    let source = (1...100).map { "line \($0)" }.joined(separator: "\n")
+    let target = try SourceTargetService.target(in: source, relativePath: "main.tex", startLine: 50, endLine: 50)
+    let context = ProjectIndexer.nearbyContext(source: source, target: target, radius: 2)
+    #expect(context.contains("line 48"))
+    #expect(context.contains("line 52"))
+    #expect(!context.contains("line 47\n"))
+}

@@ -1,0 +1,202 @@
+import AppKit
+import PDFKit
+import SwiftUI
+import SourceLeafCore
+
+struct ProjectPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var query = ""
+
+    private var files: [ProjectFile] {
+        guard !query.isEmpty else { return model.projectFiles }
+        return model.projectFiles.filter { $0.relativePath.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField(L10n.text("project.filter"), text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(8)
+            List(files, selection: Binding(
+                get: { model.selectedFile?.id },
+                set: { id in if let file = files.first(where: { $0.id == id }) { model.openFile(file) } }
+            )) { file in
+                Label(file.relativePath, systemImage: file.symbolName)
+                    .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                    .tag(file.id)
+                    .contextMenu {
+                        if file.kind == .tex {
+                            Button(L10n.text("project.setRoot")) {
+                                model.configuration.rootDocument = file.relativePath
+                                model.persistConfiguration()
+                            }
+                        }
+                    }
+            }
+            if !model.outline.isEmpty {
+                Divider()
+                Text(L10n.text("project.outline"))
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                List(model.outline) { item in
+                    Text(item.title)
+                        .font(.caption)
+                        .padding(.leading, CGFloat(max(0, item.level - 1)) * 9)
+                }
+                .frame(minHeight: 100)
+            }
+        }
+    }
+}
+
+struct PDFPanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { model.compile() } label: {
+                    Label(L10n.compile, systemImage: "play.fill")
+                }
+                .disabled(model.buildRunning)
+                Spacer()
+                if let succeeded = model.buildSucceeded {
+                    Label(
+                        succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed"),
+                        systemImage: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(succeeded ? .green : .orange)
+                    .font(.caption)
+                }
+            }
+            .padding(7)
+            .background(.bar)
+
+            if let url = model.pdfURL {
+                PDFKitView(url: url, selection: $model.pdfSelection)
+                if !model.pdfSelection.isEmpty {
+                    HStack {
+                        Text(model.pdfSelection)
+                            .lineLimit(2)
+                            .font(.caption)
+                        Spacer()
+                        Button(L10n.text("pdf.sendSelection")) {
+                            model.instruction = "Analyze this PDF selection and identify the corresponding source change. Do not modify source until the mapping is confirmed:\n\n\(model.pdfSelection)"
+                            model.layout.show(.codex, in: .trailing)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.accentColor.opacity(0.08))
+                }
+            } else {
+                ContentUnavailableView(
+                    L10n.text("pdf.none"),
+                    systemImage: "doc.richtext",
+                    description: Text(L10n.text("pdf.compileHint"))
+                )
+            }
+        }
+    }
+}
+
+struct PDFKitView: NSViewRepresentable {
+    let url: URL
+    @Binding var selection: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.displaysPageBreaks = true
+        view.document = PDFDocument(url: url)
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.selectionChanged(_:)),
+            name: Notification.Name.PDFViewSelectionChanged,
+            object: view
+        )
+        return view
+    }
+
+    func updateNSView(_ view: PDFView, context: Context) {
+        if view.document?.documentURL != url { view.document = PDFDocument(url: url) }
+    }
+
+    static func dismantleNSView(_ view: PDFView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        @Binding var selection: String
+        init(selection: Binding<String>) { _selection = selection }
+        @objc func selectionChanged(_ notification: Notification) {
+            guard let view = notification.object as? PDFView else { return }
+            selection = view.currentSelection?.string ?? ""
+        }
+    }
+}
+
+struct BuildLogPanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView([.vertical, .horizontal]) {
+            Text(model.buildLog.isEmpty ? L10n.text("build.noLog") : model.buildLog)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(10)
+        }
+        .overlay(alignment: .topTrailing) {
+            if !model.buildLog.isEmpty {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.buildLog, forType: .string)
+                } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.borderless)
+                .padding(8)
+            }
+        }
+    }
+}
+
+struct HistoryPanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        List(model.history) { entry in
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(entry.relativePath).font(.caption.monospaced()).bold()
+                    Spacer()
+                    Text(entry.createdAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(entry.instruction).lineLimit(2).font(.caption)
+                Text(entry.providerName).font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .overlay {
+            if model.history.isEmpty {
+                ContentUnavailableView(L10n.text("history.none"), systemImage: "clock.arrow.circlepath")
+            }
+        }
+    }
+}
+
+private extension ProjectFile {
+    var symbolName: String {
+        switch kind {
+        case .tex: "doc.plaintext"
+        case .bibliography: "books.vertical"
+        case .style: "paintbrush"
+        case .image: "photo"
+        case .other: "doc"
+        }
+    }
+}
