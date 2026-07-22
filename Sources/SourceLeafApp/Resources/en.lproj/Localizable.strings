@@ -216,3 +216,10 @@
 "source.insert.reference" = "Reference";
 "source.insert.label" = "Label";
 "source.insert.url" = "URL";
+"settings.theme" = "Theme";
+"theme.system" = "Follow System";
+"theme.light" = "Light";
+"theme.dark" = "Dark";
+"settings.editorFont" = "Editor Font";
+"settings.editorFontSize" = "Editor Font Size";
+"font.systemMonospaced" = "System Monospaced";

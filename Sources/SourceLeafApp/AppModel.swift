@@ -52,6 +52,9 @@ final class AppModel: ObservableObject {
     @Published var statusText = ""
     @Published var appLanguage: AppLanguage
     @Published var projectOutlineExpanded: Bool
+    @Published var editorTheme: EditorTheme = .system
+    @Published var editorFontFamily = EditorFontCatalog.systemMonospaced
+    @Published var editorFontSize: Double = 13
     @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
 
     var selectedProviderModel: String {
@@ -88,6 +91,9 @@ final class AppModel: ObservableObject {
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
     private static let selectedProviderIDKey = "SourceLeaf.selectedProviderID"
     private static let projectOutlineExpandedKey = "SourceLeaf.projectOutlineExpanded"
+    private static let editorThemeKey = "SourceLeaf.editorTheme"
+    private static let editorFontFamilyKey = "SourceLeaf.editorFontFamily"
+    private static let editorFontSizeKey = "SourceLeaf.editorFontSize"
 
     init(
         restoreLastProject: Bool = true,
@@ -101,6 +107,12 @@ final class AppModel: ObservableObject {
             : defaults.bool(forKey: Self.projectOutlineExpandedKey)
         appLanguage = defaults.string(forKey: L10n.languageDefaultsKey)
             .flatMap(AppLanguage.init(rawValue:)) ?? L10n.selectedLanguage
+        editorTheme = defaults.string(forKey: Self.editorThemeKey)
+            .flatMap(EditorTheme.init(rawValue:)) ?? .system
+        editorFontFamily = defaults.string(forKey: Self.editorFontFamilyKey)
+            ?? EditorFontCatalog.systemMonospaced
+        let savedFontSize = defaults.double(forKey: Self.editorFontSizeKey)
+        editorFontSize = savedFontSize == 0 ? 13 : min(32, max(10, savedFontSize))
         do {
             let support = try resolvedSupportDirectory()
             profilesStore = JSONFileStore(url: support.appendingPathComponent("settings/providers.json"))
@@ -141,6 +153,21 @@ final class AppModel: ObservableObject {
     func toggleProjectOutline() {
         projectOutlineExpanded.toggle()
         defaults.set(projectOutlineExpanded, forKey: Self.projectOutlineExpandedKey)
+    }
+
+    func setEditorTheme(_ theme: EditorTheme) {
+        editorTheme = theme
+        defaults.set(theme.rawValue, forKey: Self.editorThemeKey)
+    }
+
+    func setEditorFontFamily(_ family: String) {
+        editorFontFamily = family
+        defaults.set(family, forKey: Self.editorFontFamilyKey)
+    }
+
+    func setEditorFontSize(_ size: Double) {
+        editorFontSize = min(32, max(10, size))
+        defaults.set(editorFontSize, forKey: Self.editorFontSizeKey)
     }
 
     func presentOpenProjectPanel() {

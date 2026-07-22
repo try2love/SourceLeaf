@@ -4,7 +4,7 @@
 交付一个可安装、可持续开发的 macOS 14+ 原生应用：支持 LaTeX 项目编辑与 PDF 编译预览、可重排/可浮动面板、本机 Codex 与多 Provider 对话、选区受控修改、Diff 审批和持久恢复。
 
 ## 当前阶段
-阶段 9：第三轮基础编辑体验修复
+阶段 10：Overleaf 风格源码编辑体验
 
 ## 各阶段
 
@@ -96,6 +96,15 @@
 - [x] 完成类型检查、分组测试、Release 构建、安装验证及 Git 检查点
 - **状态：** complete
 
+### 阶段 10：Overleaf 风格源码编辑体验
+- [x] 建立语法着色、注释、选区、插入光标和禁止横向滚动的真实编辑器回归
+- [x] 实现 Overleaf 风格浅色/深色 LaTeX 调色板和完整主题切换
+- [x] 支持全局编辑器字体类型与字号设置并持久化
+- [x] 修复选区前景/背景冲突、插入光标不可见和行号重叠
+- [x] 文档结构按标题层级递归显示，并可逐级折叠/展开
+- [x] 完成中英本地化、视觉截图、分组测试、Release 安装与 Git 检查点
+- **状态：** complete
+
 ## 已做决策
 | 决策 | 理由 |
 |------|------|
@@ -137,6 +146,11 @@
 | 探针尝试调用不存在的 `NSColor.resolvedColor(with:)` | 1 | 改用 `NSAppearance.performAsCurrentDrawingAppearance` 内转换到 deviceRGB 静态颜色 |
 | 误把 `performAsCurrentDrawingAppearance` 当成有返回值的泛型函数 | 1 | 使用外部 `NSColor` 变量，在外观闭包内完成赋值，避免把 `Void` 写入 TextStorage |
 | 沙箱外 Swift 回归执行被 Codex 用量审批层拒绝 | 1 | 不绕过审批；先完成可在工作区内安全编辑的实现，等待用户明确授权后再测试、构建与安装 |
+| 阶段10首轮结构树测试找不到 `ProjectIndexer.outlineTree` | 1 | 符合预期红灯；实现跨文件安全的递归标题树后继续运行编辑器回归 |
+| 两个 AppKit 编辑器窗口测试并发运行时测试宿主 SIGSEGV | 1 | 沿用已验证的 AppKit 隔离策略，后续逐项单进程运行；语法测试显式调用真实 coordinator 高亮以移除异步时序噪声 |
+| 行号栏坐标回归显示正文 x=12、ruler 右缘 x=44 | 1 | 按实际坐标差动态增加 TextKit 左 inset，系统已预留 gutter 时不重复增加 |
+| 一次 apply_patch hunk 缺少标准 `@@` 标记 | 1 | 立即改为合法统一 diff hunk，未影响任何源码内容 |
+| 真实 Key Window 中命令色与正文色 RGB 距离为 0 | 1 | 初始同步应用 token 属性，窗口稳定后再重复提交一次，兼顾即时高亮与合成可靠性 |
 
 ## 备注
 - 所有网页内容仅记录在 `findings.md`，不写入本计划。

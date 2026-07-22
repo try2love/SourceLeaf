@@ -216,3 +216,10 @@
 "source.insert.reference" = "交叉引用";
 "source.insert.label" = "标签";
 "source.insert.url" = "网址";
+"settings.theme" = "主题";
+"theme.system" = "跟随系统";
+"theme.light" = "浅色";
+"theme.dark" = "深色";
+"settings.editorFont" = "编辑器字体";
+"settings.editorFontSize" = "编辑器字号";
+"font.systemMonospaced" = "系统等宽字体";

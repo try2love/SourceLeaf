@@ -10,6 +10,7 @@ struct SourceLeafApplication: App {
             WorkspaceView()
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                .preferredColorScheme(model.editorTheme.colorScheme)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowStyle(.titleBar)
@@ -22,6 +23,7 @@ struct SourceLeafApplication: App {
                 FloatingPanelView(panel: panel)
                     .environmentObject(model)
                     .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                    .preferredColorScheme(model.editorTheme.colorScheme)
                     .frame(minWidth: 420, minHeight: 360)
             }
         }
@@ -31,6 +33,7 @@ struct SourceLeafApplication: App {
             SettingsView()
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                .preferredColorScheme(model.editorTheme.colorScheme)
                 .frame(width: 680, height: 540)
         }
     }

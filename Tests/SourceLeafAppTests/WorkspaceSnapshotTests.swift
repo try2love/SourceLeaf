@@ -321,6 +321,13 @@ import Testing
     let textView = try #require(findSourceTextView(in: hostingView))
     window.makeFirstResponder(textView)
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    let storage = try #require(textView.textStorage)
+    let sourceNSString = textView.string as NSString
+    let commandLocation = sourceNSString.range(of: "\\documentclass").location
+    let bodyLocation = sourceNSString.range(of: "acmart").location
+    let commandColor = try #require(storage.attribute(.foregroundColor, at: commandLocation, effectiveRange: nil) as? NSColor)
+    let bodyColor = try #require(storage.attribute(.foregroundColor, at: bodyLocation, effectiveRange: nil) as? NSColor)
+    #expect(rgbDistance(commandColor, bodyColor) > 0.2)
     let populated = try #require(captureWindow(window))
     let original = textView.string
     let blankSource = original.map { $0 == "\n" ? "\n" : " " }.reduce(into: "") { $0.append($1) }
@@ -551,7 +558,7 @@ private func render<V: View>(_ view: V, size: NSSize) throws -> Data {
     }
     hostingView.layoutSubtreeIfNeeded()
     window.layoutIfNeeded()
-    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.45))
 
     let representation = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
     hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
@@ -682,4 +689,12 @@ private func sampledPixelDifference(
         }
     }
     return changed
+}
+
+private func rgbDistance(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {
+    guard let left = lhs.usingColorSpace(.deviceRGB),
+          let right = rhs.usingColorSpace(.deviceRGB) else { return 0 }
+    return abs(left.redComponent - right.redComponent)
+        + abs(left.greenComponent - right.greenComponent)
+        + abs(left.blueComponent - right.blueComponent)
 }

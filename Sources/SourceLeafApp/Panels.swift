@@ -78,14 +78,15 @@ struct ProjectPanel: View {
                 : L10n.text("project.outlineExpand"))
 
             if model.projectOutlineExpanded {
-                List(model.outline) { item in
-                    Button { model.jumpToOutline(item) } label: {
+                List {
+                    OutlineGroup(ProjectIndexer.outlineTree(from: model.outline), children: \.childNodes) { node in
+                    Button { model.jumpToOutline(node.item) } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "number")
                                 .foregroundStyle(.tertiary)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(item.title)
-                                if let path = item.relativePath,
+                                Text(node.item.title)
+                                if let path = node.item.relativePath,
                                    path != model.selectedFile?.relativePath {
                                     Text(path)
                                         .font(.caption2.monospaced())
@@ -94,12 +95,12 @@ struct ProjectPanel: View {
                                 }
                             }
                             Spacer()
-                            Text("\(item.line)").foregroundStyle(.tertiary)
+                            Text("\(node.item.line)").foregroundStyle(.tertiary)
                         }
                         .font(.caption)
-                        .padding(.leading, CGFloat(max(0, item.level - 1)) * 9)
                     }
                     .buttonStyle(.plain)
+                    }
                 }
                 .scrollContentBackground(.hidden)
                 .background(Color(nsColor: .controlBackgroundColor))

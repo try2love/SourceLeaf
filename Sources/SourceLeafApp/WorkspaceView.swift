@@ -45,6 +45,20 @@ struct WorkspaceView: View {
             }
         }
         ToolbarItemGroup {
+            Menu {
+                Picker(L10n.text("settings.theme"), selection: Binding(
+                    get: { model.editorTheme },
+                    set: { model.setEditorTheme($0) }
+                )) {
+                    Text(L10n.text("theme.system")).tag(EditorTheme.system)
+                    Text(L10n.text("theme.light")).tag(EditorTheme.light)
+                    Text(L10n.text("theme.dark")).tag(EditorTheme.dark)
+                }
+            } label: {
+                Label(L10n.text("settings.theme"), systemImage: model.editorTheme == .dark ? "moon.fill" : "circle.lefthalf.filled")
+            }
+            .help(L10n.text("settings.theme"))
+
             Button {
                 model.saveNow()
             } label: {

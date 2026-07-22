@@ -1,17 +1,31 @@
 import Foundation
 
 public struct DocumentOutlineItem: Identifiable, Equatable, Sendable {
-    public var id = UUID()
+    public var id: String
     public var level: Int
     public var title: String
     public var line: Int
     public var relativePath: String?
 
     public init(level: Int, title: String, line: Int, relativePath: String? = nil) {
+        id = "\(relativePath ?? ""):\(line):\(level):\(title)"
         self.level = level
         self.title = title
         self.line = line
         self.relativePath = relativePath
+    }
+}
+
+public struct DocumentOutlineNode: Identifiable, Equatable, Sendable {
+    public var item: DocumentOutlineItem
+    public var children: [DocumentOutlineNode]
+
+    public var id: String { item.id }
+    public var childNodes: [DocumentOutlineNode]? { children.isEmpty ? nil : children }
+
+    public init(item: DocumentOutlineItem, children: [DocumentOutlineNode] = []) {
+        self.item = item
+        self.children = children
     }
 }
 
@@ -131,6 +145,31 @@ public enum ProjectIndexer {
         }
     }
 
+    public static func outlineTree(from items: [DocumentOutlineItem]) -> [DocumentOutlineNode] {
+        var roots: [OutlineNodeBuilder] = []
+        var stack: [OutlineNodeBuilder] = []
+        var currentPath: String?
+
+        for item in items {
+            if item.relativePath != currentPath {
+                currentPath = item.relativePath
+                stack.removeAll(keepingCapacity: true)
+            }
+            while let last = stack.last, last.item.level >= item.level {
+                stack.removeLast()
+            }
+            let node = OutlineNodeBuilder(item: item)
+            if let parent = stack.last {
+                parent.children.append(node)
+            } else {
+                roots.append(node)
+            }
+            stack.append(node)
+        }
+
+        return roots.map(\.node)
+    }
+
     public static func sectionContext(source: String, containingLine line: Int) -> String {
         let outlines = outline(for: source)
         guard let current = outlines.last(where: { $0.line <= line }) else { return source }
@@ -156,6 +195,17 @@ public enum ProjectIndexer {
         case "png", "jpg", "jpeg", "pdf", "eps", "svg": .image
         default: .other
         }
+    }
+}
+
+private final class OutlineNodeBuilder {
+    let item: DocumentOutlineItem
+    var children: [OutlineNodeBuilder] = []
+
+    init(item: DocumentOutlineItem) { self.item = item }
+
+    var node: DocumentOutlineNode {
+        DocumentOutlineNode(item: item, children: children.map(\.node))
     }
 }
 

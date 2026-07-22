@@ -60,6 +60,9 @@ struct SourcePanel: View {
                 selection: $model.selectedRange,
                 commandRequest: model.pendingLaTeXEdit,
                 showSelectionButton: model.configuration.showSelectionButton,
+                editorTheme: model.editorTheme,
+                editorFontFamily: model.editorFontFamily,
+                editorFontSize: model.editorFontSize,
                 onAskAI: model.attachCurrentSelection,
                 onCommandApplied: model.acknowledgeLaTeXEdit
             )
@@ -160,6 +163,9 @@ struct SourceTextView: NSViewRepresentable {
     @Binding var selection: NSRange
     var commandRequest: LaTeXEditRequest? = nil
     var showSelectionButton: Bool
+    var editorTheme: EditorTheme = .system
+    var editorFontFamily: String = EditorFontCatalog.systemMonospaced
+    var editorFontSize: Double = 13
     var onAskAI: () -> Void
     var onCommandApplied: (UUID) -> Void = { _ in }
 
@@ -170,6 +176,7 @@ struct SourceTextView: NSViewRepresentable {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        scrollView.horizontalScrollElasticity = .none
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
@@ -177,7 +184,6 @@ struct SourceTextView: NSViewRepresentable {
             assertionFailure("NSTextView.scrollableTextView() did not provide a text view")
             return NSView()
         }
-        let container = SourceEditorContainerView(scrollView: scrollView, textView: textView)
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
@@ -185,26 +191,39 @@ struct SourceTextView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        let palette = SourceEditorPalette(appearance: textView.effectiveAppearance)
-        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let palette = SourceEditorPalette(theme: editorTheme, appearance: textView.effectiveAppearance)
+        let container = SourceEditorContainerView(
+            scrollView: scrollView,
+            textView: textView,
+            backgroundColor: palette.background
+        )
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = palette.background
+        scrollView.contentView.drawsBackground = true
+        scrollView.contentView.backgroundColor = palette.background
+        let editorFont = EditorFontCatalog.font(family: editorFontFamily, size: editorFontSize)
+        textView.font = editorFont
         textView.textColor = palette.text
         textView.backgroundColor = palette.background
         textView.drawsBackground = true
-        textView.insertionPointColor = palette.text
+        textView.insertionPointColor = palette.caret
         textView.selectedTextAttributes = [
             .backgroundColor: palette.selectionBackground,
             .foregroundColor: palette.selectionText
         ]
         textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
         textView.minSize = NSSize(width: 0, height: 0)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: max(scrollView.contentSize.width, 1), height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.string = text
 
         let ruler = LineNumberRulerView(textView: textView)
+        ruler.backgroundColor = palette.gutterBackground
+        ruler.numberColor = palette.gutterText
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -216,7 +235,7 @@ struct SourceTextView: NSViewRepresentable {
         askButton.translatesAutoresizingMaskIntoConstraints = false
         askButton.isHidden = true
 
-        let glyphOverlay = SourceGlyphOverlayView(textView: textView)
+        let glyphOverlay = SourceGlyphOverlayView(textView: textView, palette: palette)
         container.glyphOverlay = glyphOverlay
 
         container.addSubview(scrollView)
@@ -238,6 +257,7 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.observeScrollView(scrollView)
         glyphOverlay.synchronizeFrame()
         context.coordinator.layoutEditor()
+        context.coordinator.applyHighlighting()
         context.coordinator.scheduleInitialHighlighting()
         context.coordinator.applyPendingCommand(commandRequest)
         return container
@@ -257,8 +277,8 @@ struct SourceTextView: NSViewRepresentable {
             textView.scrollRangeToVisible(selection)
         }
         context.coordinator.applyPendingCommand(commandRequest)
-        if context.coordinator.appliedAppearanceName != nil,
-           context.coordinator.appliedAppearanceName != textView.effectiveAppearance.name {
+        if context.coordinator.appliedStyleSignature != nil,
+           context.coordinator.appliedStyleSignature != context.coordinator.currentStyleSignature {
             context.coordinator.applyHighlighting()
         }
         context.coordinator.layoutEditor()
@@ -276,8 +296,15 @@ struct SourceTextView: NSViewRepresentable {
         weak var askButton: NSButton?
         weak var glyphOverlay: SourceGlyphOverlayView?
         private var highlighting = false
-        private(set) var appliedAppearanceName: NSAppearance.Name?
+        private(set) var appliedStyleSignature: String?
         private var lastAppliedCommandID: UUID?
+        private var resettingHorizontalScroll = false
+        private var completedWindowHighlight = false
+
+        var currentStyleSignature: String {
+            let appearance = textView?.effectiveAppearance.name.rawValue ?? "none"
+            return "\(parent.editorTheme.rawValue)|\(parent.editorFontFamily)|\(parent.editorFontSize)|\(appearance)"
+        }
 
         init(parent: SourceTextView) { self.parent = parent }
 
@@ -292,7 +319,16 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
+            if !resettingHorizontalScroll,
+               let clipView = notification.object as? NSClipView,
+               abs(clipView.bounds.origin.x) > 0.5 {
+                resettingHorizontalScroll = true
+                clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
+                clipView.enclosingScrollView?.reflectScrolledClipView(clipView)
+                resettingHorizontalScroll = false
+            }
             ruler?.scrollPositionDidChange()
+            glyphOverlay?.synchronizeFrame()
             glyphOverlay?.needsDisplay = true
         }
 
@@ -308,6 +344,7 @@ struct SourceTextView: NSViewRepresentable {
             guard let textView else { return }
             parent.selection = textView.selectedRange()
             updateAskButton()
+            glyphOverlay?.needsDisplay = true
         }
 
         @objc func askAI() { parent.onAskAI() }
@@ -341,9 +378,9 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         func scheduleInitialHighlighting(attempt: Int = 0) {
-            guard appliedAppearanceName == nil else { return }
+            guard !completedWindowHighlight else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                guard let self, self.appliedAppearanceName == nil else { return }
+                guard let self, !self.completedWindowHighlight else { return }
                 guard let textView = self.textView, let window = textView.window else {
                     if attempt < 40 { self.scheduleInitialHighlighting(attempt: attempt + 1) }
                     return
@@ -355,6 +392,7 @@ struct SourceTextView: NSViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak window] in
                     guard let self, let window, window === self.textView?.window else { return }
                     self.applyHighlighting()
+                    self.completedWindowHighlight = true
                     self.invalidateVisibleEditor()
                     var ancestor = self.textView?.superview
                     while let view = ancestor {
@@ -375,33 +413,49 @@ struct SourceTextView: NSViewRepresentable {
             guard let textView, let storage = textView.textStorage else { return }
             highlighting = true
             let appearance = textView.effectiveAppearance
-            let palette = SourceEditorPalette(appearance: appearance)
+            let palette = SourceEditorPalette(theme: parent.editorTheme, appearance: appearance)
+            let editorFont = EditorFontCatalog.font(
+                family: parent.editorFontFamily,
+                size: parent.editorFontSize
+            )
             let selectedRange = textView.selectedRange()
             let source = textView.string as NSString
             let full = NSRange(location: 0, length: source.length)
+            textView.textColor = palette.text
+            textView.backgroundColor = palette.background
+            textView.font = editorFont
+            if let scrollView = textView.enclosingScrollView {
+                scrollView.drawsBackground = true
+                scrollView.backgroundColor = palette.background
+                scrollView.contentView.drawsBackground = true
+                scrollView.contentView.backgroundColor = palette.background
+                (scrollView.superview as? SourceEditorContainerView)?.backgroundColor = palette.background
+            }
+            ruler?.backgroundColor = palette.gutterBackground
+            ruler?.numberColor = palette.gutterText
             storage.beginEditing()
             storage.setAttributes([
-                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                .font: editorFont,
                 .foregroundColor: palette.text.withAlphaComponent(0.99)
             ], range: full)
-            apply(#"%.*$"#, color: palette.comment.withAlphaComponent(0.99), storage: storage, source: textView.string, options: [.anchorsMatchLines])
+            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument.withAlphaComponent(0.99), storage: storage, source: textView.string)
             apply(#"\\[A-Za-z@]+\*?"#, color: palette.command.withAlphaComponent(0.99), storage: storage, source: textView.string)
             apply(#"\$[^$\n]*\$"#, color: palette.math.withAlphaComponent(0.99), storage: storage, source: textView.string)
             apply(#"[{}]"#, color: palette.brace.withAlphaComponent(0.99), storage: storage, source: textView.string)
+            apply(#"(?<!\\)%.*$"#, color: palette.comment.withAlphaComponent(0.99), storage: storage, source: textView.string, options: [.anchorsMatchLines])
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
-                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                .font: editorFont,
                 .foregroundColor: palette.text.withAlphaComponent(0.99)
             ]
-            textView.textColor = palette.text
-            textView.backgroundColor = palette.background
-            textView.insertionPointColor = palette.text
+            textView.insertionPointColor = palette.caret
             textView.selectedTextAttributes = [
                 .backgroundColor: palette.selectionBackground,
                 .foregroundColor: palette.selectionText
             ]
-            appliedAppearanceName = appearance.name
+            appliedStyleSignature = currentStyleSignature
+            glyphOverlay?.palette = palette
             textView.layoutManager?.invalidateDisplay(forCharacterRange: full)
             if let textContainer = textView.textContainer {
                 textView.layoutManager?.ensureLayout(for: textContainer)
@@ -425,11 +479,13 @@ struct SourceTextView: NSViewRepresentable {
 
         func layoutEditor() {
             guard let textView, let scrollView = textView.enclosingScrollView else { return }
+            SourceEditorGeometry.reserveLineNumberGutter(for: textView, in: scrollView)
             let width = max(scrollView.contentSize.width, 1)
             guard width.isFinite else { return }
             if abs(textView.frame.width - width) > 0.5 {
                 textView.setFrameSize(NSSize(width: width, height: max(textView.frame.height, 1)))
             }
+            textView.maxSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
             if let textContainer = textView.textContainer {
                 textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
                 textContainer.widthTracksTextView = true
@@ -457,9 +513,13 @@ struct SourceTextView: NSViewRepresentable {
 
 final class SourceGlyphOverlayView: NSView {
     weak var textView: NSTextView?
+    var palette: SourceEditorPalette
+    private(set) var lastSelectionRectCount = 0
+    private(set) var lastCaretRect: NSRect?
 
-    init(textView: NSTextView) {
+    init(textView: NSTextView, palette: SourceEditorPalette) {
         self.textView = textView
+        self.palette = palette
         super.init(frame: .zero)
         autoresizingMask = []
     }
@@ -469,6 +529,10 @@ final class SourceGlyphOverlayView: NSView {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .iBeam)
+    }
 
     func synchronizeFrame() {
         guard let clipView = textView?.enclosingScrollView?.contentView,
@@ -487,7 +551,62 @@ final class SourceGlyphOverlayView: NSView {
             x: textView.textContainerOrigin.x - visible.minX,
             y: textView.textContainerOrigin.y - visible.minY
         )
+        lastSelectionRectCount = 0
+        lastCaretRect = nil
+        let selectedRange = textView.selectedRange()
+        if selectedRange.length > 0 {
+            let selectedGlyphs = layoutManager.glyphRange(
+                forCharacterRange: selectedRange,
+                actualCharacterRange: nil
+            )
+            palette.selectionBackground.setFill()
+            layoutManager.enumerateEnclosingRects(
+                forGlyphRange: selectedGlyphs,
+                withinSelectedGlyphRange: selectedGlyphs,
+                in: textContainer
+            ) { [weak self] rect, _ in
+                guard let self else { return }
+                let translated = rect.offsetBy(dx: origin.x, dy: origin.y)
+                translated.fill()
+                self.lastSelectionRectCount += 1
+            }
+        }
         layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: origin)
+        if selectedRange.length == 0,
+           textView.window?.firstResponder === textView,
+           let caret = caretRect(
+               at: selectedRange.location,
+               textView: textView,
+               layoutManager: layoutManager,
+               textContainer: textContainer,
+               origin: origin
+           ) {
+            palette.caret.setFill()
+            caret.fill()
+            lastCaretRect = caret
+        }
+    }
+
+    private func caretRect(
+        at characterIndex: Int,
+        textView: NSTextView,
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer,
+        origin: NSPoint
+    ) -> NSRect? {
+        let length = (textView.string as NSString).length
+        if characterIndex < length {
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
+            let glyphRect = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                in: textContainer
+            )
+            guard glyphRect.height > 0 else { return nil }
+            return NSRect(x: glyphRect.minX + origin.x, y: glyphRect.minY + origin.y, width: 2, height: glyphRect.height)
+        }
+        let extra = layoutManager.extraLineFragmentRect
+        guard extra.height > 0 else { return nil }
+        return NSRect(x: extra.minX + origin.x, y: extra.minY + origin.y, width: 2, height: extra.height)
     }
 }
 
@@ -495,12 +614,20 @@ final class SourceEditorContainerView: NSView {
     private let editorScrollView: NSScrollView
     private let editorTextView: NSTextView
     weak var glyphOverlay: SourceGlyphOverlayView?
+    var backgroundColor: NSColor {
+        didSet {
+            layer?.backgroundColor = backgroundColor.cgColor
+            needsDisplay = true
+        }
+    }
 
-    init(scrollView: NSScrollView, textView: NSTextView) {
+    init(scrollView: NSScrollView, textView: NSTextView, backgroundColor: NSColor) {
         editorScrollView = scrollView
         editorTextView = textView
+        self.backgroundColor = backgroundColor
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.backgroundColor = backgroundColor.cgColor
         layer?.masksToBounds = true
     }
 
@@ -508,11 +635,13 @@ final class SourceEditorContainerView: NSView {
 
     override func layout() {
         super.layout()
+        SourceEditorGeometry.reserveLineNumberGutter(for: editorTextView, in: editorScrollView)
         let width = max(editorScrollView.contentSize.width, 1)
         guard width.isFinite else { return }
         if abs(editorTextView.frame.width - width) > 0.5 {
             editorTextView.setFrameSize(NSSize(width: width, height: max(editorTextView.frame.height, 1)))
         }
+        editorTextView.maxSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         if let textContainer = editorTextView.textContainer {
             textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
             textContainer.widthTracksTextView = true
@@ -524,36 +653,64 @@ final class SourceEditorContainerView: NSView {
     }
 }
 
-private struct SourceEditorPalette {
+@MainActor
+enum SourceEditorGeometry {
+    static let baseHorizontalInset: CGFloat = 12
+
+    static func reserveLineNumberGutter(for textView: NSTextView, in scrollView: NSScrollView) {
+        guard let ruler = scrollView.verticalRulerView, !ruler.isHidden else { return }
+        let textOrigin = textView.convert(textView.textContainerOrigin, to: scrollView).x
+        let rulerRightEdge = ruler.convert(ruler.bounds, to: scrollView).maxX
+        let requiredOrigin = rulerRightEdge + baseHorizontalInset
+        guard textOrigin + 0.5 < requiredOrigin else { return }
+        var inset = textView.textContainerInset
+        inset.width += requiredOrigin - textOrigin
+        textView.textContainerInset = inset
+    }
+}
+
+struct SourceEditorPalette {
     let text: NSColor
     let background: NSColor
     let command: NSColor
     let comment: NSColor
+    let optionalArgument: NSColor
     let math: NSColor
     let brace: NSColor
     let selectionBackground: NSColor
     let selectionText: NSColor
+    let caret: NSColor
+    let gutterBackground: NSColor
+    let gutterText: NSColor
 
-    init(appearance: NSAppearance) {
-        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    init(theme: EditorTheme, appearance: NSAppearance) {
+        let dark = theme.isDark(for: appearance)
         if dark {
             text = NSColor(srgbRed: 0.90, green: 0.91, blue: 0.93, alpha: 1)
             background = NSColor(srgbRed: 0.10, green: 0.11, blue: 0.13, alpha: 1)
             command = NSColor(srgbRed: 0.38, green: 0.68, blue: 1.00, alpha: 1)
             comment = NSColor(srgbRed: 0.35, green: 0.78, blue: 0.43, alpha: 1)
+            optionalArgument = NSColor(srgbRed: 0.38, green: 0.78, blue: 0.82, alpha: 1)
             math = NSColor(srgbRed: 0.80, green: 0.55, blue: 0.95, alpha: 1)
             brace = NSColor(srgbRed: 1.00, green: 0.64, blue: 0.27, alpha: 1)
             selectionBackground = NSColor(srgbRed: 0.18, green: 0.42, blue: 0.72, alpha: 1)
-            selectionText = .white
+            selectionText = text
+            caret = NSColor(srgbRed: 0.98, green: 0.76, blue: 0.25, alpha: 1)
+            gutterBackground = NSColor(srgbRed: 0.075, green: 0.085, blue: 0.10, alpha: 1)
+            gutterText = NSColor(srgbRed: 0.57, green: 0.60, blue: 0.66, alpha: 1)
         } else {
             text = NSColor(srgbRed: 0.12, green: 0.13, blue: 0.15, alpha: 1)
-            background = NSColor(srgbRed: 0.99, green: 0.99, blue: 1.00, alpha: 1)
-            command = NSColor(srgbRed: 0.00, green: 0.38, blue: 0.92, alpha: 1)
-            comment = NSColor(srgbRed: 0.00, green: 0.52, blue: 0.20, alpha: 1)
+            background = NSColor(srgbRed: 1.00, green: 1.00, blue: 1.00, alpha: 1)
+            command = NSColor(srgbRed: 0.05, green: 0.18, blue: 0.95, alpha: 1)
+            comment = NSColor(srgbRed: 0.30, green: 0.61, blue: 0.47, alpha: 1)
+            optionalArgument = NSColor(srgbRed: 0.19, green: 0.55, blue: 0.62, alpha: 1)
             math = NSColor(srgbRed: 0.55, green: 0.20, blue: 0.72, alpha: 1)
             brace = NSColor(srgbRed: 0.92, green: 0.42, blue: 0.00, alpha: 1)
-            selectionBackground = NSColor(srgbRed: 0.18, green: 0.48, blue: 0.90, alpha: 1)
-            selectionText = .white
+            selectionBackground = NSColor(srgbRed: 0.70, green: 0.83, blue: 0.97, alpha: 1)
+            selectionText = text
+            caret = NSColor(srgbRed: 0.05, green: 0.18, blue: 0.95, alpha: 1)
+            gutterBackground = NSColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)
+            gutterText = NSColor(srgbRed: 0.36, green: 0.37, blue: 0.40, alpha: 1)
         }
     }
 }
@@ -562,6 +719,8 @@ final class LineNumberRulerView: NSRulerView {
     weak var textView: NSTextView?
     private(set) var lastDrawnLines: [Int] = []
     private(set) var scrollChangeCount = 0
+    var backgroundColor = NSColor.textBackgroundColor
+    var numberColor = NSColor.secondaryLabelColor
 
     init(textView: NSTextView) {
         self.textView = textView
@@ -581,7 +740,7 @@ final class LineNumberRulerView: NSRulerView {
         guard let textView,
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
-        NSColor.textBackgroundColor.setFill()
+        backgroundColor.setFill()
         rect.fill()
 
         let visible = textView.enclosingScrollView?.contentView.bounds ?? textView.visibleRect
@@ -598,7 +757,7 @@ final class LineNumberRulerView: NSRulerView {
             let string = "\(item.line)" as NSString
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
-                .foregroundColor: NSColor.secondaryLabelColor
+                .foregroundColor: numberColor
             ]
             let size = string.size(withAttributes: attributes)
             string.draw(at: NSPoint(x: ruleThickness - size.width - 7, y: y + 2), withAttributes: attributes)

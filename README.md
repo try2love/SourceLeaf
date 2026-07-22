@@ -38,7 +38,7 @@ swift run SourceLeaf
 
 ## Current status / 当前状态
 
-The current `0.3.2` build is a product-tested preview. Its central workflow is available now:
+The current `0.3.3` build is a product-tested preview. Its central workflow is available now:
 
 1. Open a LaTeX project folder and select text in a `.tex` file.
 2. Attach that selection with the floating button, context command, or `⌥⌘K`.
@@ -50,13 +50,13 @@ The current `0.3.2` build is a product-tested preview. Its central workflow is a
 
 Before acceptance, SourceLeaf compiles the proposal in an isolated temporary project copy by default. A failed candidate leaves the real source untouched; the user can inspect the build log or explicitly force acceptance. History restoration is routed back through the same reviewable diff instead of silently overwriting source.
 
-The workspace includes a collapsible project tree, a collapsible and vertically resizable project-wide LaTeX outline, native raster/vector image preview, one-page PDF navigation, live compile phases, explicit Save controls with `⌘S`, and SyncTeX in both directions. The source toolbar applies LaTeX text styles, font sizes, heading levels, formulas, lists, citations, references, labels, and URLs to the current selection; with no selection it inserts an editable placeholder. Use the source header's locate button to reveal the cursor in PDF; double-click a PDF word or command-click a position to open its owning `.tex` file and line.
+The workspace includes a collapsible project tree, a recursively collapsible and vertically resizable project-wide LaTeX outline, native raster/vector image preview, one-page PDF navigation, live compile phases, explicit Save controls with `⌘S`, and SyncTeX in both directions. The source editor now provides Overleaf-style semantic LaTeX colors, readable selection and caret rendering, fixed line numbers without horizontal drift, system/light/dark themes, and persistent font-family/font-size preferences. The source toolbar applies LaTeX text styles, font sizes, heading levels, formulas, lists, citations, references, labels, and URLs to the current selection; with no selection it inserts an editable placeholder. Use the source header's locate button to reveal the cursor in PDF; double-click a PDF word or command-click a position to open its owning `.tex` file and line.
 
 Still in development: the safety review for custom CLI providers. A managed Tectonic engine is bundled by the installer; external `latexmk` remains supported for broader TeX Live compatibility.
 
 接受修改前，SourceLeaf 现在默认在隔离的临时项目副本中试编译。失败时真实源码保持不变；用户可以检查日志，也可以明确选择强制接受。历史恢复同样会先回到 Diff 审阅，不会静默覆盖源码。
 
-工作区现在包含可折叠项目树、可收起并可拖动边界的跨文件文档结构、原生位图/矢量图预览、单页 PDF 导航、实时编译阶段、明确的保存按钮与 `⌘S`，以及 SyncTeX 双向定位。源码工具栏可对当前选区应用文字样式、字号、标题等级、公式、列表、文献引用、交叉引用、标签和网址；未选中文字时会插入可继续编辑的占位模板。源码栏按钮可在 PDF 中定位当前光标；双击 PDF 单词或按住 ⌘ 点击位置可打开对应 `.tex` 文件与行号。
+工作区现在包含可折叠项目树、可逐级收起并可拖动边界的跨文件文档结构、原生位图/矢量图预览、单页 PDF 导航、实时编译阶段、明确的保存按钮与 `⌘S`，以及 SyncTeX 双向定位。源码编辑器提供接近 Overleaf 的 LaTeX 语义配色、清晰选区与插入光标、不会横向漂移的固定行号栏、跟随系统/浅色/深色主题，以及可持久化的字体与字号设置。源码工具栏可对当前选区应用文字样式、字号、标题等级、公式、列表、文献引用、交叉引用、标签和网址；未选中文字时会插入可继续编辑的占位模板。源码栏按钮可在 PDF 中定位当前光标；双击 PDF 单词或按住 ⌘ 点击位置可打开对应 `.tex` 文件与行号。
 
 仍在开发：自定义 CLI 的安全校验。安装脚本会自动打包受管理 Tectonic；系统已有 `latexmk` 时仍可用于更完整的 TeX Live 兼容性。
 

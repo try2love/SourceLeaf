@@ -35,6 +35,33 @@ private struct GeneralSettingsView: View {
                 }
             }
             Section(L10n.text("settings.editor")) {
+                Picker(L10n.text("settings.theme"), selection: Binding(
+                    get: { model.editorTheme },
+                    set: { model.setEditorTheme($0) }
+                )) {
+                    Text(L10n.text("theme.system")).tag(EditorTheme.system)
+                    Text(L10n.text("theme.light")).tag(EditorTheme.light)
+                    Text(L10n.text("theme.dark")).tag(EditorTheme.dark)
+                }
+                Picker(L10n.text("settings.editorFont"), selection: Binding(
+                    get: { model.editorFontFamily },
+                    set: { model.setEditorFontFamily($0) }
+                )) {
+                    Text(L10n.text("font.systemMonospaced")).tag(EditorFontCatalog.systemMonospaced)
+                    Divider()
+                    ForEach(EditorFontCatalog.availableFamilies, id: \.self) { family in
+                        Text(family).tag(family)
+                    }
+                }
+                LabeledContent(L10n.text("settings.editorFontSize")) {
+                    Stepper(value: Binding(
+                        get: { model.editorFontSize },
+                        set: { model.setEditorFontSize($0) }
+                    ), in: 10...32, step: 1) {
+                        Text("\(Int(model.editorFontSize)) pt")
+                            .monospacedDigit()
+                    }
+                }
                 Toggle(L10n.text("settings.autoSave"), isOn: $model.configuration.autoSave)
                 LabeledContent(L10n.text("settings.autoSaveDelay")) {
                     Stepper(value: $model.configuration.autoSaveDelaySeconds, in: 0.2...5, step: 0.2) {

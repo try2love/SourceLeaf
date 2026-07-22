@@ -116,6 +116,21 @@ import Testing
     #expect(restored.projectOutlineExpanded)
 }
 
+@MainActor
+@Test func editorAppearanceAndTypographyPersistAcrossApplicationModels() throws {
+    let state = try productTestState(named: "editor-appearance")
+    defer { state.cleanup() }
+    let first = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    first.setEditorTheme(.dark)
+    first.setEditorFontFamily("Menlo")
+    first.setEditorFontSize(17)
+
+    let restored = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    #expect(restored.editorTheme == .dark)
+    #expect(restored.editorFontFamily == "Menlo")
+    #expect(restored.editorFontSize == 17)
+}
+
 private struct ProductTestState {
     var support: URL
     var defaults: UserDefaults

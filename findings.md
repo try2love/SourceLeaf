@@ -230,3 +230,23 @@
 - 源码空白不是文件读取或语法颜色问题：真实编辑器直接缓存始终能绘制字形，但手工创建的超高 `NSTextView` 曾出现负文档坐标，且直接把 `NSScrollView` 作为 SwiftUI representable 根视图会越界遮盖源码标签与文件名。最终采用 AppKit 标准 `scrollableTextView()`、四边约束裁剪容器，并用不接收鼠标事件的可见字形层复用同一个 TextKit 布局；真实 WindowServer 截图已清晰显示 LaTeX 正文。
 - 源码页的 LaTeX 工具应作用于 UTF-16 选区并沿用 `NSTextView.insertText`，才能同时支持中文/emoji 前缀、空选区占位模板和 AppKit 原生撤销；直接改 `AppModel.sourceText` 会绕过原生 undo 栈。
 - 最终真实 Key Window 合成回归与安装后验证共同确认：源码字形已进入 WindowServer 合成画面；0.3.2 安装包同时满足 Universal 主程序、有效签名、双架构 Tectonic 0.16.9、简体中文资源和新进程存活要求。
+
+## 2026-07-22 Overleaf 风格源码编辑反馈
+- 用户参考图的关键信息不是简单“彩色文本”，而是稳定的语义层次：命令蓝色、可选参数青色、注释绿色、正文深色、浅蓝选区保留深色字形；这些应作为浅色主题的视觉基线，深色主题需提供等价对比度。
+- 行号栏必须是固定 gutter，正文横向内容不能滑入其下；编辑器应关闭水平 scroller、令 TextKit 容器跟随可见宽度并按窗口宽度换行。
+- “看不到鼠标光标”按上下文指源码插入光标（caret）；回归必须同时验证 `insertionPointColor`、选区 `selectedTextAttributes` 和真实窗口第一响应者，而不能只检查文本存在。
+- 文档结构需要从当前扁平 OutlineItem 列表升级为按 section/subsection/subsubsection 等层级构建的递归树，界面用可展开节点显示，并保持点击跨文件跳转能力。
+- 代码验证了选区/光标根因：`SourceGlyphOverlayView` 位于 `NSTextView` 之上并再次调用 `layoutManager.drawGlyphs`，但完全没有绘制 selection 或 caret；底层原生选区被覆盖层的原始语法字形再次盖住，插入光标也可能被同层字形遮挡。修复必须让覆盖层自己感知并绘制选区背景与插入点。
+- 现有浅色选区明确配置为蓝底白字，与用户参考的浅蓝底深色字不符；应改为低饱和浅蓝背景并保留深色/语法前景。深色主题则使用较深蓝背景与浅色文字。
+- 现有高亮顺序先处理注释、后处理命令，导致注释中的 `\command` 被重新染成命令蓝；注释必须最后覆盖整行。当前也没有方括号参数/环境名的独立颜色。
+- 水平 scroller 虽设为 false，但 clip view 的 x 原点没有被钳制，TextKit `maxSize.width` 仍为无限；触控板弹性或恢复的横向 bounds 可使正文向左滑入固定行号栏。需要同时关闭水平弹性、限制文本宽度并在滚动通知中把 x 归零。
+- `ProjectPanel` 目前用 `List(model.outline)` 平铺，仅用 padding 模拟层级；`DocumentOutlineItem` 也没有 children。逐级折叠需要 Core 构树函数和 SwiftUI `OutlineGroup`，且跨文件时必须重置层级栈，避免把另一个文件的标题嵌进前一文件。
+- `AppModel` 只持久化界面语言和大纲整体开关；主题、编辑器字体、字号尚无数据契约。它们适合放在全局 UserDefaults，而非项目级 `ProjectConfiguration`。
+- 颜色探针定位出更直接的语法色根因：`applyHighlighting()` 先给 token 写入不同 `.foregroundColor`，随后又调用 `textView.textColor = palette.text`；该 setter 会把整个 TextStorage 的前景色重新压成正文色，因此正则实际上匹配成功但最终被统一覆盖。应先设置 textColor/font/background，再写 token 属性，之后不再全量覆盖。
+- 首轮真实窗口主题截图确认浅色语法色与选区已符合参考基线；但显式深色 palette 只改变了 `NSTextView` 字形，`NSClipView/NSScrollView` 的空白区域仍是白色，形成浅字白底。主题切换必须同步 scroll view、clip view、容器和行号 gutter 背景，不能只设置 text view。
+- 真实工作区截图和新增坐标断言把行号重叠量化为：正文 TextKit 起点 x=12，而行号尺右缘 x=44；`NSScrollView` 在这套自定义 ruler/SwiftUI 宿主中没有替正文自动预留宽度。修复应根据两者转换到同一 scroll-view 坐标后的差值动态增加 inset；如果系统已经预留则不重复增加。
+- 动态 gutter 修复后真实工作区截图已把行号稳定放在独立左栏，正文从其右侧开始，长行按可见宽度换行且不再横向侵入。结构面板同时显示 section 节点的 disclosure 箭头。
+- 父 `NSHostingView.cacheDisplay` 仍只显示嵌套 NSTextView 的基础黑色字形，符合此前已确认的 AppKit 嵌套缓存限制；不过最新 WindowServer 合成图也需要新增“TextStorage token 颜色确实不同”的断言，避免仅凭肉眼把缓存限制与生产高亮失效混淆。
+- 真实 Key Window token 断言首次红灯：命令与正文 RGB 距离为 0。大型 Workspace 创建链路比独立编辑器慢，原实现只在取得 window 后再延迟 0.2 秒写 token 属性，窗口测试和用户初次观察都可能先看到统一正文色。正确策略是 makeNSView 时立即写语义属性，再在 window 稳定后重复提交一次以满足合成器。
+- 修复后的最终独立编辑器截图可直接观察到：浅色模式中命令蓝、参数青、注释绿、数学紫和浅蓝深字选区；深色模式中完整暗色背景与黄色插入光标。真实工作区 WindowServer 截图也显示固定行号栏、自动换行和文档结构逐级 disclosure。
+- 最终回归必须使用独立 ASCII scratch path；把 `TMPDIR` 指到含中文的阶段目录会令 SwiftPM 6.3.3 偶发返回空 target-info，而产品代码并未参与该失败。切到 `/private/tmp/SourceLeaf-phase10-final-syntax` 后，语法、选区/光标/几何、主题截图和真实 Key Window 4 项均通过。

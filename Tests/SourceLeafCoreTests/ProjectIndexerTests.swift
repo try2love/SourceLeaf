@@ -27,6 +27,26 @@ import Testing
     #expect(outline.first?.line == 1)
 }
 
+@Test func documentOutlineTreePreservesHeadingHierarchyAndFileBoundaries() throws {
+    let first = ProjectIndexer.outline(
+        for: "\\section{Method}\n\\subsection{Details}\n\\subsubsection{Proof}\n\\section{Results}",
+        relativePath: "main.tex"
+    )
+    let second = ProjectIndexer.outline(
+        for: "\\subsection{Independent appendix detail}\n\\paragraph{Note}",
+        relativePath: "appendix.tex"
+    )
+
+    let tree = ProjectIndexer.outlineTree(from: first + second)
+    #expect(tree.count == 3)
+    #expect(tree[0].item.title == "Method")
+    #expect(tree[0].children.map(\.item.title) == ["Details"])
+    #expect(tree[0].children[0].children.map(\.item.title) == ["Proof"])
+    #expect(tree[1].item.title == "Results")
+    #expect(tree[2].item.title == "Independent appendix detail")
+    #expect(tree[2].children.map(\.item.title) == ["Note"])
+}
+
 @Test func nearbyContextIsBounded() throws {
     let source = (1...100).map { "line \($0)" }.joined(separator: "\n")
     let target = try SourceTargetService.target(in: source, relativePath: "main.tex", startLine: 50, endLine: 50)
