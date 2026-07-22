@@ -2,6 +2,17 @@ import Foundation
 import Testing
 @testable import SourceLeafCore
 
+@Test func projectPDFsHaveADedicatedPreviewKind() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sourceleaf-pdf-kind-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try Data("%PDF-1.4".utf8).write(to: root.appendingPathComponent("paper.pdf"))
+
+    let file = try #require(ProjectIndexer.discoverFiles(root: root).first)
+    #expect(file.kind == .pdf)
+}
+
 @Test func buildsDocumentOutlineAndSectionContext() {
     let source = """
     Intro

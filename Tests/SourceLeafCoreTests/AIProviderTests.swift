@@ -2,6 +2,19 @@ import Foundation
 import Testing
 @testable import SourceLeafCore
 
+@Test func chatRequestsUsePlainTextInsteadOfProposalJSON() {
+    let request = AIRequest(
+        instruction: "Explain this paper",
+        targets: [],
+        context: ["system-instructions": "Be concise"],
+        projectRoot: URL(fileURLWithPath: "/tmp/project")
+    )
+    let prompt = AIEditPromptBuilder.build(request)
+    #expect(prompt.contains("Answer the user's request directly in plain text"))
+    #expect(prompt.contains("Be concise"))
+    #expect(!prompt.contains("target_id"))
+}
+
 @Test func decodesProposalFromMarkdownWrappedJSON() throws {
     let targetID = UUID()
     let response = """

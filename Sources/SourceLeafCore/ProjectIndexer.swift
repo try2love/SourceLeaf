@@ -192,7 +192,8 @@ public enum ProjectIndexer {
         case "tex": .tex
         case "bib", "bst": .bibliography
         case "sty", "cls": .style
-        case "png", "jpg", "jpeg", "pdf", "eps", "svg": .image
+        case "png", "jpg", "jpeg", "eps", "svg": .image
+        case "pdf": .pdf
         default: .other
         }
     }

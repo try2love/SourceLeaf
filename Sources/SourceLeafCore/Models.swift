@@ -91,12 +91,20 @@ public struct DockLayout: Codable, Equatable, Sendable {
 }
 
 public enum ContextScope: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none
     case selection
     case nearby
     case section
     case document
     case project
     case custom
+
+    public var id: String { rawValue }
+}
+
+public enum ChatSendBehavior: String, Codable, CaseIterable, Identifiable, Sendable {
+    case enter
+    case shiftEnter
 
     public var id: String { rawValue }
 }
@@ -232,6 +240,8 @@ public struct ProjectConfiguration: Codable, Equatable, Sendable {
     public var autoSaveDelaySeconds: Double
     public var showSelectionButton: Bool
     public var privateChatMode: Bool
+    public var systemPrompt: String
+    public var chatSendBehavior: ChatSendBehavior
     public var layout: DockLayout
 
     public init(
@@ -242,6 +252,8 @@ public struct ProjectConfiguration: Codable, Equatable, Sendable {
         autoSaveDelaySeconds: Double = 1,
         showSelectionButton: Bool = true,
         privateChatMode: Bool = false,
+        systemPrompt: String = "You are a helpful research and LaTeX assistant.",
+        chatSendBehavior: ChatSendBehavior = .enter,
         layout: DockLayout = DockLayout()
     ) {
         self.rootDocument = rootDocument
@@ -251,7 +263,30 @@ public struct ProjectConfiguration: Codable, Equatable, Sendable {
         self.autoSaveDelaySeconds = min(5, max(0.2, autoSaveDelaySeconds))
         self.showSelectionButton = showSelectionButton
         self.privateChatMode = privateChatMode
+        self.systemPrompt = systemPrompt
+        self.chatSendBehavior = chatSendBehavior
         self.layout = layout
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case rootDocument, build, defaultContextScope, autoSave, autoSaveDelaySeconds
+        case showSelectionButton, privateChatMode, systemPrompt, chatSendBehavior, layout
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            rootDocument: try container.decodeIfPresent(String.self, forKey: .rootDocument),
+            build: try container.decodeIfPresent(BuildConfiguration.self, forKey: .build) ?? BuildConfiguration(),
+            defaultContextScope: try container.decodeIfPresent(ContextScope.self, forKey: .defaultContextScope) ?? .section,
+            autoSave: try container.decodeIfPresent(Bool.self, forKey: .autoSave) ?? true,
+            autoSaveDelaySeconds: try container.decodeIfPresent(Double.self, forKey: .autoSaveDelaySeconds) ?? 1,
+            showSelectionButton: try container.decodeIfPresent(Bool.self, forKey: .showSelectionButton) ?? true,
+            privateChatMode: try container.decodeIfPresent(Bool.self, forKey: .privateChatMode) ?? false,
+            systemPrompt: try container.decodeIfPresent(String.self, forKey: .systemPrompt) ?? "You are a helpful research and LaTeX assistant.",
+            chatSendBehavior: try container.decodeIfPresent(ChatSendBehavior.self, forKey: .chatSendBehavior) ?? .enter,
+            layout: try container.decodeIfPresent(DockLayout.self, forKey: .layout) ?? DockLayout()
+        )
     }
 }
 
@@ -267,6 +302,7 @@ public struct ProjectFile: Identifiable, Hashable, Sendable {
         case bibliography
         case style
         case image
+        case pdf
         case other
     }
 
@@ -510,6 +546,7 @@ public struct AIEditHistoryEntry: Codable, Identifiable, Equatable, Sendable {
     public var instruction: String
     public var providerName: String
     public var createdAt: Date
+    public var sessionID: UUID?
 
     public init(
         id: UUID = UUID(),
@@ -519,7 +556,8 @@ public struct AIEditHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         replacementText: String,
         instruction: String,
         providerName: String,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        sessionID: UUID? = nil
     ) {
         self.id = id
         self.projectPath = projectPath
@@ -529,5 +567,6 @@ public struct AIEditHistoryEntry: Codable, Identifiable, Equatable, Sendable {
         self.instruction = instruction
         self.providerName = providerName
         self.createdAt = createdAt
+        self.sessionID = sessionID
     }
 }

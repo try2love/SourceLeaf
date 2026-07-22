@@ -3,6 +3,53 @@ import SwiftUI
 import Testing
 @testable import SourceLeafApp
 
+@Test func staleSwiftUIEchoNeverOverwritesNewerNativeTyping() {
+    #expect(!SourceTextSynchronization.shouldApplyExternalText(
+        incoming: "t",
+        nativeText: "te",
+        lastLocallyEmittedText: "te"
+    ))
+    #expect(SourceTextSynchronization.shouldApplyExternalText(
+        incoming: "accepted external replacement",
+        nativeText: "local source",
+        lastLocallyEmittedText: nil
+    ))
+}
+
+@MainActor
+@Test func rapidNativeTypingPreservesCharacterOrderAndCaretPosition() async throws {
+    let state = TypingState()
+    let view = NSHostingView(rootView: TypingHarness(state: state))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = view
+    window.makeKeyAndOrderFront(nil)
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(350))
+    let textView = try #require(findSourceTextView(in: view))
+    window.makeFirstResponder(textView)
+
+    for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: character,
+            charactersIgnoringModifiers: character,
+            isARepeat: false,
+            keyCode: UInt16(keyCode)
+        ))
+        textView.keyDown(with: event)
+        await Task.yield()
+    }
+    try await Task.sleep(for: .milliseconds(160))
+    #expect(textView.string == "test")
+    #expect(state.text == "test")
+    #expect(textView.selectedRange() == NSRange(location: 4, length: 0))
+}
+
 @MainActor
 @Test func overleafStyleSyntaxKeepsCommentsUnifiedAndOptionalArgumentsDistinct() async throws {
     let source = "% \\section{commented}\n\\documentclass[lettersize,journal]{IEEEtran}\n$E=mc^2$"
@@ -58,7 +105,8 @@ import Testing
     host.window.makeFirstResponder(textView)
     overlay.needsDisplay = true
     overlay.displayIfNeeded()
-    #expect(overlay.lastSelectionRectCount > 0)
+    #expect(textView.selectedRange() == NSRange(location: 10, length: 18))
+    #expect(overlay.lastSelectionRectCount == 0)
 
     textView.setSelectedRange(NSRange(location: 12, length: 0))
     overlay.needsDisplay = true
@@ -208,6 +256,29 @@ private final class SelectionPerformanceState: ObservableObject {
     @Published var selection = NSRange(location: 0, length: 0)
 
     init(source: String) { self.source = source }
+}
+
+@MainActor
+private final class TypingState: ObservableObject {
+    @Published var text = ""
+    @Published var selection = NSRange(location: 0, length: 0)
+}
+
+@MainActor
+private struct TypingHarness: View {
+    @ObservedObject var state: TypingState
+
+    var body: some View {
+        SourceTextView(
+            text: $state.text,
+            selection: $state.selection,
+            showSelectionButton: false,
+            editorTheme: .light,
+            editorFontFamily: "Menlo",
+            editorFontSize: 14,
+            onAskAI: {}
+        )
+    }
 }
 
 @MainActor

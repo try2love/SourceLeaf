@@ -7,6 +7,8 @@ struct CodexPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("SourceLeaf.composerHeight") private var composerHeight = 120.0
     @State private var composerDragStart: Double?
+    @State private var renameTitle = ""
+    @State private var showingRename = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,7 +18,14 @@ struct CodexPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(model.messages) { message in
-                            ChatBubble(message: message).id(message.id)
+                            ChatBubble(
+                                message: message,
+                                onEdit: { model.editMessage(message) },
+                                onRegenerate: model.regenerateLastResponse
+                            ).id(message.id)
+                        }
+                        ForEach(acceptedEdits) { entry in
+                            AcceptedDiffCard(entry: entry)
                         }
                         if let proposal = model.pendingProposal {
                             ForEach(proposal.replacements) { replacement in
@@ -24,8 +33,17 @@ struct CodexPanel: View {
                             }
                         }
                         if model.generating {
-                            HStack { ProgressView(); Text(L10n.text("ai.thinking")) }
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                ProgressView()
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(L10n.text("ai.thinking"))
+                                    Text(model.generationStatus).sourceLeafFont(.caption2)
+                                }
+                                Spacer()
+                                Button(L10n.text("ai.stop")) { model.cancelAIResponse() }
+                                    .buttonStyle(.bordered)
+                            }
+                            .foregroundStyle(.secondary)
                         }
                     }
                     .padding(12)
@@ -44,6 +62,48 @@ struct CodexPanel: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Menu {
+                    Button(L10n.text("chat.new")) { model.newChatSession() }
+                    Button(L10n.text("chat.rename")) {
+                        renameTitle = model.chatSessions.first(where: { $0.id == model.selectedChatSessionID })?.title ?? ""
+                        showingRename = true
+                    }
+                    Divider()
+                    ForEach(model.chatSessions) { session in
+                        Button {
+                            model.selectChatSession(session.id)
+                        } label: {
+                            if session.id == model.selectedChatSessionID {
+                                Label(session.title, systemImage: "checkmark")
+                            } else { Text(session.title) }
+                        }
+                    }
+                } label: {
+                    Label(selectedSessionTitle, systemImage: "bubble.left.and.bubble.right")
+                }
+                .help(String(format: L10n.text("chat.currentSession"), selectedSessionTitle))
+                .popover(isPresented: $showingRename) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.text("chat.rename")).sourceLeafFont(.headline, weight: .semibold)
+                        TextField(L10n.text("chat.title"), text: $renameTitle)
+                            .frame(width: 260)
+                            .onSubmit {
+                                model.renameSelectedChatSession(renameTitle)
+                                showingRename = false
+                            }
+                        HStack {
+                            Spacer()
+                            Button(L10n.text("action.cancel")) { showingRename = false }
+                            Button(L10n.text("action.save")) {
+                                model.renameSelectedChatSession(renameTitle)
+                                showingRename = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding(14)
+                }
+
+                Menu {
                     ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
                         Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
                             model.usePrompt(prompt)
@@ -52,6 +112,7 @@ struct CodexPanel: View {
                 } label: {
                     Label(L10n.text("ai.quickPrompt"), systemImage: "text.bubble")
                 }
+                .help(L10n.text("ai.quickPrompt"))
 
                 providerHealthButton
 
@@ -70,6 +131,7 @@ struct CodexPanel: View {
                 } label: {
                     Label(selectedProviderName, systemImage: "terminal")
                 }
+                .help(String(format: L10n.text("provider.current"), selectedProviderName))
 
                 Menu {
                     Button(L10n.text("provider.modelDefault")) { model.selectedProviderModel = "" }
@@ -87,6 +149,7 @@ struct CodexPanel: View {
                 } label: {
                     Label(model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel, systemImage: "slider.horizontal.3")
                 }
+                .help(String(format: L10n.text("provider.currentModel"), model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel))
 
                 if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
                     Menu {
@@ -105,6 +168,7 @@ struct CodexPanel: View {
                     } label: {
                         Label(reasoningLabel, systemImage: "brain.head.profile")
                     }
+                    .help(String(format: L10n.text("provider.currentReasoning"), reasoningLabel))
                 }
 
                 Menu {
@@ -122,6 +186,7 @@ struct CodexPanel: View {
                 } label: {
                     Label(L10n.context(model.contextScope), systemImage: "doc.text.magnifyingglass")
                 }
+                .help(String(format: L10n.text("ai.currentContext"), L10n.context(model.contextScope)))
 
                 if model.contextScope == .custom {
                     Menu {
@@ -167,7 +232,7 @@ struct CodexPanel: View {
                         ForEach(model.editTargets) { target in
                             HStack(spacing: 4) {
                                 Text("\(target.relativePath):\(target.startLine)-\(target.endLine)")
-                                    .font(.caption.monospaced())
+                                    .sourceLeafFont(.caption, design: .monospaced)
                                 Button { model.removeTarget(target) } label: { Image(systemName: "xmark.circle.fill") }
                                     .buttonStyle(.plain)
                             }
@@ -182,9 +247,19 @@ struct CodexPanel: View {
             HStack(alignment: .bottom, spacing: 8) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.instruction)
-                        .font(.body)
+                        .sourceLeafFont(.body)
                         .scrollContentBackground(.hidden)
                         .padding(3)
+                        .onKeyPress { press in
+                            guard press.key == .return else { return .ignored }
+                            let shift = press.modifiers.contains(.shift)
+                            let shouldSend = model.configuration.chatSendBehavior == .enter ? !shift : shift
+                            guard shouldSend,
+                                  !model.generating,
+                                  !model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .ignored }
+                            model.sendToAI()
+                            return .handled
+                        }
                     if model.instruction.isEmpty {
                         Text(L10n.text("ai.composerPlaceholder"))
                             .foregroundStyle(.tertiary)
@@ -197,15 +272,18 @@ struct CodexPanel: View {
                 .background(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.035))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
-                Button { model.sendToAI() } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                Button {
+                    if model.generating { model.cancelAIResponse() }
+                    else { model.sendToAI() }
+                } label: {
+                    Image(systemName: model.generating ? "stop.circle.fill" : "arrow.up.circle.fill").sourceLeafFont(.title2)
                 }
                 .buttonStyle(.plain)
-                .disabled(model.generating || model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(!model.generating && model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help(model.generating ? L10n.text("ai.stop") : L10n.text("ai.send"))
             }
             Text(model.editTargets.isEmpty ? L10n.text("ai.chatOnlyHint") : L10n.text("ai.targetHint"))
-                .font(.caption2)
+                .sourceLeafFont(.caption2)
                 .foregroundStyle(.secondary)
         }
         .padding(9)
@@ -241,6 +319,14 @@ struct CodexPanel: View {
         model.providerProfiles.first { $0.id == model.selectedProviderID }?.name ?? L10n.text("ai.provider")
     }
 
+    private var selectedSessionTitle: String {
+        model.chatSessions.first(where: { $0.id == model.selectedChatSessionID })?.title ?? L10n.text("chat.new")
+    }
+
+    private var acceptedEdits: [AIEditHistoryEntry] {
+        Array(model.history.lazy.filter { $0.sessionID == model.selectedChatSessionID }.prefix(8))
+    }
+
     private var reasoningLabel: String {
         model.selectedReasoningEffort
             .map { L10n.text("reasoning.\($0.rawValue)") }
@@ -259,28 +345,47 @@ struct CodexPanel: View {
 
 private struct ChatBubble: View {
     let message: ChatMessage
+    let onEdit: () -> Void
+    let onRegenerate: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 24) }
-            Text(message.text)
-                .foregroundStyle(message.role == .user ? Color.white : Color.primary)
-                .padding(9)
-                .background(
-                    message.role == .user
-                        ? Color.accentColor
-                        : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .contextMenu {
-                    Button(L10n.text("action.copy")) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(message.text, forType: .string)
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                Text(message.text)
+                    .textSelection(.enabled)
+                    .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+                    .padding(9)
+                    .background(
+                        message.role == .user
+                            ? Color.accentColor
+                            : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                HStack(spacing: 7) {
+                    Text(message.createdAt, format: .dateTime.month().day().hour().minute())
+                        .sourceLeafFont(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Button { copyMessage() } label: { Image(systemName: "doc.on.doc") }
+                        .help(L10n.text("action.copy"))
+                    if message.role == .user {
+                        Button(action: onEdit) { Image(systemName: "pencil") }
+                            .help(L10n.text("chat.edit"))
+                    } else {
+                        Button(action: onRegenerate) { Image(systemName: "arrow.clockwise") }
+                            .help(L10n.text("chat.regenerate"))
                     }
                 }
+                .buttonStyle(.borderless)
+            }
             if message.role != .user { Spacer(minLength: 24) }
         }
+    }
+
+    private func copyMessage() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text, forType: .string)
     }
 }
 
@@ -295,7 +400,7 @@ private struct ProposalCard: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Label(target.map { "\($0.relativePath):\($0.startLine)-\($0.endLine)" } ?? L10n.text("diff.untitled"), systemImage: "arrow.left.arrow.right")
-                    .font(.caption.monospaced()).bold()
+                    .sourceLeafFont(.caption, design: .monospaced).bold()
                 Spacer()
                 if validation?.hasErrors == true {
                     Label(L10n.text("validation.error"), systemImage: "xmark.octagon.fill").foregroundStyle(.red)
@@ -306,7 +411,7 @@ private struct ProposalCard: View {
                 }
             }
             if !replacement.explanation.isEmpty {
-                Text(replacement.explanation).font(.caption).foregroundStyle(.secondary)
+                Text(replacement.explanation).sourceLeafFont(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: 0) {
                 DiffText(title: L10n.text("diff.original"), text: target?.originalText ?? "", color: .red)
@@ -317,7 +422,7 @@ private struct ProposalCard: View {
             if let validation, !validation.issues.isEmpty {
                 ForEach(validation.issues) { issue in
                     Label(L10n.validationMessage(issue), systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle")
-                        .font(.caption)
+                        .sourceLeafFont(.caption)
                         .foregroundStyle(issue.severity == .error ? .red : .orange)
                 }
             }
@@ -333,7 +438,7 @@ private struct ProposalCard: View {
                 Menu {
                     Button(L10n.text("action.forceAccept")) { model.accept(replacement) }
                 } label: {
-                    Label("", systemImage: "chevron.down")
+                    Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -346,13 +451,38 @@ private struct ProposalCard: View {
                         Text(model.configuration.build.trialCompileBeforeAccept ? L10n.text("action.validateAccept") : L10n.text("action.accept"))
                     }
                 }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.validatingReplacementID != nil)
+                .buttonStyle(.borderedProminent)
+                .disabled(model.validatingReplacementID != nil)
             }
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25)))
+    }
+}
+
+private struct AcceptedDiffCard: View {
+    let entry: AIEditHistoryEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(entry.relativePath, systemImage: "checkmark.circle.fill")
+                    .sourceLeafFont(.caption, design: .monospaced, weight: .bold)
+                    .foregroundStyle(.green)
+                Spacer()
+                Text(L10n.text("diff.accepted")).sourceLeafFont(.caption).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: 0) {
+                DiffText(title: L10n.text("diff.original"), text: entry.originalText, color: .red)
+                Divider()
+                DiffText(title: L10n.text("diff.proposed"), text: entry.replacementText, color: .green)
+            }
+            .frame(minHeight: 100, maxHeight: 260)
+        }
+        .padding(10)
+        .background(.background, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.35)))
     }
 }
 
@@ -362,7 +492,7 @@ private struct DiffText: View {
     let color: Color
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption.bold()).foregroundStyle(color)
+            Text(title).sourceLeafFont(.caption, weight: .bold).foregroundStyle(color)
             ScrollView([.vertical, .horizontal]) {
                 Text(text)
                     .font(.system(size: 11, design: .monospaced))

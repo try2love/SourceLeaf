@@ -74,7 +74,10 @@ private struct GeneralSettingsView: View {
                             .monospacedDigit()
                     }
                 }
-                Toggle(L10n.text("settings.autoSave"), isOn: $model.configuration.autoSave)
+                Toggle(L10n.text("settings.autoSave"), isOn: Binding(
+                    get: { model.configuration.autoSave },
+                    set: { model.setAutoSave($0) }
+                ))
                 LabeledContent(L10n.text("settings.autoSaveDelay")) {
                     Stepper(value: $model.configuration.autoSaveDelaySeconds, in: 0.2...5, step: 0.2) {
                         Text(model.configuration.autoSaveDelaySeconds, format: .number.precision(.fractionLength(1))) + Text(" s")
@@ -82,6 +85,22 @@ private struct GeneralSettingsView: View {
                 }
                 Toggle(L10n.text("settings.selectionButton"), isOn: $model.configuration.showSelectionButton)
                 Toggle(L10n.text("settings.privateChat"), isOn: $model.configuration.privateChatMode)
+                Picker(L10n.text("settings.chatSendBehavior"), selection: $model.configuration.chatSendBehavior) {
+                    Text(L10n.text("chat.sendWithEnter")).tag(ChatSendBehavior.enter)
+                    Text(L10n.text("chat.sendWithShiftEnter")).tag(ChatSendBehavior.shiftEnter)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.text("settings.systemPrompt"))
+                    TextEditor(text: $model.configuration.systemPrompt)
+                        .sourceLeafFont(.body, design: .monospaced)
+                        .frame(minHeight: 90)
+                        .padding(5)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(.quaternary))
+                    Text(L10n.text("settings.systemPromptHint"))
+                        .sourceLeafFont(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section(L10n.text("settings.build")) {
                 Picker(L10n.text("settings.engine"), selection: $model.configuration.build.engine) {
@@ -97,7 +116,7 @@ private struct GeneralSettingsView: View {
                 Toggle(L10n.text("settings.trialCompile"), isOn: $model.configuration.build.trialCompileBeforeAccept)
                 if model.configuration.build.engine == .custom {
                     TextField("latexmk {{root}} -outdir={{output}}", text: $model.configuration.build.customCommand)
-                        .font(.body.monospaced())
+                        .sourceLeafFont(.body, design: .monospaced)
                 }
             }
             Section(L10n.text("settings.context")) {
@@ -192,13 +211,13 @@ private struct ProviderEditor: View {
                 ))
                 SecureField(L10n.text("provider.apiKey"), text: $secret)
                     .onSubmit { model.setSecret(secret, for: profile) }
-                Text(L10n.text("provider.keychainHint")).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.text("provider.keychainHint")).sourceLeafFont(.caption).foregroundStyle(.secondary)
             } else {
                 Label(
                     L10n.text(profile.kind == .codeBuddy ? "provider.codeBuddyHint" : "provider.localCodexHint"),
                     systemImage: "lock.shield"
                 )
-                    .font(.caption)
+                    .sourceLeafFont(.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -225,10 +244,10 @@ private struct PromptSettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(model.appLanguage.isChinese ? prompt.nameZH : prompt.name)
                         HStack {
-                            Text(prompt.id).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            Text(prompt.id).sourceLeafFont(.caption2, design: .monospaced).foregroundStyle(.secondary)
                             if prompt.builtIn {
                                 Text(L10n.text("prompt.builtIn"))
-                                    .font(.caption2)
+                                    .sourceLeafFont(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -308,19 +327,19 @@ struct PromptEditor: View {
                 }
             }
             Text(language == .english ? L10n.text("prompt.bodyEnglish") : L10n.text("prompt.bodyChinese"))
-                .font(.headline)
+                .sourceLeafFont(.headline, weight: .semibold)
             Group {
                 if prompt.builtIn {
                     ScrollView {
                         Text(bodyBinding.wrappedValue)
-                            .font(.body.monospaced())
+                            .sourceLeafFont(.body, design: .monospaced)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .padding(10)
                     }
                 } else {
                     TextEditor(text: bodyBinding)
-                        .font(.body.monospaced())
+                        .sourceLeafFont(.body, design: .monospaced)
                         .padding(7)
                 }
             }
@@ -331,14 +350,14 @@ struct PromptEditor: View {
             if !prompt.variables.isEmpty {
                 LabeledContent(L10n.text("prompt.variables")) {
                     Text(prompt.variables.map { "{{\($0)}}" }.joined(separator: ", "))
-                        .font(.caption.monospaced())
+                        .sourceLeafFont(.caption, design: .monospaced)
                         .textSelection(.enabled)
                 }
             }
             if prompt.builtIn {
                 HStack {
                     Label(L10n.text("prompt.readOnlyHint"), systemImage: "lock")
-                        .font(.caption)
+                        .sourceLeafFont(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button(L10n.text("prompt.duplicateToEdit")) {
@@ -372,7 +391,7 @@ private struct StorageSettingsView: View {
                 Button(L10n.text("storage.clearChat"), role: .destructive) { model.clearChatHistory() }
                 Button(L10n.text("storage.clearAIHistory"), role: .destructive) { model.clearAIHistory() }
             }
-            Text(L10n.text("storage.locationHint")).font(.caption).foregroundStyle(.secondary)
+            Text(L10n.text("storage.locationHint")).sourceLeafFont(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

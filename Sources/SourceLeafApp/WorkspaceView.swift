@@ -77,6 +77,9 @@ struct WorkspaceView: View {
                 Label(L10n.autoCompile, systemImage: "bolt")
             }
             .toggleStyle(.button)
+            .help(model.configuration.build.autoBuild
+                ? L10n.text("build.autoCompileOn")
+                : L10n.text("build.autoCompileOff"))
 
             Button {
                 if model.buildRunning { model.cancelCompile() }
@@ -90,10 +93,11 @@ struct WorkspaceView: View {
                 }
             }
             .disabled(model.projectRoot == nil)
+            .help(model.buildRunning ? L10n.text("build.stop") : L10n.compile)
         }
         ToolbarItem(placement: .status) {
             Text(model.statusText)
-                .font(.caption)
+                .sourceLeafFont(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -122,7 +126,7 @@ private struct ActivityBarView: View {
                     else { model.activatePanel(panel) }
                 } label: {
                     Image(systemName: panel.symbolName)
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 17 * model.interfaceFontScale, weight: .medium))
                         .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
                         .background(activityBackground(for: panel), in: RoundedRectangle(cornerRadius: 7))
@@ -150,17 +154,7 @@ private struct DockCanvasView: View {
 
     var body: some View {
         VSplitView {
-            HSplitView {
-                ForEach([DockZone.leading, .center, .trailing], id: \.self) { zone in
-                    if (model.layout.zones[zone] ?? []).isEmpty {
-                        DockZoneView(zone: zone)
-                            .frame(minWidth: 38, idealWidth: 44, maxWidth: 64)
-                    } else {
-                        DockZoneView(zone: zone)
-                            .frame(minWidth: zone == .center ? 320 : 210)
-                    }
-                }
-            }
+            ResizableDockColumns()
             .frame(minHeight: 420)
 
             DockZoneView(zone: .bottom)
@@ -170,6 +164,55 @@ private struct DockCanvasView: View {
                     maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 180
                 )
         }
+    }
+}
+
+private struct ResizableDockColumns: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var leadingWidth: CGFloat = 260
+    @State private var trailingWidth: CGFloat = 390
+    @State private var leadingDragStart: CGFloat?
+    @State private var trailingDragStart: CGFloat?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let leadingEmpty = (model.layout.zones[.leading] ?? []).isEmpty
+            let trailingEmpty = (model.layout.zones[.trailing] ?? []).isEmpty
+            let left = leadingEmpty ? 44 : min(max(210, leadingWidth), max(210, geometry.size.width - 550))
+            let right = trailingEmpty ? 44 : min(max(210, trailingWidth), max(210, geometry.size.width - left - 330))
+            HStack(spacing: 0) {
+                DockZoneView(zone: .leading).frame(width: left)
+                WideDockDivider {
+                    if leadingDragStart == nil { leadingDragStart = leadingWidth }
+                    leadingWidth = max(210, (leadingDragStart ?? leadingWidth) + $0)
+                } onEnded: { leadingDragStart = nil }
+                DockZoneView(zone: .center).frame(minWidth: 320, maxWidth: .infinity)
+                WideDockDivider {
+                    if trailingDragStart == nil { trailingDragStart = trailingWidth }
+                    trailingWidth = max(210, (trailingDragStart ?? trailingWidth) - $0)
+                } onEnded: { trailingDragStart = nil }
+                DockZoneView(zone: .trailing).frame(width: right)
+            }
+        }
+    }
+}
+
+private struct WideDockDivider: View {
+    let onChanged: (CGFloat) -> Void
+    let onEnded: () -> Void
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 10)
+            .overlay(Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { onChanged($0.translation.width) }
+                    .onEnded { _ in onEnded() }
+            )
+            .help(L10n.text("workspace.resizePanels"))
     }
 }
 
@@ -210,7 +253,7 @@ struct DockZoneView: View {
             Image(systemName: "rectangle.dashed")
             if zone == .bottom { Text(L10n.text("dock.dropBottom")) }
         }
-        .font(.caption2)
+        .sourceLeafFont(.caption2)
         .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -222,7 +265,7 @@ struct DockZoneView: View {
                 HStack(spacing: 5) {
                     Button { model.selectPanel(panel, in: zone) } label: {
                         Label(L10n.panel(panel), systemImage: panel.symbolName)
-                            .font(.caption)
+                            .sourceLeafFont(.caption)
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)

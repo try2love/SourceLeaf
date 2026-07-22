@@ -15,6 +15,9 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
         let text = try await perform(prompt: AIEditPromptBuilder.build(request))
+        if request.targets.isEmpty {
+            return AIProposal(summary: text.trimmingCharacters(in: .whitespacesAndNewlines), replacements: [], providerName: displayName)
+        }
         return try AIProposalCodec.decode(text, providerName: displayName)
     }
 

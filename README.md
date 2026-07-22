@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.5" src="https://img.shields.io/badge/version-0.3.5-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.6" src="https://img.shields.io/badge/version-0.3.6-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -47,8 +47,8 @@ The rest of the application follows the same local-first boundary. Project metad
 
 ### LaTeX workspace
 
-- **Native source editor** with Overleaf-style semantic colors, comment highlighting, readable selections and caret, fixed line numbers, line wrapping, light/dark/system themes, and persistent font preferences.
-- **Project navigation** with a collapsible folder tree, image preview, and a recursively collapsible document outline that jumps to the owning source location.
+- **Native source editor** with Overleaf-style semantic colors, native live selections, stable rapid typing and caret ownership, fixed line numbers, line wrapping, opaque system Find/Replace, light/dark/system themes, and persistent font preferences.
+- **Project navigation** with full-row folder disclosure, dedicated multipage project-PDF routing, centered and pannable image preview, and a recursively collapsible document outline that jumps to the owning source location.
 - **LaTeX editing tools** with Find/Replace, toggleable styles, common shortcuts, heading levels, font sizes, formulas, tables, figures, lists, citations, references, labels, and URLs.
 - **Explicit saving** with dirty-state feedback, toolbar actions, and `⌘S`.
 
@@ -65,16 +65,18 @@ The rest of the application follows the same local-first boundary. Project metad
 - **Local Codex CLI first**: reuse the Mac's existing Codex login and configuration without copying `auth.json`.
 - **Configurable providers**: local Codex, restricted headless CodeBuddy, and HTTP API profiles with model and supported reasoning controls.
 - **Verifiable connectivity**: an explicit `hello` health check drives the unknown/checking/connected/failed status indicator.
-- **Selectable context scope**: selection only, nearby text, section, full document, or project.
+- **Selectable context scope**: none, selection only, nearby text, section, full document, project, or custom files; no-target requests use a normal plain-text conversation protocol.
 - **Diff before write**: inspect warnings and original/proposed text before accepting or rejecting a change.
 - **Prompt library**: a compact Quick Prompt menu plus built-in and user-managed prompts; long bilingual templates use a full-height language-focused editor.
-- **History through review**: restoring an earlier change returns through the same diff workflow instead of overwriting source silently.
+- **Conversation sessions** with create, rename, switch, editable/copyable timestamped messages, regenerate/stop controls, configurable send keys, and a user-defined system prompt.
+- **History through review**: accepted diffs remain visible without action buttons, and restoring an earlier change returns through a full original/updated diff workflow instead of overwriting source silently.
 
 ### Flexible native interface
 
 - Source, PDF, conversation, project navigation, and logs can be shown, hidden, rearranged, docked, or detached.
 - The conversation composer can be resized vertically and remembers its height.
-- Interface text size is adjustable independently from the source editor font, including layouts used on external displays.
+- Interface text size continuously scales actual semantic UI fonts independently from the source editor font, including layouts used on external displays.
+- Main dock dividers provide a wider drag target, and clickable controls expose localized hover help including state where applicable.
 - Detached panels return to the main workspace when their windows close.
 - Interface language can switch immediately between English, Simplified Chinese, and Follow System.
 - The most recent project and source file reopen automatically.

@@ -2,6 +2,20 @@ import Foundation
 import Testing
 @testable import SourceLeafCore
 
+@Test func selectionTracksAcceptedReplacementInsteadOfReturningToAnAbsoluteOffset() {
+    let replacementRange = NSRange(location: 10, length: 4)
+    #expect(SourceTargetService.adjustedSelection(
+        NSRange(location: 30, length: 0),
+        replacing: replacementRange,
+        replacementUTF16Length: 9
+    ) == NSRange(location: 35, length: 0))
+    #expect(SourceTargetService.adjustedSelection(
+        NSRange(location: 12, length: 1),
+        replacing: replacementRange,
+        replacementUTF16Length: 9
+    ) == NSRange(location: 19, length: 0))
+}
+
 @Test func selectionTargetCapturesLinesAndRejectsStaleText() throws {
     let source = "first\nsecond line\nthird"
     let range = (source as NSString).range(of: "second line")

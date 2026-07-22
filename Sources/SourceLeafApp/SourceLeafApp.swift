@@ -4,13 +4,17 @@ import SourceLeafCore
 @main
 struct SourceLeafApplication: App {
     @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(SourceLeafLifecycleDelegate.self) private var lifecycleDelegate
 
     var body: some Scene {
         WindowGroup {
             WorkspaceView()
+                .onAppear { lifecycleDelegate.model = model }
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                 .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
+                .environment(\.sourceLeafInterfaceScale, model.interfaceFontScale)
+                .font(.system(size: 13 * model.interfaceFontScale))
                 .preferredColorScheme(model.editorTheme.colorScheme)
                 .frame(minWidth: 900, minHeight: 600)
         }
@@ -25,6 +29,8 @@ struct SourceLeafApplication: App {
                     .environmentObject(model)
                     .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                     .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
+                    .environment(\.sourceLeafInterfaceScale, model.interfaceFontScale)
+                    .font(.system(size: 13 * model.interfaceFontScale))
                     .preferredColorScheme(model.editorTheme.colorScheme)
                     .frame(minWidth: 420, minHeight: 360)
             }
@@ -36,9 +42,20 @@ struct SourceLeafApplication: App {
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
                 .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
+                .environment(\.sourceLeafInterfaceScale, model.interfaceFontScale)
+                .font(.system(size: 13 * model.interfaceFontScale))
                 .preferredColorScheme(model.editorTheme.colorScheme)
                 .frame(minWidth: 680, minHeight: 540)
         }
+    }
+}
+
+@MainActor
+final class SourceLeafLifecycleDelegate: NSObject, NSApplicationDelegate {
+    weak var model: AppModel?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        model?.applicationTerminationReply() ?? .terminateNow
     }
 }
 
@@ -46,6 +63,10 @@ private struct SourceLeafCommands: Commands {
     @ObservedObject var model: AppModel
 
     var body: some Commands {
+        CommandGroup(replacing: .appTermination) {
+            Button(L10n.text("action.quit")) { model.requestQuit() }
+                .keyboardShortcut("q", modifiers: .command)
+        }
         CommandGroup(replacing: .newItem) {
             Button(L10n.openProject) { model.presentOpenProjectPanel() }
                 .keyboardShortcut("o")
@@ -84,7 +105,7 @@ private struct SourceLeafCommands: Commands {
             Button(L10n.text("source.findReplace")) {
                 NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil)
             }
-            .keyboardShortcut("f", modifiers: [.command, .option])
+            .keyboardShortcut("f", modifiers: .command)
         }
     }
 }

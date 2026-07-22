@@ -62,3 +62,46 @@ enum InterfaceFontScale {
         }
     }
 }
+
+private struct SourceLeafInterfaceScaleKey: EnvironmentKey {
+    static let defaultValue = 1.0
+}
+
+extension EnvironmentValues {
+    var sourceLeafInterfaceScale: Double {
+        get { self[SourceLeafInterfaceScaleKey.self] }
+        set { self[SourceLeafInterfaceScaleKey.self] = newValue }
+    }
+}
+
+private struct SourceLeafFontModifier: ViewModifier {
+    @Environment(\.sourceLeafInterfaceScale) private var scale
+    let style: Font.TextStyle
+    let design: Font.Design
+    let weight: Font.Weight
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: basePointSize * scale, weight: weight, design: design))
+    }
+
+    private var basePointSize: Double {
+        switch style {
+        case .caption2: 10
+        case .caption: 11
+        case .body: 13
+        case .headline: 13
+        case .title2: 17
+        default: 13
+        }
+    }
+}
+
+extension View {
+    func sourceLeafFont(
+        _ style: Font.TextStyle,
+        design: Font.Design = .default,
+        weight: Font.Weight = .regular
+    ) -> some View {
+        modifier(SourceLeafFontModifier(style: style, design: design, weight: weight))
+    }
+}

@@ -34,8 +34,8 @@ struct ProjectPanel: View {
     private var fileBrowser: some View {
         if query.isEmpty {
             List {
-                OutlineGroup(model.projectTree, children: \.children) { node in
-                    ProjectTreeRow(node: node)
+                ForEach(model.projectTree) { node in
+                    ProjectTreeBranch(node: node)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -44,7 +44,10 @@ struct ProjectPanel: View {
             List(filteredFiles) { file in
                 Button { model.openFile(file) } label: {
                     Label(file.relativePath, systemImage: file.symbolName)
-                        .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                        .font(.system(
+                            size: 11 * model.interfaceFontScale,
+                            design: file.kind == .tex ? .monospaced : .default
+                        ))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -71,7 +74,7 @@ struct ProjectPanel: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .font(.caption.weight(.semibold))
+            .sourceLeafFont(.caption, weight: .semibold)
             .padding(.horizontal, 9)
             .frame(height: 28)
             .background(.bar)
@@ -91,7 +94,7 @@ struct ProjectPanel: View {
                                 if let path = node.item.relativePath,
                                    path != model.selectedFile?.relativePath {
                                     Text(path)
-                                        .font(.caption2.monospaced())
+                                        .sourceLeafFont(.caption2, design: .monospaced)
                                         .foregroundStyle(.tertiary)
                                         .lineLimit(1)
                                 }
@@ -99,7 +102,7 @@ struct ProjectPanel: View {
                             Spacer()
                             Text("\(node.item.line)").foregroundStyle(.tertiary)
                         }
-                        .font(.caption)
+                        .sourceLeafFont(.caption)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
@@ -118,6 +121,31 @@ struct ProjectPanel: View {
     }
 }
 
+private struct ProjectTreeBranch: View {
+    @EnvironmentObject private var model: AppModel
+    let node: ProjectTreeNode
+    @State private var expanded = true
+
+    var body: some View {
+        if node.isDirectory {
+            DisclosureGroup(isExpanded: $expanded) {
+                ForEach(node.children ?? []) { child in
+                    ProjectTreeBranch(node: child)
+                }
+            } label: {
+                Label(node.name, systemImage: expanded ? "folder.fill" : "folder")
+                    .font(.system(size: 11 * model.interfaceFontScale))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { expanded.toggle() }
+                    .help(expanded ? L10n.text("project.folderCollapse") : L10n.text("project.folderExpand"))
+            }
+        } else {
+            ProjectTreeRow(node: node)
+        }
+    }
+}
+
 private struct ProjectTreeRow: View {
     @EnvironmentObject private var model: AppModel
     let node: ProjectTreeNode
@@ -126,11 +154,15 @@ private struct ProjectTreeRow: View {
         if let file = node.file {
             Button { model.openFile(file) } label: {
                 Label(node.name, systemImage: file.symbolName)
-                    .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                    .font(.system(
+                        size: 11 * model.interfaceFontScale,
+                        design: file.kind == .tex ? .monospaced : .default
+                    ))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(String(format: L10n.text("project.openFile"), file.relativePath))
             .contextMenu {
                 if file.kind == .tex {
                     Button(L10n.text("project.setRoot")) {
@@ -141,7 +173,7 @@ private struct ProjectTreeRow: View {
             }
         } else {
             Label(node.name, systemImage: "folder")
-                .font(.caption)
+                .sourceLeafFont(.caption)
         }
     }
 }
@@ -155,16 +187,18 @@ struct ImagePanel: View {
             HStack(spacing: 7) {
                 Image(systemName: "photo")
                 Text(model.selectedImageFile?.relativePath ?? L10n.text("image.none"))
-                    .font(.caption.monospaced())
+                    .sourceLeafFont(.caption, design: .monospaced)
                     .lineLimit(1)
                 Spacer()
                 Button { zoomScale = max(0.1, zoomScale / 1.2) } label: { Image(systemName: "minus.magnifyingglass") }
                     .disabled(zoomScale <= 0.1)
+                    .help(L10n.text("preview.zoomOut"))
                 Text("\(Int((zoomScale * 100).rounded()))%")
-                    .font(.caption.monospacedDigit())
+                    .sourceLeafFont(.caption, design: .monospaced)
                     .frame(minWidth: 42)
                 Button { zoomScale = min(8, zoomScale * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
                     .disabled(zoomScale >= 8)
+                    .help(L10n.text("preview.zoomIn"))
                 Button { zoomScale = 1 } label: { Image(systemName: "arrow.counterclockwise") }
                     .help(L10n.text("preview.actualSize"))
             }
@@ -201,7 +235,7 @@ struct ZoomableImagePreview: NSViewRepresentable {
 }
 
 final class ZoomableImageScrollView: NSScrollView {
-    private let imageView = NSImageView()
+    private let imageView = PannableImageView()
     private(set) var loadedURL: URL?
     var onScaleChanged: ((Double) -> Void)?
 
@@ -217,6 +251,7 @@ final class ZoomableImageScrollView: NSScrollView {
         maxMagnification = 8
         imageView.imageScaling = .scaleNone
         imageView.imageAlignment = .alignCenter
+        imageView.owner = self
         documentView = imageView
     }
 
@@ -228,16 +263,19 @@ final class ZoomableImageScrollView: NSScrollView {
         let size = imageView.image?.size ?? NSSize(width: 1, height: 1)
         imageView.frame = NSRect(origin: .zero, size: size)
         magnification = 1
+        updateCenteringInsets()
         onScaleChanged?(1)
     }
 
     func setZoomScale(_ scale: Double) {
         let bounded = min(8, max(0.1, scale))
         if abs(magnification - bounded) > 0.005 { setMagnification(bounded, centeredAt: visibleRect.center) }
+        updateCenteringInsets()
     }
 
     override func magnify(with event: NSEvent) {
         super.magnify(with: event)
+        updateCenteringInsets()
         onScaleChanged?(magnification)
     }
 
@@ -248,11 +286,54 @@ final class ZoomableImageScrollView: NSScrollView {
         }
         let next = Self.zoomedScale(from: magnification, scrollingDeltaY: event.scrollingDeltaY)
         setMagnification(next, centeredAt: convert(event.locationInWindow, from: nil))
+        updateCenteringInsets()
         onScaleChanged?(next)
+    }
+
+    override func layout() {
+        super.layout()
+        updateCenteringInsets()
+    }
+
+    private func updateCenteringInsets() {
+        guard let documentView else { return }
+        let scaledWidth = documentView.bounds.width * magnification
+        let scaledHeight = documentView.bounds.height * magnification
+        contentInsets = NSEdgeInsets(
+            top: max(0, (contentSize.height - scaledHeight) / 2),
+            left: max(0, (contentSize.width - scaledWidth) / 2),
+            bottom: max(0, (contentSize.height - scaledHeight) / 2),
+            right: max(0, (contentSize.width - scaledWidth) / 2)
+        )
     }
 
     static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
         min(8, max(0.1, scale * pow(1.12, scrollingDeltaY)))
+    }
+}
+
+private final class PannableImageView: NSImageView {
+    weak var owner: NSScrollView?
+    private var lastDragPoint: NSPoint?
+
+    override func mouseDown(with event: NSEvent) {
+        lastDragPoint = event.locationInWindow
+        NSCursor.closedHand.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let owner, let lastDragPoint else { return }
+        let point = event.locationInWindow
+        let delta = NSPoint(x: point.x - lastDragPoint.x, y: point.y - lastDragPoint.y)
+        let clip = owner.contentView
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x - delta.x, y: clip.bounds.origin.y + delta.y))
+        owner.reflectScrolledClipView(clip)
+        self.lastDragPoint = point
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        lastDragPoint = nil
+        NSCursor.pop()
     }
 }
 
@@ -271,10 +352,12 @@ struct PDFPanel: View {
                 Button { showsThumbnails.toggle() } label: { Image(systemName: "sidebar.left") }
                     .help(L10n.text("pdf.thumbnails"))
                 Button { zoomScale = max(0.1, (zoomScale > 0 ? zoomScale : 1) / 1.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                    .help(L10n.text("preview.zoomOut"))
                 Text(zoomScale > 0 ? "\(Int((zoomScale * 100).rounded()))%" : L10n.text("pdf.fit"))
-                    .font(.caption.monospacedDigit())
+                    .sourceLeafFont(.caption, design: .monospaced)
                     .frame(minWidth: 42)
                 Button { zoomScale = min(8, (zoomScale > 0 ? zoomScale : 1) * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                    .help(L10n.text("preview.zoomIn"))
                 Button { zoomScale = 0 } label: { Image(systemName: "arrow.counterclockwise") }
                     .help(L10n.text("pdf.fit"))
                 Button {
@@ -297,7 +380,9 @@ struct PDFPanel: View {
                     }
                 )) { Image(systemName: model.configuration.build.autoBuild ? "bolt.fill" : "bolt.slash") }
                     .toggleStyle(.button)
-                    .help(L10n.autoCompile)
+                    .help(model.configuration.build.autoBuild
+                        ? L10n.text("build.autoCompileOn")
+                        : L10n.text("build.autoCompileOff"))
                 if model.pdfPageCount > 0 {
                     Divider().frame(height: 16)
                     Button {
@@ -310,7 +395,7 @@ struct PDFPanel: View {
                     .help(L10n.text("pdf.previousPage"))
 
                     Text("\(model.pdfPageIndex + 1)/\(model.pdfPageCount)")
-                        .font(.caption.monospacedDigit())
+                        .sourceLeafFont(.caption, design: .monospaced)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .help(String(format: L10n.text("pdf.pageIndicator"), model.pdfPageIndex + 1, model.pdfPageCount))
@@ -326,7 +411,7 @@ struct PDFPanel: View {
                 }
                 if model.syncTeXDocument != nil {
                     Label(L10n.text("synctex.commandClickHint"), systemImage: "cursorarrow.click")
-                        .font(.caption2)
+                        .sourceLeafFont(.caption2)
                         .foregroundStyle(.tertiary)
                         .labelStyle(.iconOnly)
                         .help(L10n.text("synctex.commandClickHint"))
@@ -337,7 +422,7 @@ struct PDFPanel: View {
                         ProgressView().controlSize(.small)
                         Text(L10n.buildPhase(model.buildPhase))
                     }
-                    .font(.caption)
+                    .sourceLeafFont(.caption)
                     .foregroundStyle(.secondary)
                 }
                 if let succeeded = model.buildSucceeded {
@@ -346,7 +431,7 @@ struct PDFPanel: View {
                         systemImage: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
                     )
                     .foregroundStyle(succeeded ? .green : .orange)
-                    .font(.caption)
+                    .sourceLeafFont(.caption)
                 }
                 Button { model.presentPDFExportPanel() } label: { Image(systemName: "square.and.arrow.down") }
                     .disabled(model.pdfURL == nil)
@@ -374,7 +459,7 @@ struct PDFPanel: View {
                     HStack {
                         Text(model.pdfSelection)
                             .lineLimit(2)
-                            .font(.caption)
+                            .sourceLeafFont(.caption)
                         Spacer()
                         Button(L10n.text("pdf.sendSelection")) {
                             model.instruction = L10n.text("pdf.selectionInstruction") + "\n\n\(model.pdfSelection)"
@@ -577,6 +662,10 @@ final class NavigablePDFView: PDFView {
             super.scrollWheel(with: event)
             return
         }
+        performControlZoom(with: event)
+    }
+
+    func performControlZoom(with event: NSEvent) {
         autoScales = false
         scaleFactor = Self.zoomedScale(from: scaleFactor, scrollingDeltaY: event.scrollingDeltaY)
         onScaleChanged?(scaleFactor)
@@ -617,6 +706,7 @@ final class PDFPreviewContainerView: NSView {
     var showsThumbnails: Bool {
         didSet { thumbnailView.isHidden = !showsThumbnails; needsLayout = true }
     }
+    private var scrollMonitor: Any?
 
     init(pdfView: NavigablePDFView, showsThumbnails: Bool) {
         self.pdfView = pdfView
@@ -627,9 +717,31 @@ final class PDFPreviewContainerView: NSView {
         thumbnailView.isHidden = !showsThumbnails
         addSubview(thumbnailView)
         addSubview(pdfView)
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self,
+                  event.modifierFlags.contains(.control),
+                  event.window === self.window,
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else { return event }
+            return self.handleControlScroll(event) ? nil : event
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @discardableResult
+    func handleControlScroll(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.control) else { return false }
+        pdfView.performControlZoom(with: event)
+        return true
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let scrollMonitor {
+            NSEvent.removeMonitor(scrollMonitor)
+            self.scrollMonitor = nil
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
 
     override func layout() {
         super.layout()
@@ -676,7 +788,7 @@ struct BuildLogPanel: View {
                 .disabled(model.buildLog.isEmpty)
                 .help(L10n.text("build.copyLog"))
             }
-            .font(.caption)
+            .sourceLeafFont(.caption)
             .padding(.horizontal, 10)
             .frame(height: 28)
             .background(.bar)
@@ -719,18 +831,25 @@ struct HistoryPanel: View {
 
     var body: some View {
         List(model.history) { entry in
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(entry.relativePath).font(.caption.monospaced()).bold()
+                    Text(entry.relativePath).sourceLeafFont(.caption, design: .monospaced).bold()
                     Spacer()
-                    Text(entry.createdAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+                    Text(entry.createdAt, style: .relative).sourceLeafFont(.caption2).foregroundStyle(.secondary)
                 }
-                Text(entry.instruction).lineLimit(2).font(.caption)
+                Text(entry.instruction).lineLimit(2).sourceLeafFont(.caption)
+                HStack(alignment: .top, spacing: 0) {
+                    HistoryDiffText(title: L10n.text("diff.original"), text: entry.originalText, color: .red)
+                    Divider()
+                    HistoryDiffText(title: L10n.text("diff.proposed"), text: entry.replacementText, color: .green)
+                }
+                .frame(minHeight: 96, maxHeight: 210)
                 HStack {
-                    Text(entry.providerName).font(.caption2).foregroundStyle(.secondary)
+                    Text(entry.providerName).sourceLeafFont(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button(L10n.text("history.prepareRestore")) { model.prepareRevert(entry) }
                         .buttonStyle(.borderless)
+                        .help(L10n.text("history.prepareRestoreHelp"))
                 }
             }
             .padding(.vertical, 4)
@@ -743,6 +862,27 @@ struct HistoryPanel: View {
     }
 }
 
+private struct HistoryDiffText: View {
+    let title: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).sourceLeafFont(.caption2, weight: .bold).foregroundStyle(color)
+            ScrollView([.vertical, .horizontal]) {
+                Text(text)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        .padding(7)
+        .background(color.opacity(0.06))
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private extension ProjectFile {
     var symbolName: String {
         switch kind {
@@ -750,6 +890,7 @@ private extension ProjectFile {
         case .bibliography: "books.vertical"
         case .style: "paintbrush"
         case .image: "photo"
+        case .pdf: "doc.richtext"
         case .other: "doc"
         }
     }

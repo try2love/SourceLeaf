@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.5" src="https://img.shields.io/badge/version-0.3.5-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.6" src="https://img.shields.io/badge/version-0.3.6-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -47,8 +47,8 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 
 ### LaTeX 工作区
 
-- **原生源码编辑器**：接近 Overleaf 的语义配色、注释高亮、清晰选区与光标、固定行号、自动换行、系统/浅色/深色主题，以及可持久化的字体设置。
-- **项目导航**：可折叠文件树、图片预览，以及可逐级折叠并跳转到源码位置的跨文件文档结构。
+- **原生源码编辑器**：接近 Overleaf 的语义配色、原生实时选区、稳定的连续输入与光标所有权、固定行号、自动换行、不透明系统查找替换、系统/浅色/深色主题，以及可持久化的字体设置。
+- **项目导航**：文件夹整行折叠、项目 PDF 专用多页预览、居中且可拖动的图片预览，以及可逐级折叠并跳转到源码位置的跨文件文档结构。
 - **LaTeX 编辑工具**：支持查找替换、可切换文字样式、常用快捷键、标题等级、字号、公式、表格、图片、列表、引用、交叉引用、标签和网址。
 - **明确保存能力**：未保存状态提示、工具栏操作和 `⌘S`。
 
@@ -65,16 +65,18 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 - **本机 Codex CLI 优先**：复用当前 Mac 的 Codex 登录和配置，不复制 `auth.json`。
 - **可配置 Provider**：支持本机 Codex、受限无头 CodeBuddy 和 HTTP API，可选择模型与 Provider 支持的思考深度。
 - **可验证连接**：显式发送 `hello` 健康检查，驱动未检测/检测中/已连接/失败状态。
-- **可选择上下文范围**：仅选区、附近内容、当前章节、全文或整个项目。
+- **可选择上下文范围**：无、仅选区、附近内容、当前章节、全文、整个项目或自定义文件；没有修改目标时自动使用普通纯文本对话协议。
 - **写入前审阅 Diff**：先检查警告、试编译结果与原文/建议，再选择接受或拒绝。
 - **提示词库**：包含紧凑的快捷 Prompt 菜单，支持内置和个人提示词的新增、复制、编辑、启停与删除；长中英文模板使用单语言大编辑区。
-- **安全历史恢复**：历史内容同样经过 Diff 审阅，不会静默覆盖源码。
+- **完整会话管理**：支持新建、重命名和切换会话；消息可选择、复制、修改、重新回答并显示时间；支持终止回答、自定义发送键和系统提示词。
+- **安全历史恢复**：已接受 Diff 会保留为只读记录；历史恢复同样经过完整原文/修改后 Diff 审阅，不会静默覆盖源码。
 
 ### 灵活的原生界面
 
 - 源码、PDF、对话、项目导航和日志面板均可显示、隐藏、重新排列、停靠或独立浮动。
 - 对话输入区可纵向拖动调整，并记住用户设置的高度。
-- 界面文字大小可独立于源码字体调整，适配外接显示器。
+- 界面文字大小会连续缩放实际语义字体，并独立于源码字体，适配外接显示器。
+- 主工作区分隔条具有更宽的拖动命中区；可点击控件提供本地化悬停说明，并在适用时显示当前状态。
 - 关闭独立面板窗口后，对应面板会回到主工作区。
 - 界面语言可在 English、简体中文和跟随系统之间即时切换。
 - 自动恢复上次打开的项目和源码文件。

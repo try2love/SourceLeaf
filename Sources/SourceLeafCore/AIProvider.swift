@@ -100,6 +100,9 @@ public enum AIProposalCodec {
 
 public enum AIEditPromptBuilder {
     public static func build(_ request: AIRequest) -> String {
+        if request.targets.isEmpty {
+            return AIChatPromptBuilder.build(request)
+        }
         let targetBlocks = request.targets.map { target in
             """
             <target id="\(target.id.uuidString)" file="\(target.relativePath)" lines="\(target.startLine)-\(target.endLine)">
@@ -146,6 +149,24 @@ public enum AIEditPromptBuilder {
     }
 }
 
+public enum AIChatPromptBuilder {
+    public static func build(_ request: AIRequest) -> String {
+        let contextBlocks = request.context.sorted { $0.key < $1.key }.map { name, value in
+            "<context name=\"\(name)\">\n\(value)\n</context>"
+        }.joined(separator: "\n\n")
+        return """
+        You are the conversation assistant inside SourceLeaf, a LaTeX editor.
+        Answer the user's request directly in plain text. Do not return JSON.
+
+        User message:
+        \(request.instruction)
+
+        Optional read-only context:
+        \(contextBlocks)
+        """
+    }
+}
+
 public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
     public let displayName: String
     private let executableURL: URL
@@ -180,6 +201,9 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         )
         guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
         let message = Self.lastAgentMessage(in: output.standardOutput) ?? output.standardOutput
+        if request.targets.isEmpty {
+            return AIProposal(summary: message.trimmingCharacters(in: .whitespacesAndNewlines), replacements: [], providerName: displayName)
+        }
         return try AIProposalCodec.decode(message, providerName: displayName)
     }
 
@@ -265,6 +289,9 @@ public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
         let text = try await run(prompt: AIEditPromptBuilder.build(request), workspaceKey: String(
             SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16)
         ))
+        if request.targets.isEmpty {
+            return AIProposal(summary: text.trimmingCharacters(in: .whitespacesAndNewlines), replacements: [], providerName: displayName)
+        }
         return try AIProposalCodec.decode(text, providerName: displayName)
     }
 

@@ -43,6 +43,8 @@ final class AppModel: ObservableObject {
     @Published var buildSucceeded: Bool?
     @Published var buildPhase: BuildPhase = .idle
     @Published var messages: [ChatMessage] = []
+    @Published var chatSessions: [ChatSession] = []
+    @Published var selectedChatSessionID: UUID?
     @Published var editTargets: [SourceTarget] = []
     @Published var pendingProposal: AIProposal?
     @Published var proposalValidation: [UUID: LaTeXValidationResult] = [:]
@@ -53,6 +55,7 @@ final class AppModel: ObservableObject {
     @Published var selectedProviderID: UUID?
     @Published private(set) var providerHealth: [UUID: ProviderHealthStatus] = [:]
     @Published var generating = false
+    @Published var generationStatus = ""
     @Published var validatingReplacementID: UUID?
     @Published var lastError: String?
     @Published var history: [AIEditHistoryEntry] = []
@@ -88,16 +91,23 @@ final class AppModel: ObservableObject {
         return [.tex, .bibliography, .style].contains(selectedFile.kind)
     }
 
+    var canAutoCompileCurrentSource: Bool {
+        configuration.build.autoBuild && (configuration.autoSave || !hasUnsavedChanges)
+    }
+
     private let compiler: CompilerService
     private let keychain = KeychainStore()
     private var saveTask: Task<Void, Never>?
+    private var outlineRefreshTask: Task<Void, Never>?
     private var compileDebounceTask: Task<Void, Never>?
     private var activeCompileTask: Task<Void, Never>?
+    private var activeAITask: Task<Void, Never>?
     private var suppressTextChange = false
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
     private var historyStore: JSONFileStore<[AIEditHistoryEntry]>?
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
     private var chatStore: JSONFileStore<[ChatMessage]>?
+    private var chatSessionsStore: JSONFileStore<[ChatSession]>?
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
     private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
     private let supportDirectoryOverride: URL?
@@ -169,6 +179,36 @@ final class AppModel: ObservableObject {
     func setInterfaceFontScale(_ scale: Double) {
         interfaceFontScale = min(1.6, max(0.85, scale))
         defaults.set(interfaceFontScale, forKey: Self.interfaceFontScaleKey)
+    }
+
+    func setAutoSave(_ enabled: Bool) {
+        configuration.autoSave = enabled
+        if !enabled { saveTask?.cancel() }
+        persistConfiguration()
+    }
+
+    func requestQuit() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    func applicationTerminationReply() -> NSApplication.TerminateReply {
+        guard hasUnsavedChanges, !configuration.autoSave else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = L10n.text("save.quitTitle")
+        alert.informativeText = L10n.text("save.quitMessage")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.text("save.saveAndQuit"))
+        alert.addButton(withTitle: L10n.text("save.dontSave"))
+        alert.addButton(withTitle: L10n.text("action.cancel"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            saveNow()
+            return hasUnsavedChanges ? .terminateCancel : .terminateNow
+        case .alertSecondButtonReturn:
+            return .terminateNow
+        default:
+            return .terminateCancel
+        }
     }
 
     func presentPDFExportPanel() {
@@ -269,11 +309,26 @@ final class AppModel: ObservableObject {
             projectConfigStore = JSONFileStore(url: stateRoot.appendingPathComponent("configuration.json"))
             historyStore = JSONFileStore(url: stateRoot.appendingPathComponent("ai-history.json"))
             chatStore = JSONFileStore(url: stateRoot.appendingPathComponent("messages.json"))
+            chatSessionsStore = JSONFileStore(url: stateRoot.appendingPathComponent("chat-sessions.json"))
             configuration = try projectConfigStore?.load(default: ProjectConfiguration()) ?? ProjectConfiguration()
             layout = configuration.layout
             contextScope = configuration.defaultContextScope
             history = try historyStore?.load(default: []) ?? []
-            messages = configuration.privateChatMode ? [] : (try chatStore?.load(default: []) ?? [])
+            if configuration.privateChatMode {
+                chatSessions = [ChatSession(projectPath: root.standardizedFileURL.path)]
+            } else {
+                chatSessions = try chatSessionsStore?.load(default: []) ?? []
+                if chatSessions.isEmpty {
+                    let legacy = try chatStore?.load(default: []) ?? []
+                    chatSessions = [ChatSession(
+                        title: legacy.isEmpty ? L10n.text("chat.new") : L10n.text("chat.migrated"),
+                        projectPath: root.standardizedFileURL.path,
+                        messages: legacy
+                    )]
+                }
+            }
+            selectedChatSessionID = chatSessions.first?.id
+            messages = chatSessions.first?.messages ?? []
 
             let lastFileKey = "SourceLeaf.lastFile.\(key)"
             let lastFile = defaults.string(forKey: lastFileKey)
@@ -324,6 +379,10 @@ final class AppModel: ObservableObject {
             openImage(file)
             return
         }
+        if file.kind == .pdf {
+            openPDF(file)
+            return
+        }
         do {
             try saveCurrentFileIfNeeded()
             let text = try String(contentsOf: file.url, encoding: .utf8)
@@ -357,13 +416,37 @@ final class AppModel: ObservableObject {
         } catch { report(error) }
     }
 
+    func openPDF(_ file: ProjectFile) {
+        do {
+            try saveCurrentFileIfNeeded()
+            pdfURL = file.url
+            pdfPageIndex = 0
+            pdfSelection = ""
+            syncTeXDocument = nil
+            updateLayout { layout in
+                layout.show(.pdf, in: .trailing)
+                if let zone = layout.zone(containing: .pdf) { layout.selected[zone] = .pdf }
+            }
+            rememberLastOpenedFile(file)
+        } catch { report(error) }
+    }
+
     func sourceChanged(_ text: String) {
         guard !suppressTextChange else { return }
         sourceText = text
         hasUnsavedChanges = canSaveCurrentFile
-        refreshActiveFileOutline()
+        scheduleOutlineRefresh()
         scheduleSave()
         scheduleCompile()
+    }
+
+    private func scheduleOutlineRefresh() {
+        outlineRefreshTask?.cancel()
+        outlineRefreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            refreshActiveFileOutline()
+        }
     }
 
     func saveCurrentFileIfNeeded() throws {
@@ -569,10 +652,14 @@ final class AppModel: ObservableObject {
         proposalValidation = [:]
         instruction = ""
 
-        Task {
+        generationStatus = L10n.text("ai.preparingContext")
+        activeAITask?.cancel()
+        activeAITask = Task {
             do {
+                try Task.checkCancellation()
                 let provider = try makeSelectedProvider()
                 let context = try buildContext(scope: contextScope, targets: targets)
+                generationStatus = L10n.text("ai.waitingProvider")
                 let request = AIRequest(
                     instruction: userInstruction,
                     targets: targets,
@@ -580,10 +667,11 @@ final class AppModel: ObservableObject {
                     projectRoot: root
                 )
                 let proposal = try await provider.generateProposal(for: request)
+                try Task.checkCancellation()
                 guard Set(proposal.replacements.map(\.targetID)).isSubset(of: Set(targets.map(\.id))) else {
                     throw AppPresentationError.unknownProposalTarget
                 }
-                pendingProposal = proposal
+                pendingProposal = proposal.replacements.isEmpty ? nil : proposal
                 for replacement in proposal.replacements {
                     if let target = targets.first(where: { $0.id == replacement.targetID }) {
                         proposalValidation[replacement.id] = LaTeXValidator.validate(
@@ -595,11 +683,75 @@ final class AppModel: ObservableObject {
                 messages.append(ChatMessage(role: .assistant, text: proposal.summary))
                 persistMessages()
             } catch {
+                if error is CancellationError {
+                    generationStatus = L10n.text("ai.cancelled")
+                    generating = false
+                    return
+                }
                 report(error)
                 messages.append(ChatMessage(role: .assistant, text: L10n.userMessage(for: error)))
+                persistMessages()
             }
             generating = false
+            generationStatus = ""
         }
+    }
+
+    func cancelAIResponse() {
+        activeAITask?.cancel()
+        activeAITask = nil
+        generating = false
+        generationStatus = L10n.text("ai.cancelled")
+    }
+
+    func newChatSession() {
+        guard let root = projectRoot else { return }
+        persistMessages()
+        let session = ChatSession(title: L10n.text("chat.new"), projectPath: root.path)
+        chatSessions.insert(session, at: 0)
+        selectedChatSessionID = session.id
+        messages = []
+        editTargets = []
+        pendingProposal = nil
+        persistMessages()
+    }
+
+    func selectChatSession(_ id: UUID) {
+        persistMessages()
+        guard let session = chatSessions.first(where: { $0.id == id }) else { return }
+        selectedChatSessionID = id
+        messages = session.messages
+        editTargets = []
+        pendingProposal = nil
+    }
+
+    func renameSelectedChatSession(_ title: String) {
+        guard let id = selectedChatSessionID,
+              let index = chatSessions.firstIndex(where: { $0.id == id }) else { return }
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        chatSessions[index].title = cleaned
+        chatSessions[index].updatedAt = Date()
+        persistMessages()
+    }
+
+    func editMessage(_ message: ChatMessage) {
+        guard message.role == .user,
+              let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
+        instruction = message.text
+        messages.removeSubrange(index...)
+        pendingProposal = nil
+        persistMessages()
+    }
+
+    func regenerateLastResponse() {
+        guard !generating,
+              let lastUserIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+        let prompt = messages[lastUserIndex].text
+        messages.removeSubrange(lastUserIndex..<messages.count)
+        persistMessages()
+        instruction = prompt
+        sendToAI()
     }
 
     func accept(_ replacement: ProposedReplacement) {
@@ -615,19 +767,26 @@ final class AppModel: ObservableObject {
                 currentText: current
             )
             try Data(updated.utf8).write(to: url, options: [.atomic])
+            let adjustedSelection = SourceTargetService.adjustedSelection(
+                selectedRange,
+                replacing: NSRange(location: target.utf16Location, length: target.utf16Length),
+                replacementUTF16Length: replacement.replacement.utf16.count
+            )
             history.insert(AIEditHistoryEntry(
                 projectPath: root.path,
                 relativePath: target.relativePath,
                 originalText: target.originalText,
                 replacementText: replacement.replacement,
                 instruction: messages.last(where: { $0.role == .user })?.text ?? "",
-                providerName: proposal.providerName
+                providerName: proposal.providerName,
+                sessionID: selectedChatSessionID
             ), at: 0)
             try historyStore?.save(history)
             if selectedFile?.relativePath == target.relativePath {
                 suppressTextChange = true
                 sourceText = updated
                 hasUnsavedChanges = false
+                selectedRange = adjustedSelection
                 outline = ProjectIndexer.outline(for: updated)
                 suppressTextChange = false
             }
@@ -831,7 +990,13 @@ final class AppModel: ObservableObject {
 
     func clearChatHistory() {
         messages = []
-        do { try chatStore?.remove() } catch { report(error) }
+        chatSessions = []
+        selectedChatSessionID = nil
+        do {
+            try chatStore?.remove()
+            try chatSessionsStore?.remove()
+        } catch { report(error) }
+        if projectRoot != nil { newChatSession() }
     }
 
     func clearAIHistory() {
@@ -966,6 +1131,9 @@ final class AppModel: ObservableObject {
     private func scheduleCompile() {
         compileDebounceTask?.cancel()
         guard configuration.build.autoBuild else { return }
+        // Manual-save mode must never compile source that still exists only in
+        // memory; otherwise the PDF silently represents a different document.
+        guard configuration.autoSave || !hasUnsavedChanges else { return }
         let delay = configuration.build.debounceSeconds
         compileDebounceTask = Task {
             try? await Task.sleep(for: .seconds(delay))
@@ -977,8 +1145,10 @@ final class AppModel: ObservableObject {
     private func buildContext(scope: ContextScope, targets: [SourceTarget]) throws -> [String: String] {
         guard let root = projectRoot else { return [:] }
         switch scope {
+        case .none:
+            return baseConversationContext()
         case .selection:
-            return [:]
+            return baseConversationContext()
         case .nearby:
             var result: [String: String] = [:]
             for target in targets {
@@ -986,7 +1156,7 @@ final class AppModel: ObservableObject {
                 let source = try String(contentsOf: url, encoding: .utf8)
                 result["nearby:\(target.relativePath):\(target.startLine)"] = ProjectIndexer.nearbyContext(source: source, target: target)
             }
-            return result
+            return baseConversationContext().merging(result) { _, new in new }
         case .section:
             var result: [String: String] = [:]
             for target in targets {
@@ -994,16 +1164,16 @@ final class AppModel: ObservableObject {
                 let source = try String(contentsOf: url, encoding: .utf8)
                 result["section:\(target.relativePath):\(target.startLine)"] = ProjectIndexer.sectionContext(source: source, containingLine: target.startLine)
             }
-            return result
+            return baseConversationContext().merging(result) { _, new in new }
         case .document:
             guard let selectedFile else { return [:] }
-            return ["document:\(selectedFile.relativePath)": sourceText]
+            return baseConversationContext().merging(["document:\(selectedFile.relativePath)": sourceText]) { _, new in new }
         case .project:
             var result: [String: String] = [:]
             for file in projectFiles where [.tex, .bibliography, .style].contains(file.kind) {
                 if let text = try? String(contentsOf: file.url, encoding: .utf8) { result[file.relativePath] = text }
             }
-            return result
+            return baseConversationContext().merging(result) { _, new in new }
         case .custom:
             var result: [String: String] = [:]
             for path in customContextPaths.sorted() {
@@ -1012,8 +1182,17 @@ final class AppModel: ObservableObject {
                     result["custom:\(path)"] = text
                 }
             }
-            return result
+            return baseConversationContext().merging(result) { _, new in new }
         }
+    }
+
+    private func baseConversationContext() -> [String: String] {
+        var result: [String: String] = [:]
+        let system = configuration.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !system.isEmpty { result["system-instructions"] = system }
+        let prior = messages.dropLast().suffix(12).map { "\($0.role.rawValue): \($0.text)" }.joined(separator: "\n\n")
+        if !prior.isEmpty { result["conversation-history"] = prior }
+        return result
     }
 
     private func makeSelectedProvider() throws -> any AIProvider {
@@ -1032,7 +1211,18 @@ final class AppModel: ObservableObject {
 
     private func persistMessages() {
         guard !configuration.privateChatMode else { return }
-        do { try chatStore?.save(messages) } catch { report(error) }
+        do {
+            if let id = selectedChatSessionID,
+               let index = chatSessions.firstIndex(where: { $0.id == id }) {
+                chatSessions[index].messages = messages
+                chatSessions[index].updatedAt = Date()
+                if chatSessions[index].title == L10n.text("chat.new"),
+                   let first = messages.first(where: { $0.role == .user }) {
+                    chatSessions[index].title = String(first.text.prefix(36))
+                }
+            }
+            try chatSessionsStore?.save(chatSessions)
+        } catch { report(error) }
     }
 
     private var selectedProviderProfile: ProviderProfile? {

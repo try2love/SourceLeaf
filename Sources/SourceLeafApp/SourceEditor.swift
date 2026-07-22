@@ -3,6 +3,20 @@ import QuartzCore
 import SwiftUI
 import SourceLeafCore
 
+enum SourceTextSynchronization {
+    static func shouldApplyExternalText(
+        incoming: String,
+        nativeText: String,
+        lastLocallyEmittedText: String?
+    ) -> Bool {
+        guard incoming != nativeText else { return false }
+        // SwiftUI may deliver an older binding value after NSTextView has
+        // already accepted another keystroke. Never let that echo replace the
+        // newer native buffer; a genuine external edit has no local marker.
+        return lastLocallyEmittedText != nativeText
+    }
+}
+
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
 
@@ -10,7 +24,7 @@ struct SourcePanel: View {
         VStack(spacing: 0) {
             HStack {
                 Text(model.selectedFile?.relativePath ?? L10n.text("source.noFile"))
-                    .font(.caption.monospaced())
+                    .sourceLeafFont(.caption, design: .monospaced)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if model.hasUnsavedChanges {
@@ -29,13 +43,17 @@ struct SourcePanel: View {
                 .buttonStyle(.borderless)
                 .disabled(!model.canSaveCurrentFile || !model.hasUnsavedChanges)
                 .help(L10n.text("action.save"))
-                if model.selectedRange.length > 0 {
+                if model.configuration.showSelectionButton {
                     Button {
                         model.attachCurrentSelection()
                     } label: {
                         Label(L10n.text("selection.askAI"), systemImage: "sparkles")
                     }
                     .buttonStyle(.borderless)
+                    .disabled(model.selectedRange.length == 0)
+                    .help(model.selectedRange.length == 0
+                        ? L10n.text("selection.selectFirst")
+                        : L10n.text("selection.askAI"))
                     .keyboardShortcut("k", modifiers: [.option, .command])
                 }
                 if model.syncTeXDocument != nil, model.selectedFile?.kind == .tex {
@@ -142,7 +160,7 @@ private struct LaTeXSourceToolbar: View {
                     Label(L10n.text("source.toolbar.insert"), systemImage: "plus")
                 }
             }
-            .font(.caption)
+            .font(.system(size: 11 * model.interfaceFontScale))
             .menuStyle(.borderlessButton)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
@@ -199,7 +217,7 @@ struct SourceTextView: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        textView.isIncrementalSearchingEnabled = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -241,31 +259,20 @@ struct SourceTextView: NSViewRepresentable {
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
 
-        let askButton = NSButton(title: L10n.text("selection.askAI"), target: context.coordinator, action: #selector(Coordinator.askAI))
-        askButton.bezelStyle = .rounded
-        askButton.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
-        askButton.imagePosition = .imageLeading
-        askButton.translatesAutoresizingMaskIntoConstraints = false
-        askButton.isHidden = true
-
         let glyphOverlay = SourceGlyphOverlayView(textView: textView, palette: palette)
         container.glyphOverlay = glyphOverlay
 
         container.addSubview(scrollView)
         container.addSubview(glyphOverlay, positioned: .above, relativeTo: scrollView)
-        container.addSubview(askButton)
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: container.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            askButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            askButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18)
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
 
         context.coordinator.textView = textView
         context.coordinator.ruler = ruler
-        context.coordinator.askButton = askButton
         context.coordinator.glyphOverlay = glyphOverlay
         context.coordinator.observeScrollView(scrollView)
         glyphOverlay.synchronizeFrame()
@@ -280,16 +287,31 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
         var requiresFullRefresh = false
-        if textView.string != text {
+        if textView.string == text {
+            context.coordinator.lastLocallyEmittedText = nil
+        } else if SourceTextSynchronization.shouldApplyExternalText(
+            incoming: text,
+            nativeText: textView.string,
+            lastLocallyEmittedText: context.coordinator.lastLocallyEmittedText
+        ) {
             let visible = textView.enclosingScrollView?.contentView.bounds
+            let selectedRange = textView.selectedRange()
             textView.string = text
+            context.coordinator.lastLocallyEmittedText = nil
             context.coordinator.applyHighlighting()
             if let visible { textView.enclosingScrollView?.contentView.scroll(to: visible.origin) }
+            let length = (text as NSString).length
+            let restored = NSRange(location: min(selectedRange.location, length), length: 0)
+            textView.setSelectedRange(restored)
             requiresFullRefresh = true
         }
-        if textView.selectedRange() != selection, NSMaxRange(selection) <= (textView.string as NSString).length {
+        if textView.selectedRange() == selection {
+            context.coordinator.lastLocallyEmittedSelection = nil
+        } else if context.coordinator.lastLocallyEmittedSelection != textView.selectedRange(),
+                  NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
+            context.coordinator.lastLocallyEmittedSelection = nil
         }
         context.coordinator.applyPendingCommand(commandRequest)
         if context.coordinator.appliedStyleSignature != nil,
@@ -305,8 +327,6 @@ struct SourceTextView: NSViewRepresentable {
             context.coordinator.layoutEditor()
             context.coordinator.invalidateVisibleEditor()
         }
-        context.coordinator.askButton?.title = L10n.text("selection.askAI")
-        context.coordinator.updateAskButton()
     }
 
     @MainActor
@@ -314,7 +334,6 @@ struct SourceTextView: NSViewRepresentable {
         var parent: SourceTextView
         var textView: NSTextView?
         weak var ruler: LineNumberRulerView?
-        weak var askButton: NSButton?
         weak var glyphOverlay: SourceGlyphOverlayView?
         private var highlighting = false
         private(set) var appliedStyleSignature: String?
@@ -322,6 +341,9 @@ struct SourceTextView: NSViewRepresentable {
         private var resettingHorizontalScroll = false
         private var completedWindowHighlight = false
         private var selectionSyncTimer: Timer?
+        private var highlightTimer: Timer?
+        var lastLocallyEmittedText: String?
+        var lastLocallyEmittedSelection: NSRange?
 
         var currentStyleSignature: String {
             let appearance = textView?.effectiveAppearance.name.rawValue ?? "none"
@@ -370,28 +392,38 @@ struct SourceTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !highlighting, let textView else { return }
+            lastLocallyEmittedText = textView.string
+            lastLocallyEmittedSelection = textView.selectedRange()
             parent.text = textView.string
-            applyHighlighting()
+            highlightTimer?.invalidate()
+            let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
+            highlightTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
         }
 
+        @objc private func applyDeferredHighlighting() {
+            applyHighlighting()
+        }
+
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard textView != nil else { return }
+            guard let textView else { return }
+            lastLocallyEmittedSelection = textView.selectedRange()
             // Keep AppKit's native interaction immediate, but coalesce the
             // higher-level SwiftUI binding while a pointer drag is in flight.
             selectionSyncTimer?.invalidate()
             let timer = Timer(timeInterval: 0.05, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
             selectionSyncTimer = timer
             RunLoop.main.add(timer, forMode: .common)
-            updateAskButton()
             glyphOverlay?.selectionDidChange()
         }
 
         @objc private func commitSelectionToBinding() {
             guard let textView else { return }
             let range = textView.selectedRange()
+            lastLocallyEmittedSelection = range
             if parent.selection != range { parent.selection = range }
         }
 
@@ -432,7 +464,6 @@ struct SourceTextView: NSViewRepresentable {
                 undoManager?.endUndoGrouping()
                 textView.scrollRangeToVisible(edit.resultingSelection)
                 self.parent.selection = edit.resultingSelection
-                self.updateAskButton()
                 self.glyphOverlay?.needsDisplay = true
                 self.parent.onCommandApplied(request.id)
             }
@@ -482,10 +513,6 @@ struct SourceTextView: NSViewRepresentable {
                     window.displayIfNeeded()
                 }
             }
-        }
-
-        func updateAskButton() {
-            askButton?.isHidden = !parent.showSelectionButton || (textView?.selectedRange().length ?? 0) == 0
         }
 
         func applyHighlighting() {
@@ -632,7 +659,7 @@ final class SourceGlyphOverlayView: NSView {
     func selectionDidChange() {
         restartCaretBlink()
         needsDisplay = true
-        displayIfNeeded()
+        lastPaintedSelection = textView?.selectedRange() ?? NSRange(location: NSNotFound, length: 0)
     }
 
     func restartCaretBlink() {
@@ -652,7 +679,6 @@ final class SourceGlyphOverlayView: NSView {
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
         let visible = scrollView.contentView.bounds
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
         let origin = NSPoint(
             x: textView.textContainerOrigin.x - visible.minX,
             y: textView.textContainerOrigin.y - visible.minY
@@ -663,24 +689,9 @@ final class SourceGlyphOverlayView: NSView {
         caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
         let selectedRange = textView.selectedRange()
         lastPaintedSelection = selectedRange
-        if selectedRange.length > 0 {
-            let selectedGlyphs = layoutManager.glyphRange(
-                forCharacterRange: selectedRange,
-                actualCharacterRange: nil
-            )
-            palette.selectionBackground.setFill()
-            layoutManager.enumerateEnclosingRects(
-                forGlyphRange: selectedGlyphs,
-                withinSelectedGlyphRange: selectedGlyphs,
-                in: textContainer
-            ) { [weak self] rect, _ in
-                guard let self else { return }
-                let translated = rect.offsetBy(dx: origin.x, dy: origin.y)
-                translated.fill()
-                self.lastSelectionRectCount += 1
-            }
-        }
-        layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: origin)
+        // Selection and find-result painting belong to NSTextView. Keeping the
+        // overlay out of the pointer-tracking path makes drag selection native
+        // and prevents it from covering the system find indicators.
         if selectedRange.length == 0,
            textView.window?.firstResponder === textView,
            let caret = caretRect(

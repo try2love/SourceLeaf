@@ -56,6 +56,26 @@
 - 16 项反馈均落到产品实现或自动回归，不修改用户的 `MutedRAG.tex` / `MutedRAG.pdf`；所有新增构建、测试和快照产物均保存在分类 `临时文件/阶段12` 或既有构建分类目录。
 - 安装版为 SourceLeaf 0.3.5（build 8），Universal `x86_64 arm64`，ad-hoc 签名有效，内置 Tectonic 0.16.9 双架构并正常启动。
 
+## 2026-07-22 第六轮真实使用反馈：成熟编辑器与会话系统
+- 共 23 项反馈，核心风险不是功能数量，而是编辑器状态一致性：输入 `test` 显示成 `tset`、增删行后光标回到旧绝对位置、接受 AI 修改后滚到顶部，说明 AppKit 文本状态与 SwiftUI 模型之间存在互相覆盖。
+- 用户希望“询问 AI”固定在源码栏，不再作为选区附近/角落浮动框；无有效选区时禁用，并显示“请先选中目标文本”。
+- 三张截图显示：待审 Diff 卡片底部“继续调整”右侧出现两个同内容下拉；接受后卡片整体消失；历史页只剩文件、指令、Provider、相对时间和“审阅恢复”，没有原文/修改后对比，也没有明确反馈说明按钮效果。
+- 对话需要成为独立产品对象：普通聊天（无编辑目标）、只读附件上下文、系统提示词、多个可命名会话、时间戳、消息复制/编辑/重答、可选中正文、停止生成、Enter/Shift+Enter 偏好，以及可见的思考/进度反馈。
+- 预览和导航要求进一步明确：图片应居中且可拖拽平移；项目内 PDF 必须走多页 PDF 预览而非图片路由；文件夹整行点击可展开；分隔条命中区应达到项目树/编辑区分隔条的可用宽度。
+- 保存语义要求：自动保存与手动保存由用户选择；手动保存且存在未保存内容时不得自动编译，退出前必须给出保存/不保存/取消。
+
+## 阶段 13 截图证据
+- 图 1 的 Diff 卡片存在两个连续向下箭头控件，视觉和内容重复；静态检查通过、拒绝、继续调整和接受控件挤在同一底栏。
+- 图 2 在接受后完全移除 Diff，仅保留聊天气泡，用户无法回看本次修改前后内容。
+- 图 3 的历史页为空白式列表，只展示一行元数据；“审阅恢复”没有可见 Diff 或状态变化，无法形成可理解的恢复工作流。
+
+## 阶段 13 初始诊断假设
+1. `SourceTextView.updateNSView` 在高频 SwiftUI 更新中把滞后的 binding 文本写回 AppKit，导致乱序输入、光标绝对位置不变和滚动复位。
+2. 自绘 `SourceGlyphOverlayView` 与浮动询问按钮在 event-tracking loop 中同步绘制/布局，拖慢鼠标拖选；常驻工具栏按钮可移除该耦合。
+3. `dynamicTypeSize` 未覆盖 macOS 显式字体和 AppKit 控件，界面缩放设置虽持久化却没有可见效果。
+4. 图片 `documentView` 与原图同尺寸且以原点布局，缺少居中 clip/document 容器；PDF Control+滚轮到达内部 `NSScrollView` 而非外层 `PDFView`。
+5. `pendingProposal` 是瞬时状态且接受后清空，历史只保存文本字段/元数据；缺少持久 Diff 快照和会话领域模型导致普通聊天、上下文附件、接受后审阅与恢复语义混乱。
+
 ## 研究发现
 - 本机 Texifier 1.9.33 只暴露基础文档 AppleScript 能力，没有可嵌入侧栏的公开插件接口。
 - Codex CLI 与扩展共享 `~/.codex` 状态；`codex exec` 是稳定的非交互接口，`codex app-server` 目前仍标为实验性。
@@ -328,3 +348,35 @@
 - CodeBuddy Provider 采用官方 headless JSON 路径，从 stdin 接收 prompt，解析 `result` / `structured_output`，可通过 `--settings` 选模型；运行时处于不含论文源文件的工作区，显式 `--disallowedTools` 禁止文件、shell 和网络工具，且回归断言不出现危险跳过权限参数。
 - 对话 UI 现为单行横向工具栏：快捷 Prompt、真实连接状态、Provider、模型、思考深度和上下文；输入框上方拖动把手可在 64–360pt 之间调整，高度由 AppStorage 保留。
 - 长 Prompt 设置页改为英文/中文 segmented 切换后共用一个可占满右侧的大编辑区；内置审稿 Prompt 已拆分为独立中英文正文，英文无中文字符回归已通过。
+## 2026-07-22：第十三阶段代码定位补充
+
+- `SourceEditor.swift` 的 `SourceTextView` 同时通过 `textDidChange` 向 `AppModel.sourceChanged` 写入内容，又会在 `updateNSView` 中依据绑定值重写 `NSTextView.string`。这条双向同步路径与用户报告的 `test -> tset`、插删行后光标错位、接受修改后滚动回顶部高度吻合，必须先用真实 AppKit 输入序列复现，再改同步所有权。
+- “询问 AI”当前不是固定工具栏控件，而是编辑器内部动态创建、隐藏和移动的 `NSButton`；它与选择监听、覆盖层重绘处于同一个交互路径，符合拖选反馈被阻塞的假设。
+- `AppModel` 当前只有扁平的 `messages`、单个瞬态 `pendingProposal` 和元数据型 `AIEditHistoryEntry`；接受后清空 proposal，因此对比卡消失，而历史页无法重建 Git 风格差异。
+- 自定义上下文由 `editTargets` 与 `buildContext` 共同组装，附件与“可替换目标”耦合，可能把普通 `.tex` 上下文误判为无效修改选区。
+- 自动保存与自动编译分别由 `scheduleSave`、`scheduleCompile` 调度，需要显式增加“手动保存且文件有未保存修改时禁止编译”的状态约束，并在退出时接入保存/不保存/取消流程。
+- PDF 已有自定义滚轮处理，但事件很可能由 `PDFView` 内部滚动视图先消费；图片预览以原图尺寸作为 document view，缺少比视口更大的居中画布，因此缩小后固定在角落。
+
+### 已确认的实现缺口
+
+- 编辑器 `textDidChange` 每次键入都立即把全文写回 SwiftUI binding，并立即全文重新语法着色；`updateNSView` 若收到稍旧的 binding 又会执行 `textView.string = text`。这是高频输入乱序与光标跳动的直接竞态，不只是渲染性能问题。
+- 选区变化仍调用覆盖层的 `displayIfNeeded()` 同步绘制；即使 binding 已做 50ms 合并，这个同步显示仍在鼠标追踪循环中执行，会制造拖选卡顿。原生 `NSTextView` 本身已经能够即时绘制选区，无需自绘选区。
+- `Cmd+F` 未注册；当前查找替换快捷键是 `Option+Cmd+F`。编辑器启用了系统 find bar，但自绘 glyph/selection 覆盖层重新绘制全部字形，容易遮盖系统查找高亮并改变背景观感。
+- 工程树使用 `OutlineGroup` 的默认 disclosure，而文件夹行只是静态 `Label`；SwiftUI 默认只能由 disclosure 三角切换，行点击没有折叠语义。
+- `ProjectFileKind` 没有 PDF 专属路由，非文本文件落入图片预览路径；因此项目 PDF 被当成单张图加载。
+- 全局字号仅用 `.dynamicTypeSize(...)` 映射到少数离散级别；大量 `.font(.system(size: ...))`、`.caption` 和 AppKit 字体不会按设置连续缩放，当前持久化测试只验证了数值，没有验证实际像素变化。
+- 对话消息已有 `createdAt`，但 UI 不显示；`ChatSession` 模型已经存在却完全未接入 `AppModel`。因此会话管理可沿用现有核心模型，不需要重新发明数据结构。
+- proposal 卡右侧所谓“重复下拉”由“继续调整”按钮紧接一个仅含强制接受的无标题 `Menu` 造成；接受按钮又紧邻该 Menu，视觉上形成两个下拉/动作区域。
+
+### 已证实的关键根因
+
+- 真实 `keyDown` 回归在旧同步逻辑下稳定产生 `test -> tset`，并把光标保持在 `{0,0}`。根因不是字符处理，而是：文本 binding 每次更新都会触发 `updateNSView`，而选区 binding 仍停留在合并提交前的 `{0,0}`，于是外层状态把 AppKit 已向前移动的插入点反复拉回 0。文本和选区必须分别记录“最近由原生编辑器发出”的值，并拒绝其滞后回声。
+- 修复后相同真实 `keyDown` 序列得到 `test`、SwiftUI 状态也是 `test`、插入点为 `{4,0}`；说明用户报告的最严重编辑不可用问题已被正确复现并在同一测试缝隙关闭。
+
+### 阶段 13 发布结论
+
+- 界面字号问题的真正修复不是继续调整 `dynamicTypeSize` 档位，而是让 48 处语义字体统一读取连续的 `sourceLeafInterfaceScale` 环境值；实际几何测试证明大小发生变化。
+- 普通聊天必须与结构化源码修改分协议：无可写目标时返回纯文本；只有显式目标存在时才要求带 `target_id` 的 JSON proposal。这消除了“自定义只读 tex 上下文被判为无效选区”。
+- 停止回答依赖 Swift Task 取消；Local Codex/CodeBuddy 的 `ProcessRunner` 已有取消处理，HTTP provider 使用的 URLSession async 请求也随任务取消。界面只展示真实可观测阶段（准备上下文、等待 Provider），不伪造模型隐藏思考链。
+- 已接受修改以带 `sessionID` 的 `AIEditHistoryEntry` 持久化；对话中显示无操作按钮的已接受 Diff，历史页显示完整双栏 Diff，恢复按钮只生成反向 proposal，接受前不写盘。
+- 安装验证结果：SourceLeaf 0.3.6 build 9，Universal `x86_64 arm64`，签名有效，双架构 Tectonic 存在，PID 70684。

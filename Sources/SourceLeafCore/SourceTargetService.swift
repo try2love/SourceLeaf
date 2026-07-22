@@ -161,6 +161,19 @@ public enum SourceTargetService {
         return (currentText as NSString).replacingCharacters(in: range, with: proposal.replacement)
     }
 
+    public static func adjustedSelection(
+        _ selection: NSRange,
+        replacing range: NSRange,
+        replacementUTF16Length: Int
+    ) -> NSRange {
+        let delta = replacementUTF16Length - range.length
+        if selection.location >= NSMaxRange(range) {
+            return NSRange(location: max(0, selection.location + delta), length: selection.length)
+        }
+        if NSMaxRange(selection) <= range.location { return selection }
+        return NSRange(location: range.location + replacementUTF16Length, length: 0)
+    }
+
     private static func capturedString(
         _ name: String,
         match: NSTextCheckingResult,

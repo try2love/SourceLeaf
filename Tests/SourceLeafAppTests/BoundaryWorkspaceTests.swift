@@ -71,6 +71,9 @@ import Testing
     #expect(preview.minMagnification == 0.1)
     #expect(preview.maxMagnification == 8)
     #expect(ZoomableImageScrollView.zoomedScale(from: 1, scrollingDeltaY: 1) > 1)
+    preview.setZoomScale(0.1)
+    preview.layoutSubtreeIfNeeded()
+    #expect(preview.contentInsets.left > 0 || preview.contentInsets.top > 0)
 }
 
 @MainActor

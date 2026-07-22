@@ -7,6 +7,22 @@ import Testing
 @testable import SourceLeafApp
 
 @MainActor
+@Test func interfaceFontScaleChangesActualSemanticTextGeometry() {
+    let small = NSHostingView(rootView:
+        Text("SourceLeaf interface")
+            .sourceLeafFont(.body)
+            .environment(\.sourceLeafInterfaceScale, 0.85)
+    )
+    let large = NSHostingView(rootView:
+        Text("SourceLeaf interface")
+            .sourceLeafFont(.body)
+            .environment(\.sourceLeafInterfaceScale, 1.60)
+    )
+    #expect(large.fittingSize.width > small.fittingSize.width * 1.5)
+    #expect(large.fittingSize.height > small.fittingSize.height * 1.4)
+}
+
+@MainActor
 @Test func applicationModelCanBeIsolatedForVisualTests() throws {
     let support = FileManager.default.temporaryDirectory
         .appendingPathComponent("SourceLeaf-visual-state-\(UUID().uuidString)", isDirectory: true)
@@ -96,6 +112,27 @@ import Testing
     #expect(NavigablePDFView.zoomedScale(from: 1, scrollingDeltaY: -1) < 1)
     #expect(NavigablePDFView.zoomedScale(from: 7.9, scrollingDeltaY: 100) == 8)
     #expect(NavigablePDFView.zoomedScale(from: 0.11, scrollingDeltaY: -100) == 0.1)
+}
+
+@MainActor
+@Test func pdfContainerRoutesControlWheelBeforeItsInternalScrollViewConsumesIt() throws {
+    let pdfView = NavigablePDFView()
+    pdfView.minScaleFactor = 0.1
+    pdfView.maxScaleFactor = 8
+    pdfView.scaleFactor = 1
+    let container = PDFPreviewContainerView(pdfView: pdfView, showsThumbnails: false)
+    let cgEvent = try #require(CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 1,
+        wheel1: 1,
+        wheel2: 0,
+        wheel3: 0
+    ))
+    cgEvent.flags = .maskControl
+    let event = try #require(NSEvent(cgEvent: cgEvent))
+    #expect(container.handleControlScroll(event))
+    #expect(pdfView.scaleFactor > 1)
 }
 
 @MainActor

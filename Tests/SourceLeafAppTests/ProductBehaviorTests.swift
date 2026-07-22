@@ -102,6 +102,68 @@ import Testing
 }
 
 @MainActor
+@Test func manualSaveModeBlocksAutomaticCompilationUntilSourceIsSaved() throws {
+    let state = try productTestState(named: "manual-save-auto-build")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}\nChanged\n".utf8).write(to: project.appendingPathComponent("main.tex"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    model.setAutoSave(false)
+    model.configuration.build.autoBuild = true
+    model.sourceChanged(model.sourceText + "more")
+
+    #expect(model.hasUnsavedChanges)
+    #expect(!model.canAutoCompileCurrentSource)
+    model.saveNow()
+    #expect(model.canAutoCompileCurrentSource)
+}
+
+@MainActor
+@Test func conversationsCanBeCreatedRenamedSelectedAndRestored() throws {
+    let state = try productTestState(named: "chat-sessions")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}".utf8).write(to: project.appendingPathComponent("main.tex"))
+    let first = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    first.openProject(project)
+    let originalID = try #require(first.selectedChatSessionID)
+    first.newChatSession()
+    let newID = try #require(first.selectedChatSessionID)
+    #expect(newID != originalID)
+    first.renameSelectedChatSession("Methods discussion")
+    first.selectChatSession(originalID)
+    first.selectChatSession(newID)
+
+    let restored = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    restored.openProject(project)
+    #expect(restored.chatSessions.contains { $0.title == "Methods discussion" })
+    #expect(restored.chatSessions.count == 2)
+}
+
+@MainActor
+@Test func openingAProjectPDFUsesTheMultipagePDFPanel() throws {
+    let state = try productTestState(named: "project-pdf")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}".utf8).write(to: project.appendingPathComponent("main.tex"))
+    let pdfURL = project.appendingPathComponent("paper.pdf")
+    try Data("%PDF-1.4".utf8).write(to: pdfURL)
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    let pdf = try #require(model.projectFiles.first { $0.kind == .pdf })
+    model.openFile(pdf)
+    #expect(model.pdfURL?.standardizedFileURL == pdfURL.standardizedFileURL)
+    #expect(model.layout.contains(.pdf))
+}
+
+@MainActor
 @Test func documentOutlineExpansionPersistsAcrossApplicationModels() throws {
     let state = try productTestState(named: "outline-expansion")
     defer { state.cleanup() }
