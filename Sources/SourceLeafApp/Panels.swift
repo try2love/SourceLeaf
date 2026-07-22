@@ -18,38 +18,66 @@ struct ProjectPanel: View {
             TextField(L10n.text("project.filter"), text: $query)
                 .textFieldStyle(.roundedBorder)
                 .padding(8)
-            if query.isEmpty {
-                List {
-                    OutlineGroup(model.projectTree, children: \.children) { node in
-                        ProjectTreeRow(node: node)
-                    }
-                }
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .controlBackgroundColor))
-            } else {
-                List(filteredFiles) { file in
-                    Button { model.openFile(file) } label: {
-                        Label(file.relativePath, systemImage: file.symbolName)
-                            .font(file.kind == .tex ? .caption.monospaced() : .caption)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .controlBackgroundColor))
-            }
             if !model.outline.isEmpty {
-                Divider()
+                VSplitView {
+                    fileBrowser
+                        .frame(minHeight: 100)
+                    outlinePane
+                }
+            } else {
+                fileBrowser
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var fileBrowser: some View {
+        if query.isEmpty {
+            List {
+                OutlineGroup(model.projectTree, children: \.children) { node in
+                    ProjectTreeRow(node: node)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .controlBackgroundColor))
+        } else {
+            List(filteredFiles) { file in
+                Button { model.openFile(file) } label: {
+                    Label(file.relativePath, systemImage: file.symbolName)
+                        .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                }
+                .buttonStyle(.plain)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .controlBackgroundColor))
+        }
+    }
+
+    private var outlinePane: some View {
+        VStack(spacing: 0) {
+            Button {
+                model.toggleProjectOutline()
+            } label: {
                 HStack(spacing: 6) {
+                    Image(systemName: model.projectOutlineExpanded ? "chevron.down" : "chevron.right")
                     Image(systemName: "list.bullet.indent")
                     Text(L10n.text("project.outline"))
                     Spacer()
                     Text("\(model.outline.count)")
                         .foregroundStyle(.tertiary)
                 }
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(.bar)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(.bar)
+            .help(model.projectOutlineExpanded
+                ? L10n.text("project.outlineCollapse")
+                : L10n.text("project.outlineExpand"))
+
+            if model.projectOutlineExpanded {
                 List(model.outline) { item in
                     Button { model.jumpToOutline(item) } label: {
                         HStack(spacing: 5) {
@@ -75,9 +103,13 @@ struct ProjectPanel: View {
                 }
                 .scrollContentBackground(.hidden)
                 .background(Color(nsColor: .controlBackgroundColor))
-                .frame(minHeight: 100, idealHeight: 190, maxHeight: 230)
             }
         }
+        .frame(
+            minHeight: model.projectOutlineExpanded ? 80 : 28,
+            idealHeight: model.projectOutlineExpanded ? 190 : 28,
+            maxHeight: model.projectOutlineExpanded ? .infinity : 28
+        )
     }
 }
 

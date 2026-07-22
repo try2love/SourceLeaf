@@ -18,7 +18,9 @@ final class AppModel: ObservableObject {
     @Published var selectedFile: ProjectFile?
     @Published var selectedImageFile: ProjectFile?
     @Published var sourceText = ""
+    @Published private(set) var hasUnsavedChanges = false
     @Published var selectedRange = NSRange(location: 0, length: 0)
+    @Published var pendingLaTeXEdit: LaTeXEditRequest?
     @Published var outline: [DocumentOutlineItem] = []
     @Published var configuration = ProjectConfiguration()
     @Published var layout = DockLayout()
@@ -49,6 +51,7 @@ final class AppModel: ObservableObject {
     @Published var selectedPromptID: String?
     @Published var statusText = ""
     @Published var appLanguage: AppLanguage
+    @Published var projectOutlineExpanded: Bool
     @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
 
     var selectedProviderModel: String {
@@ -62,6 +65,11 @@ final class AppModel: ObservableObject {
     }
 
     var selectedProviderKind: ProviderKind? { selectedProviderProfile?.kind }
+
+    var canSaveCurrentFile: Bool {
+        guard let selectedFile else { return false }
+        return [.tex, .bibliography, .style].contains(selectedFile.kind)
+    }
 
     private let compiler = CompilerService()
     private let keychain = KeychainStore()
@@ -79,6 +87,7 @@ final class AppModel: ObservableObject {
     private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
     private static let selectedProviderIDKey = "SourceLeaf.selectedProviderID"
+    private static let projectOutlineExpandedKey = "SourceLeaf.projectOutlineExpanded"
 
     init(
         restoreLastProject: Bool = true,
@@ -87,6 +96,9 @@ final class AppModel: ObservableObject {
     ) {
         supportDirectoryOverride = supportDirectory
         self.defaults = defaults
+        projectOutlineExpanded = defaults.object(forKey: Self.projectOutlineExpandedKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.projectOutlineExpandedKey)
         appLanguage = defaults.string(forKey: L10n.languageDefaultsKey)
             .flatMap(AppLanguage.init(rawValue:)) ?? L10n.selectedLanguage
         do {
@@ -126,6 +138,11 @@ final class AppModel: ObservableObject {
         else { defaults.removeObject(forKey: Self.selectedProviderIDKey) }
     }
 
+    func toggleProjectOutline() {
+        projectOutlineExpanded.toggle()
+        defaults.set(projectOutlineExpanded, forKey: Self.projectOutlineExpandedKey)
+    }
+
     func presentOpenProjectPanel() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -142,6 +159,7 @@ final class AppModel: ObservableObject {
             selectedFile = nil
             selectedImageFile = nil
             sourceText = ""
+            hasUnsavedChanges = false
             selectedRange = NSRange(location: 0, length: 0)
             outline = []
             pdfURL = nil
@@ -202,6 +220,7 @@ final class AppModel: ObservableObject {
             suppressTextChange = true
             selectedFile = file
             sourceText = text
+            hasUnsavedChanges = false
             selectedRange = NSRange(location: 0, length: 0)
             refreshActiveFileOutline()
             suppressTextChange = false
@@ -231,6 +250,7 @@ final class AppModel: ObservableObject {
     func sourceChanged(_ text: String) {
         guard !suppressTextChange else { return }
         sourceText = text
+        hasUnsavedChanges = canSaveCurrentFile
         refreshActiveFileOutline()
         scheduleSave()
         scheduleCompile()
@@ -239,8 +259,10 @@ final class AppModel: ObservableObject {
     func saveCurrentFileIfNeeded() throws {
         guard let selectedFile, [.tex, .bibliography, .style].contains(selectedFile.kind) else { return }
         let currentDisk = (try? String(contentsOf: selectedFile.url, encoding: .utf8)) ?? ""
-        guard currentDisk != sourceText else { return }
-        try Data(sourceText.utf8).write(to: selectedFile.url, options: [.atomic])
+        if currentDisk != sourceText {
+            try Data(sourceText.utf8).write(to: selectedFile.url, options: [.atomic])
+        }
+        hasUnsavedChanges = false
     }
 
     func saveNow() {
@@ -248,6 +270,16 @@ final class AppModel: ObservableObject {
             try saveCurrentFileIfNeeded()
             statusText = L10n.text("status.saved")
         } catch { report(error) }
+    }
+
+    func performLaTeXEdit(_ command: LaTeXEditCommand) {
+        guard selectedFile?.kind == .tex else { return }
+        pendingLaTeXEdit = LaTeXEditRequest(command: command)
+    }
+
+    func acknowledgeLaTeXEdit(_ id: UUID) {
+        guard pendingLaTeXEdit?.id == id else { return }
+        pendingLaTeXEdit = nil
     }
 
     func togglePanel(_ panel: WorkspacePanel) {
@@ -485,6 +517,7 @@ final class AppModel: ObservableObject {
             if selectedFile?.relativePath == target.relativePath {
                 suppressTextChange = true
                 sourceText = updated
+                hasUnsavedChanges = false
                 outline = ProjectIndexer.outline(for: updated)
                 suppressTextChange = false
             }

@@ -77,6 +77,45 @@ import Testing
     #expect(restored.selectedReasoningEffort == .high)
 }
 
+@MainActor
+@Test func explicitSaveWritesTheCurrentSourceAndClearsDirtyState() throws {
+    let state = try productTestState(named: "manual-save")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    let sourceURL = project.appendingPathComponent("main.tex")
+    let original = "\\documentclass{article}\n\\begin{document}\nOriginal\n\\end{document}\n"
+    try Data(original.utf8).write(to: sourceURL, options: .atomic)
+
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    let edited = original.replacingOccurrences(of: "Original", with: "Saved explicitly")
+    model.sourceChanged(edited)
+
+    #expect(model.canSaveCurrentFile)
+    #expect(model.hasUnsavedChanges)
+    model.saveNow()
+    let saved = try String(contentsOf: sourceURL, encoding: .utf8)
+    #expect(!model.hasUnsavedChanges)
+    #expect(saved == edited)
+}
+
+@MainActor
+@Test func documentOutlineExpansionPersistsAcrossApplicationModels() throws {
+    let state = try productTestState(named: "outline-expansion")
+    defer { state.cleanup() }
+    let first = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    #expect(first.projectOutlineExpanded)
+    first.toggleProjectOutline()
+    #expect(!first.projectOutlineExpanded)
+
+    let restored = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    #expect(!restored.projectOutlineExpanded)
+    restored.toggleProjectOutline()
+    #expect(restored.projectOutlineExpanded)
+}
+
 private struct ProductTestState {
     var support: URL
     var defaults: UserDefaults

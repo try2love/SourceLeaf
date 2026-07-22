@@ -52,7 +52,7 @@ import Testing
     hostingView.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
 
-    let textView = try #require(findTextView(in: hostingView))
+    let textView = try #require(findSourceTextView(in: hostingView))
     let usedRect = try #require(textView.layoutManager).usedRect(
         for: try #require(textView.textContainer)
     )
@@ -106,7 +106,7 @@ import Testing
     hostingView.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
 
-    let textView = try #require(findTextView(in: hostingView))
+    let textView = try #require(findSourceTextView(in: hostingView))
     let scrollView = try #require(textView.enclosingScrollView)
     let ruler = try #require(scrollView.verticalRulerView as? LineNumberRulerView)
     textView.scrollRangeToVisible(NSRange(location: (source as NSString).length - 1, length: 0))
@@ -230,7 +230,7 @@ import Testing
     hostingView.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.25))
 
-    let textView = try #require(findTextView(in: hostingView))
+    let textView = try #require(findSourceTextView(in: hostingView))
     let visibleRect = textView.visibleRect
     let representation = try #require(textView.bitmapImageRepForCachingDisplay(in: visibleRect))
     textView.cacheDisplay(in: visibleRect, to: representation)
@@ -247,7 +247,6 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.dock-editor.\(UUID().uuidString)"))
     let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
     model.openProject(URL(fileURLWithPath: projectPath, isDirectory: true))
-
     let hostingView = NSHostingView(
         rootView: WorkspaceView()
             .environmentObject(model)
@@ -269,7 +268,7 @@ import Testing
     window.layoutIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.3))
 
-    let textView = try #require(findTextView(in: hostingView))
+    let textView = try #require(findSourceTextView(in: hostingView))
     let layoutManager = try #require(textView.layoutManager)
     let textContainer = try #require(textView.textContainer)
     layoutManager.ensureLayout(for: textContainer)
@@ -289,6 +288,133 @@ import Testing
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         try data.write(to: output.appendingPathComponent("源码编辑器-Dock宿主.png"), options: .atomic)
     }
+}
+
+@MainActor
+@Test func keyWindowCompositorActuallyContainsSourceGlyphs() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-key-window-editor-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.key-window-editor.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    model.openProject(URL(fileURLWithPath: projectPath, isDirectory: true))
+    let hostingView = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.orderOut(nil)
+        window.contentView = nil
+        window.close()
+    }
+    window.center()
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.4))
+
+    let textView = try #require(findSourceTextView(in: hostingView))
+    window.makeFirstResponder(textView)
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    let populated = try #require(captureWindow(window))
+    let original = textView.string
+    let blankSource = original.map { $0 == "\n" ? "\n" : " " }.reduce(into: "") { $0.append($1) }
+    textView.insertText(
+        blankSource,
+        replacementRange: NSRange(location: 0, length: (original as NSString).length)
+    )
+    textView.layoutManager?.ensureLayout(for: try #require(textView.textContainer))
+    textView.needsDisplay = true
+    if let overlay = findGlyphOverlay(in: hostingView) {
+        overlay.needsDisplay = true
+        overlay.displayIfNeeded()
+    }
+    hostingView.needsDisplay = true
+    hostingView.displayIfNeeded()
+    window.displayIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+    let blank = try #require(captureWindow(window))
+
+    let editorInWindow = textView.convert(textView.visibleRect, to: nil)
+    let scaleX = CGFloat(populated.pixelsWide) / window.frame.width
+    let scaleY = CGFloat(populated.pixelsHigh) / window.frame.height
+    let sourcePixels = NSRect(
+        x: (editorInWindow.minX + 60) * scaleX,
+        y: (editorInWindow.minY + 8) * scaleY,
+        width: max(1, (editorInWindow.width - 80) * scaleX),
+        height: max(1, (editorInWindow.height - 16) * scaleY)
+    )
+    let changedPixels = sampledPixelDifference(populated, blank, in: sourcePixels)
+    #expect(changedPixels > 300)
+
+    if let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_SNAPSHOT_OUTPUT"] {
+        let output = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        if let data = populated.representation(using: .png, properties: [:]) {
+            try data.write(to: output.appendingPathComponent("源码编辑器-真实窗口合成.png"), options: .atomic)
+        }
+        if let data = blank.representation(using: .png, properties: [:]) {
+            try data.write(to: output.appendingPathComponent("源码编辑器-真实窗口空格对照.png"), options: .atomic)
+        }
+    }
+}
+
+@MainActor
+@Test func latexToolbarCommandUsesNativeTextEditingAndUndo() async throws {
+    let state = SourceEditorHarnessState()
+    state.commandRequest = LaTeXEditRequest(command: .bold)
+    let hostingView = NSHostingView(rootView: SourceEditorHarnessView(state: state))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    hostingView.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+    let textView = try #require(findSourceTextView(in: hostingView))
+    window.makeFirstResponder(textView)
+    #expect(textView.window === window)
+    try await Task.sleep(for: .milliseconds(600))
+
+    #expect(state.text == "\\textbf{alpha}")
+    #expect(state.selection == NSRange(location: 8, length: 5))
+    #expect(textView.undoManager?.canUndo == true)
+
+    textView.undoManager?.undo()
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(state.text == "alpha")
+}
+
+@MainActor
+@Test func projectTreeAndOutlineUseAResizableVerticalSplit() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-project-split-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.project-split.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    model.openProject(URL(fileURLWithPath: projectPath, isDirectory: true))
+
+    let hostingView = NSHostingView(rootView: ProjectPanel().environmentObject(model))
+    hostingView.frame = NSRect(x: 0, y: 0, width: 360, height: 760)
+    hostingView.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+
+    let splitViews = findSplitViews(in: hostingView)
+    #expect(splitViews.contains { !$0.isVertical && $0.subviews.count >= 2 })
+    model.toggleProjectOutline()
+    #expect(!model.projectOutlineExpanded)
 }
 
 @MainActor
@@ -328,7 +454,7 @@ import Testing
         window.layoutIfNeeded()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.12))
 
-        let textView = try #require(findTextView(in: hostingView))
+        let textView = try #require(findSourceTextView(in: hostingView))
         #expect(textView.string == model.sourceText)
         #expect(textView.string == expectedSource)
         #expect(textView.visibleRect.width > 200)
@@ -443,12 +569,68 @@ private func findTextView(in view: NSView) -> NSTextView? {
 }
 
 @MainActor
+private func findSourceTextView(in view: NSView) -> NSTextView? {
+    if let textView = view as? NSTextView,
+       textView.enclosingScrollView?.verticalRulerView is LineNumberRulerView {
+        return textView
+    }
+    for child in view.subviews {
+        if let result = findSourceTextView(in: child) { return result }
+    }
+    return nil
+}
+
+@MainActor
+private func findGlyphOverlay(in view: NSView) -> SourceGlyphOverlayView? {
+    if let overlay = view as? SourceGlyphOverlayView { return overlay }
+    for child in view.subviews {
+        if let result = findGlyphOverlay(in: child) { return result }
+    }
+    return nil
+}
+
+@MainActor
+private final class SourceEditorHarnessState: ObservableObject {
+    @Published var text = "alpha"
+    @Published var selection = NSRange(location: 0, length: 5)
+    @Published var commandRequest: LaTeXEditRequest?
+}
+
+@MainActor
+private struct SourceEditorHarnessView: View {
+    @ObservedObject var state: SourceEditorHarnessState
+
+    var body: some View {
+        SourceTextView(
+            text: $state.text,
+            selection: $state.selection,
+            commandRequest: state.commandRequest,
+            showSelectionButton: false,
+            onAskAI: {},
+            onCommandApplied: { id in
+                if state.commandRequest?.id == id { state.commandRequest = nil }
+            }
+        )
+        .frame(width: 640, height: 420)
+    }
+}
+
+@MainActor
 private func findPDFView(in view: NSView) -> PDFView? {
     if let pdfView = view as? PDFView { return pdfView }
     for child in view.subviews {
         if let result = findPDFView(in: child) { return result }
     }
     return nil
+}
+
+@MainActor
+private func findSplitViews(in view: NSView) -> [NSSplitView] {
+    var result = view is NSSplitView ? [view as! NSSplitView] : []
+    for child in view.subviews {
+        result.append(contentsOf: findSplitViews(in: child))
+    }
+    return result
 }
 
 private func visibleInkPixelCount(in bitmap: NSBitmapImageRep) -> Int {
@@ -467,4 +649,37 @@ private func visibleInkPixelCount(in bitmap: NSBitmapImageRep) -> Int {
         }
     }
     return count
+}
+
+@MainActor
+private func captureWindow(_ window: NSWindow) -> NSBitmapImageRep? {
+    guard let image = CGWindowListCreateImage(
+        .null,
+        .optionIncludingWindow,
+        CGWindowID(window.windowNumber),
+        [.boundsIgnoreFraming, .bestResolution]
+    ) else { return nil }
+    return NSBitmapImageRep(cgImage: image)
+}
+
+private func sampledPixelDifference(
+    _ lhs: NSBitmapImageRep,
+    _ rhs: NSBitmapImageRep,
+    in rect: NSRect? = nil
+) -> Int {
+    guard lhs.pixelsWide == rhs.pixelsWide, lhs.pixelsHigh == rhs.pixelsHigh else { return 0 }
+    let bounds = NSRect(x: 0, y: 0, width: lhs.pixelsWide, height: lhs.pixelsHigh)
+    let sampleRect = (rect ?? bounds).intersection(bounds).integral
+    var changed = 0
+    for y in stride(from: max(2, Int(sampleRect.minY)), to: min(lhs.pixelsHigh - 2, Int(sampleRect.maxY)), by: 2) {
+        for x in stride(from: max(2, Int(sampleRect.minX)), to: min(lhs.pixelsWide - 2, Int(sampleRect.maxX)), by: 2) {
+            guard let left = lhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                  let right = rhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+            let delta = abs(left.redComponent - right.redComponent)
+                + abs(left.greenComponent - right.greenComponent)
+                + abs(left.blueComponent - right.blueComponent)
+            if delta > 0.12 { changed += 1 }
+        }
+    }
+    return changed
 }

@@ -45,6 +45,14 @@ struct WorkspaceView: View {
             }
         }
         ToolbarItemGroup {
+            Button {
+                model.saveNow()
+            } label: {
+                Label(L10n.text("action.save"), systemImage: "square.and.arrow.down")
+            }
+            .disabled(!model.canSaveCurrentFile || !model.hasUnsavedChanges)
+            .help(L10n.text("action.save"))
+
             Toggle(isOn: Binding(
                 get: { model.configuration.build.autoBuild },
                 set: {

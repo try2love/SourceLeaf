@@ -4,7 +4,7 @@
 交付一个可安装、可持续开发的 macOS 14+ 原生应用：支持 LaTeX 项目编辑与 PDF 编译预览、可重排/可浮动面板、本机 Codex 与多 Provider 对话、选区受控修改、Diff 审批和持久恢复。
 
 ## 当前阶段
-阶段 8：第二轮真实使用反馈诊断与修复
+阶段 9：第三轮基础编辑体验修复
 
 ## 各阶段
 
@@ -87,6 +87,15 @@
 - [x] 增加回归测试、真实论文验证、视觉复核、Release 安装及 Git 检查点
 - **状态：** complete
 
+### 阶段 9：第三轮基础编辑体验修复
+- [x] 以真实 Key Window 合成截图验证并修复源码文字不可见
+- [x] 文档结构可收起/展开，并可拖动调整与文件树的边界
+- [x] 增加显式保存、未保存状态与 `⌘S`
+- [x] 在源码页增加面向选区的 LaTeX 工具栏（文字样式、字号、标题、公式与常用结构）
+- [x] 为 LaTeX 插入/包裹行为补充 UTF-16 选区和原生撤销回归
+- [x] 完成类型检查、分组测试、Release 构建、安装验证及 Git 检查点
+- **状态：** complete
+
 ## 已做决策
 | 决策 | 理由 |
 |------|------|
@@ -125,6 +134,9 @@
 | `defaults` 拒绝用 `CFFIXED_USER_HOME` 写隔离偏好域 | 1 | 未改真实偏好；改用只在诊断探针开启时读取的临时项目环境变量，定位后删除 |
 | 单进程连续离屏构造 AppKit/QuickLook 窗口后 `swiftpm-testing-helper` SIGSEGV | 3 | 崩溃在 `objc_autoreleasePoolPop`，产品断言无失败；补齐 QuickLook close 与测试窗口清理，发布验收按隔离组运行 |
 | 真实 Tectonic 编译在缓存不完整时超过 2 分钟 | 1 | 精确终止测试进程；完成资源缓存后测得普通编译 62.09s，引入 cached-first 后降至 15.10s，无变更快路径 0.0016s |
+| 探针尝试调用不存在的 `NSColor.resolvedColor(with:)` | 1 | 改用 `NSAppearance.performAsCurrentDrawingAppearance` 内转换到 deviceRGB 静态颜色 |
+| 误把 `performAsCurrentDrawingAppearance` 当成有返回值的泛型函数 | 1 | 使用外部 `NSColor` 变量，在外观闭包内完成赋值，避免把 `Void` 写入 TextStorage |
+| 沙箱外 Swift 回归执行被 Codex 用量审批层拒绝 | 1 | 不绕过审批；先完成可在工作区内安全编辑的实现，等待用户明确授权后再测试、构建与安装 |
 
 ## 备注
 - 所有网页内容仅记录在 `findings.md`，不写入本计划。

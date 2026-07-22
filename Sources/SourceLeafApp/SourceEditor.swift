@@ -12,7 +12,22 @@ struct SourcePanel: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if model.hasUnsavedChanges {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                        .help(L10n.text("status.unsaved"))
+                }
                 Spacer()
+                Button {
+                    model.saveNow()
+                } label: {
+                    Label(L10n.text("action.save"), systemImage: "square.and.arrow.down")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(!model.canSaveCurrentFile || !model.hasUnsavedChanges)
+                .help(L10n.text("action.save"))
                 if model.selectedRange.length > 0 {
                     Button {
                         model.attachCurrentSelection()
@@ -36,21 +51,117 @@ struct SourcePanel: View {
             .padding(.vertical, 6)
             .background(.bar)
 
+            if model.selectedFile?.kind == .tex {
+                LaTeXSourceToolbar()
+            }
+
             SourceTextView(
                 text: Binding(get: { model.sourceText }, set: { model.sourceChanged($0) }),
                 selection: $model.selectedRange,
+                commandRequest: model.pendingLaTeXEdit,
                 showSelectionButton: model.configuration.showSelectionButton,
-                onAskAI: model.attachCurrentSelection
+                onAskAI: model.attachCurrentSelection,
+                onCommandApplied: model.acknowledgeLaTeXEdit
             )
         }
+    }
+}
+
+private struct LaTeXSourceToolbar: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                formatButton(.bold, key: "source.format.bold", symbol: "bold")
+                formatButton(.italic, key: "source.format.italic", symbol: "italic")
+                formatButton(.underline, key: "source.format.underline", symbol: "underline")
+
+                Divider().frame(height: 17)
+
+                Menu {
+                    menuButton(.section, key: "source.heading.section")
+                    menuButton(.subsection, key: "source.heading.subsection")
+                    menuButton(.subsubsection, key: "source.heading.subsubsection")
+                    menuButton(.paragraph, key: "source.heading.paragraph")
+                } label: {
+                    Label(L10n.text("source.toolbar.heading"), systemImage: "textformat.size")
+                }
+
+                Menu {
+                    menuButton(.tiny, title: "\\tiny")
+                    menuButton(.scriptsize, title: "\\scriptsize")
+                    menuButton(.footnotesize, title: "\\footnotesize")
+                    menuButton(.small, title: "\\small")
+                    menuButton(.normalsize, title: "\\normalsize")
+                    menuButton(.large, title: "\\large")
+                    menuButton(.largeUpper, title: "\\Large")
+                    menuButton(.largeAllCaps, title: "\\LARGE")
+                    menuButton(.huge, title: "\\huge")
+                    menuButton(.hugeUpper, title: "\\Huge")
+                } label: {
+                    Label(L10n.text("source.toolbar.fontSize"), systemImage: "textformat")
+                }
+
+                Menu {
+                    menuButton(.inlineMath, key: "source.math.inline")
+                    menuButton(.displayMath, key: "source.math.display")
+                    menuButton(.equation, key: "source.math.equation")
+                    Divider()
+                    menuButton(.fraction, key: "source.math.fraction")
+                    menuButton(.superscript, key: "source.math.superscript")
+                    menuButton(.subscriptText, key: "source.math.subscript")
+                } label: {
+                    Label(L10n.text("source.toolbar.math"), systemImage: "function")
+                }
+
+                Menu {
+                    menuButton(.emphasis, key: "source.format.emphasis")
+                    menuButton(.itemize, key: "source.insert.itemize")
+                    menuButton(.enumerate, key: "source.insert.enumerate")
+                    Divider()
+                    menuButton(.cite, key: "source.insert.cite")
+                    menuButton(.reference, key: "source.insert.reference")
+                    menuButton(.label, key: "source.insert.label")
+                    menuButton(.url, key: "source.insert.url")
+                } label: {
+                    Label(L10n.text("source.toolbar.insert"), systemImage: "plus")
+                }
+            }
+            .font(.caption)
+            .menuStyle(.borderlessButton)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func formatButton(_ command: LaTeXEditCommand, key: String, symbol: String) -> some View {
+        Button { model.performLaTeXEdit(command) } label: {
+            Image(systemName: symbol)
+        }
+        .buttonStyle(.borderless)
+        .help(L10n.text(key))
+        .accessibilityLabel(L10n.text(key))
+    }
+
+    private func menuButton(_ command: LaTeXEditCommand, key: String) -> some View {
+        Button(L10n.text(key)) { model.performLaTeXEdit(command) }
+    }
+
+    private func menuButton(_ command: LaTeXEditCommand, title: String) -> some View {
+        Button(title) { model.performLaTeXEdit(command) }
     }
 }
 
 struct SourceTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
+    var commandRequest: LaTeXEditRequest? = nil
     var showSelectionButton: Bool
     var onAskAI: () -> Void
+    var onCommandApplied: (UUID) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -74,14 +185,15 @@ struct SourceTextView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        let palette = SourceEditorPalette(appearance: textView.effectiveAppearance)
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textColor = .labelColor
-        textView.backgroundColor = .textBackgroundColor
+        textView.textColor = palette.text
+        textView.backgroundColor = palette.background
         textView.drawsBackground = true
-        textView.insertionPointColor = .labelColor
+        textView.insertionPointColor = palette.text
         textView.selectedTextAttributes = [
-            .backgroundColor: NSColor.selectedTextBackgroundColor,
-            .foregroundColor: NSColor.selectedTextColor
+            .backgroundColor: palette.selectionBackground,
+            .foregroundColor: palette.selectionText
         ]
         textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.textContainer?.widthTracksTextView = true
@@ -104,7 +216,11 @@ struct SourceTextView: NSViewRepresentable {
         askButton.translatesAutoresizingMaskIntoConstraints = false
         askButton.isHidden = true
 
+        let glyphOverlay = SourceGlyphOverlayView(textView: textView)
+        container.glyphOverlay = glyphOverlay
+
         container.addSubview(scrollView)
+        container.addSubview(glyphOverlay, positioned: .above, relativeTo: scrollView)
         container.addSubview(askButton)
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -118,9 +234,12 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.ruler = ruler
         context.coordinator.askButton = askButton
+        context.coordinator.glyphOverlay = glyphOverlay
         context.coordinator.observeScrollView(scrollView)
-        container.layoutEditor()
-        context.coordinator.applyHighlighting()
+        glyphOverlay.synchronizeFrame()
+        context.coordinator.layoutEditor()
+        context.coordinator.scheduleInitialHighlighting()
+        context.coordinator.applyPendingCommand(commandRequest)
         return container
     }
 
@@ -137,8 +256,12 @@ struct SourceTextView: NSViewRepresentable {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
         }
-        textView.backgroundColor = .textBackgroundColor
-        (nsView as? SourceEditorContainerView)?.layoutEditor()
+        context.coordinator.applyPendingCommand(commandRequest)
+        if context.coordinator.appliedAppearanceName != nil,
+           context.coordinator.appliedAppearanceName != textView.effectiveAppearance.name {
+            context.coordinator.applyHighlighting()
+        }
+        context.coordinator.layoutEditor()
         context.coordinator.invalidateVisibleEditor()
         context.coordinator.askButton?.title = L10n.text("selection.askAI")
         context.coordinator.updateAskButton()
@@ -148,10 +271,13 @@ struct SourceTextView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: SourceTextView
-        weak var textView: NSTextView?
+        var textView: NSTextView?
         weak var ruler: LineNumberRulerView?
         weak var askButton: NSButton?
+        weak var glyphOverlay: SourceGlyphOverlayView?
         private var highlighting = false
+        private(set) var appliedAppearanceName: NSAppearance.Name?
+        private var lastAppliedCommandID: UUID?
 
         init(parent: SourceTextView) { self.parent = parent }
 
@@ -167,6 +293,7 @@ struct SourceTextView: NSViewRepresentable {
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
             ruler?.scrollPositionDidChange()
+            glyphOverlay?.needsDisplay = true
         }
 
         func textDidChange(_ notification: Notification) {
@@ -174,6 +301,7 @@ struct SourceTextView: NSViewRepresentable {
             parent.text = textView.string
             applyHighlighting()
             ruler?.needsDisplay = true
+            glyphOverlay?.needsDisplay = true
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -184,6 +312,61 @@ struct SourceTextView: NSViewRepresentable {
 
         @objc func askAI() { parent.onAskAI() }
 
+        func applyPendingCommand(_ request: LaTeXEditRequest?) {
+            guard let request, request.id != lastAppliedCommandID else { return }
+            lastAppliedCommandID = request.id
+            executePendingCommand(request, attempt: 0)
+        }
+
+        private func executePendingCommand(_ request: LaTeXEditRequest, attempt: Int) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0 : 0.05)) { [self] in
+                guard let textView = textView else { return }
+                guard textView.window != nil else {
+                    if attempt < 20 { self.executePendingCommand(request, attempt: attempt + 1) }
+                    return
+                }
+                let edit = LaTeXSourceFormatter.edit(
+                    command: request.command,
+                    source: textView.string,
+                    selection: textView.selectedRange()
+                )
+                textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
+                textView.setSelectedRange(edit.resultingSelection)
+                textView.scrollRangeToVisible(edit.resultingSelection)
+                self.parent.selection = edit.resultingSelection
+                self.updateAskButton()
+                self.glyphOverlay?.needsDisplay = true
+                self.parent.onCommandApplied(request.id)
+            }
+        }
+
+        func scheduleInitialHighlighting(attempt: Int = 0) {
+            guard appliedAppearanceName == nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self, self.appliedAppearanceName == nil else { return }
+                guard let textView = self.textView, let window = textView.window else {
+                    if attempt < 40 { self.scheduleInitialHighlighting(attempt: attempt + 1) }
+                    return
+                }
+                // SwiftUI performs one more representable/layout transaction
+                // after the view first acquires a window. Commit TextStorage
+                // attributes after that transaction so the window compositor
+                // keeps the glyph layer.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak window] in
+                    guard let self, let window, window === self.textView?.window else { return }
+                    self.applyHighlighting()
+                    self.invalidateVisibleEditor()
+                    var ancestor = self.textView?.superview
+                    while let view = ancestor {
+                        view.needsDisplay = true
+                        ancestor = view.superview
+                    }
+                    window.contentView?.displayIfNeeded()
+                    window.displayIfNeeded()
+                }
+            }
+        }
+
         func updateAskButton() {
             askButton?.isHidden = !parent.showSelectionButton || (textView?.selectedRange().length ?? 0) == 0
         }
@@ -191,29 +374,41 @@ struct SourceTextView: NSViewRepresentable {
         func applyHighlighting() {
             guard let textView, let storage = textView.textStorage else { return }
             highlighting = true
+            let appearance = textView.effectiveAppearance
+            let palette = SourceEditorPalette(appearance: appearance)
             let selectedRange = textView.selectedRange()
             let source = textView.string as NSString
             let full = NSRange(location: 0, length: source.length)
             storage.beginEditing()
             storage.setAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-                .foregroundColor: NSColor.labelColor
+                .foregroundColor: palette.text.withAlphaComponent(0.99)
             ], range: full)
-            apply(#"%.*$"#, color: .systemGreen, storage: storage, source: textView.string, options: [.anchorsMatchLines])
-            apply(#"\\[A-Za-z@]+\*?"#, color: .systemBlue, storage: storage, source: textView.string)
-            apply(#"\$[^$\n]*\$"#, color: .systemPurple, storage: storage, source: textView.string)
-            apply(#"[{}]"#, color: .systemOrange, storage: storage, source: textView.string)
+            apply(#"%.*$"#, color: palette.comment.withAlphaComponent(0.99), storage: storage, source: textView.string, options: [.anchorsMatchLines])
+            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command.withAlphaComponent(0.99), storage: storage, source: textView.string)
+            apply(#"\$[^$\n]*\$"#, color: palette.math.withAlphaComponent(0.99), storage: storage, source: textView.string)
+            apply(#"[{}]"#, color: palette.brace.withAlphaComponent(0.99), storage: storage, source: textView.string)
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
                 .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-                .foregroundColor: NSColor.labelColor
+                .foregroundColor: palette.text.withAlphaComponent(0.99)
             ]
+            textView.textColor = palette.text
+            textView.backgroundColor = palette.background
+            textView.insertionPointColor = palette.text
+            textView.selectedTextAttributes = [
+                .backgroundColor: palette.selectionBackground,
+                .foregroundColor: palette.selectionText
+            ]
+            appliedAppearanceName = appearance.name
             textView.layoutManager?.invalidateDisplay(forCharacterRange: full)
             if let textContainer = textView.textContainer {
                 textView.layoutManager?.ensureLayout(for: textContainer)
             }
             textView.needsDisplay = true
+            glyphOverlay?.synchronizeFrame()
+            glyphOverlay?.needsDisplay = true
             highlighting = false
         }
 
@@ -224,6 +419,24 @@ struct SourceTextView: NSViewRepresentable {
             textView.setNeedsDisplay(textView.visibleRect)
             textView.enclosingScrollView?.contentView.needsDisplay = true
             ruler?.needsDisplay = true
+            glyphOverlay?.synchronizeFrame()
+            glyphOverlay?.needsDisplay = true
+        }
+
+        func layoutEditor() {
+            guard let textView, let scrollView = textView.enclosingScrollView else { return }
+            let width = max(scrollView.contentSize.width, 1)
+            guard width.isFinite else { return }
+            if abs(textView.frame.width - width) > 0.5 {
+                textView.setFrameSize(NSSize(width: width, height: max(textView.frame.height, 1)))
+            }
+            if let textContainer = textView.textContainer {
+                textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+                textContainer.widthTracksTextView = true
+                textView.layoutManager?.ensureLayout(for: textContainer)
+            }
+            textView.setNeedsDisplay(textView.visibleRect)
+            glyphOverlay?.synchronizeFrame()
         }
 
         private func apply(
@@ -242,37 +455,59 @@ struct SourceTextView: NSViewRepresentable {
     }
 }
 
+final class SourceGlyphOverlayView: NSView {
+    weak var textView: NSTextView?
+
+    init(textView: NSTextView) {
+        self.textView = textView
+        super.init(frame: .zero)
+        autoresizingMask = []
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func synchronizeFrame() {
+        guard let clipView = textView?.enclosingScrollView?.contentView,
+              let superview else { return }
+        frame = clipView.convert(clipView.bounds, to: superview)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let textView,
+              let scrollView = textView.enclosingScrollView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return }
+        let visible = scrollView.contentView.bounds
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
+        let origin = NSPoint(
+            x: textView.textContainerOrigin.x - visible.minX,
+            y: textView.textContainerOrigin.y - visible.minY
+        )
+        layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: origin)
+    }
+}
+
 final class SourceEditorContainerView: NSView {
     private let editorScrollView: NSScrollView
     private let editorTextView: NSTextView
+    weak var glyphOverlay: SourceGlyphOverlayView?
 
     init(scrollView: NSScrollView, textView: NSTextView) {
         editorScrollView = scrollView
         editorTextView = textView
         super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func layout() {
         super.layout()
-        layoutEditor()
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.layoutEditor()
-            self.editorTextView.isHidden = false
-            self.editorTextView.alphaValue = 1
-            self.editorTextView.setNeedsDisplay(self.editorTextView.visibleRect)
-            self.editorScrollView.contentView.needsDisplay = true
-        }
-    }
-
-    func layoutEditor() {
         let width = max(editorScrollView.contentSize.width, 1)
         guard width.isFinite else { return }
         if abs(editorTextView.frame.width - width) > 0.5 {
@@ -283,7 +518,43 @@ final class SourceEditorContainerView: NSView {
             textContainer.widthTracksTextView = true
             editorTextView.layoutManager?.ensureLayout(for: textContainer)
         }
+        glyphOverlay?.synchronizeFrame()
+        glyphOverlay?.needsDisplay = true
         editorTextView.setNeedsDisplay(editorTextView.visibleRect)
+    }
+}
+
+private struct SourceEditorPalette {
+    let text: NSColor
+    let background: NSColor
+    let command: NSColor
+    let comment: NSColor
+    let math: NSColor
+    let brace: NSColor
+    let selectionBackground: NSColor
+    let selectionText: NSColor
+
+    init(appearance: NSAppearance) {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        if dark {
+            text = NSColor(srgbRed: 0.90, green: 0.91, blue: 0.93, alpha: 1)
+            background = NSColor(srgbRed: 0.10, green: 0.11, blue: 0.13, alpha: 1)
+            command = NSColor(srgbRed: 0.38, green: 0.68, blue: 1.00, alpha: 1)
+            comment = NSColor(srgbRed: 0.35, green: 0.78, blue: 0.43, alpha: 1)
+            math = NSColor(srgbRed: 0.80, green: 0.55, blue: 0.95, alpha: 1)
+            brace = NSColor(srgbRed: 1.00, green: 0.64, blue: 0.27, alpha: 1)
+            selectionBackground = NSColor(srgbRed: 0.18, green: 0.42, blue: 0.72, alpha: 1)
+            selectionText = .white
+        } else {
+            text = NSColor(srgbRed: 0.12, green: 0.13, blue: 0.15, alpha: 1)
+            background = NSColor(srgbRed: 0.99, green: 0.99, blue: 1.00, alpha: 1)
+            command = NSColor(srgbRed: 0.00, green: 0.38, blue: 0.92, alpha: 1)
+            comment = NSColor(srgbRed: 0.00, green: 0.52, blue: 0.20, alpha: 1)
+            math = NSColor(srgbRed: 0.55, green: 0.20, blue: 0.72, alpha: 1)
+            brace = NSColor(srgbRed: 0.92, green: 0.42, blue: 0.00, alpha: 1)
+            selectionBackground = NSColor(srgbRed: 0.18, green: 0.48, blue: 0.90, alpha: 1)
+            selectionText = .white
+        }
     }
 }
 

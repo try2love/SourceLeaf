@@ -213,3 +213,20 @@
 
 ---
 *每执行2次查看/浏览器/搜索操作后更新此文件*
+
+## 2026-07-22 第三轮基础编辑体验反馈
+- `AppModel` 已有 `saveCurrentFileIfNeeded()` 与 `saveNow()`，但 `SourcePanel` 工具栏和 `SourceLeafCommands` 均没有保存按钮/Command-S 命令，也没有向用户展示 dirty 状态；因此现有实现即使内部可能在编译等路径保存，产品层面仍等同于“没有保存功能”。
+- `ProjectPanel` 把文件树和文档结构写成同一个 `VStack` 中的两个 `List`，大纲固定在 100–230pt，没有折叠状态、Disclosure 控件或 `VSplitView`，所以无法收起/展开，也无法拖动边界。
+- 源码编辑器仍混合两套布局机制：`NSTextView.scrollableTextView()` 返回的滚动视图被 Auto Layout 约束到自定义容器，同时 `SourceEditorContainerView.layoutEditor()` 又手工设置 document view frame 和 textContainer 尺寸。真实窗口重布局时这可能与 AppKit 自身的 document-view tile/layout 竞争。
+- 源码空白的待证假设依次为：容器/文档视图双重布局竞争；跨文件残留选区或滚动点落在无内容区域；全量语法高亮导致持续布局失效；文件读取实际为空但 UI 未给出可见状态。每个假设都必须用真实 Dock/window seam 的字形或内容断言证伪/确认。
+- 当前真实偏好指向 `/Users/0x211/本地文稿/paper/TDSC` 和 `MutedRAG.tex`；对应配置明确选择 center/source，源码文件实际为 87,878 bytes 且 UTF-8 首行可读，排除“恢复到了图片”“源码文件为空”和“源码面板未被选中”三种解释。
+- 安装包 Info.plist 为 0.3.1；当前沙箱内普通 `pgrep` 因 sysmon 权限不可用，后续进程核验需在批准的沙箱外执行。
+- 真实 Key Window 合成回归稳定红灯：8.7 万字符源码替换为空格前后，窗口采样最初仅变化 160 像素，截图与用户反馈一致，只显示行号、源码字形完全缺失。
+- 前两轮可见性测试存在关键假阳性：递归 `findTextView` 命中了“筛选文件”的 `_SystemTextFieldFieldEditor`（287×16、无 enclosingScrollView），而非源码编辑器。现已改成只接受其垂直标尺为 `LineNumberRulerView` 的 NSTextView。
+- 真正源码编辑器的状态为：87,654 UTF-16 字符、frame 490×34,692、可见 glyph range 0–819、首字形 rect 5×0、直接 `cacheDisplay` 能清晰绘制语法高亮；但系统窗口合成图仍为空白。这排除文件读取、滚动到空区和 TextKit 排版失败，根因位于 NSTextView 进入 SwiftUI/AppKit 混合窗口合成的最后一层。
+- 对真实窗口内的 TextStorage 做一次不同的静态前景属性写入并显式显示后，窗口合成回归立即转绿，截图同时恢复源码标签、文件名与源码正文；单纯 layer-backed、移除行号尺或 `setNeedsDisplay` 均无效。最终实现因此让每个 SwiftUI 最终保留的编辑器实例有限重试等待 `textView.window`，先提交近似无差异的固定前景以触发 TextKit 属性帧，再在下一主循环应用完整静态浅/深色语法调色板。
+- 文档结构现由 `VSplitView` 与文件树分隔：展开时分界线可上下拖动；标题栏提供明确的左右/向下 disclosure，折叠到 28pt；展开状态保存在 UserDefaults。
+- 保存逻辑原本只有隐藏的 auto-save/model 方法；现新增 dirty 状态、源码标题橙点、源码栏和全局工具栏保存按钮、File/Save 菜单替换及 Command-S。显式保存原子写盘并清除 dirty 状态，自动保存仍保留。
+- 源码空白不是文件读取或语法颜色问题：真实编辑器直接缓存始终能绘制字形，但手工创建的超高 `NSTextView` 曾出现负文档坐标，且直接把 `NSScrollView` 作为 SwiftUI representable 根视图会越界遮盖源码标签与文件名。最终采用 AppKit 标准 `scrollableTextView()`、四边约束裁剪容器，并用不接收鼠标事件的可见字形层复用同一个 TextKit 布局；真实 WindowServer 截图已清晰显示 LaTeX 正文。
+- 源码页的 LaTeX 工具应作用于 UTF-16 选区并沿用 `NSTextView.insertText`，才能同时支持中文/emoji 前缀、空选区占位模板和 AppKit 原生撤销；直接改 `AppModel.sourceText` 会绕过原生 undo 栈。
+- 最终真实 Key Window 合成回归与安装后验证共同确认：源码字形已进入 WindowServer 合成画面；0.3.2 安装包同时满足 Universal 主程序、有效签名、双架构 Tectonic 0.16.9、简体中文资源和新进程存活要求。

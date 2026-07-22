@@ -44,6 +44,11 @@ private struct SourceLeafCommands: Commands {
             Button(L10n.openProject) { model.presentOpenProjectPanel() }
                 .keyboardShortcut("o")
         }
+        CommandGroup(replacing: .saveItem) {
+            Button(L10n.text("action.save")) { model.saveNow() }
+                .keyboardShortcut("s")
+                .disabled(!model.canSaveCurrentFile || !model.hasUnsavedChanges)
+        }
         CommandMenu(L10n.workspace) {
             ForEach(WorkspacePanel.allCases) { panel in
                 Button(model.layout.contains(panel) ? L10n.hide(panel) : L10n.show(panel)) {
