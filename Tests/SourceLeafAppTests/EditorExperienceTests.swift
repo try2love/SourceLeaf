@@ -107,6 +107,21 @@ import Testing
 }
 
 @MainActor
+@Test func selectionOverlayPaintsEveryDragStepSynchronously() async throws {
+    let host = makeEditorHost(source: String(repeating: "live selection ", count: 200), theme: .light, fontFamily: "Menlo", fontSize: 14)
+    defer { closeEditorHost(host) }
+    try await Task.sleep(for: .milliseconds(400))
+    let textView = try #require(findSourceTextView(in: host.view))
+    let overlay = try #require(findGlyphOverlay(in: host.view))
+    host.window.makeFirstResponder(textView)
+
+    textView.setSelectedRange(NSRange(location: 0, length: 8))
+    #expect(overlay.lastPaintedSelection == NSRange(location: 0, length: 8))
+    textView.setSelectedRange(NSRange(location: 0, length: 24))
+    #expect(overlay.lastPaintedSelection == NSRange(location: 0, length: 24))
+}
+
+@MainActor
 @Test func sourceCaretBlinksWhileTheEditorIsFocused() async throws {
     let host = makeEditorHost(source: "\\section{Blinking caret}", theme: .light, fontFamily: "Menlo", fontSize: 16)
     defer { closeEditorHost(host) }

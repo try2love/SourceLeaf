@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import QuickLookUI
 import SourceLeafCore
 import SwiftUI
 import Testing
@@ -50,7 +49,7 @@ import Testing
 }
 
 @MainActor
-@Test func imagePanelHandsTheSelectedSVGToQuickLook() throws {
+@Test func imagePanelLoadsTheSelectedSVGIntoAZoomablePreview() throws {
     guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
     let fixtures = URL(fileURLWithPath: fixturesPath, isDirectory: true)
     let model = try isolatedModel(named: "image-preview")
@@ -66,8 +65,12 @@ import Testing
     hostingView.frame = NSRect(x: 0, y: 0, width: 720, height: 520)
     hostingView.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
-    let preview = try #require(findQuickLookPreview(in: hostingView))
-    #expect((preview.previewItem as? NSURL)?.filePathURL == svg.url)
+    let preview = try #require(findZoomableImagePreview(in: hostingView))
+    #expect(preview.loadedURL == svg.url)
+    #expect(preview.allowsMagnification)
+    #expect(preview.minMagnification == 0.1)
+    #expect(preview.maxMagnification == 8)
+    #expect(ZoomableImageScrollView.zoomedScale(from: 1, scrollingDeltaY: 1) > 1)
 }
 
 @MainActor
@@ -150,10 +153,10 @@ private func isolatedModel(named name: String) throws -> AppModel {
 }
 
 @MainActor
-private func findQuickLookPreview(in view: NSView) -> QLPreviewView? {
-    if let preview = view as? QLPreviewView { return preview }
+private func findZoomableImagePreview(in view: NSView) -> ZoomableImageScrollView? {
+    if let preview = view as? ZoomableImageScrollView { return preview }
     for child in view.subviews {
-        if let result = findQuickLookPreview(in: child) { return result }
+        if let result = findZoomableImagePreview(in: child) { return result }
     }
     return nil
 }

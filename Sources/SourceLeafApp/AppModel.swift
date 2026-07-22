@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import SourceLeafCore
+import UniformTypeIdentifiers
 
 struct PDFNavigationTarget: Equatable, Identifiable {
     var id = UUID()
@@ -63,6 +64,7 @@ final class AppModel: ObservableObject {
     @Published var editorTheme: EditorTheme = .system
     @Published var editorFontFamily = EditorFontCatalog.systemMonospaced
     @Published var editorFontSize: Double = 13
+    @Published var interfaceFontScale: Double = 1
     @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
 
     var selectedProviderModel: String {
@@ -106,6 +108,7 @@ final class AppModel: ObservableObject {
     private static let editorThemeKey = "SourceLeaf.editorTheme"
     private static let editorFontFamilyKey = "SourceLeaf.editorFontFamily"
     private static let editorFontSizeKey = "SourceLeaf.editorFontSize"
+    private static let interfaceFontScaleKey = "SourceLeaf.interfaceFontScale"
 
     init(
         restoreLastProject: Bool = true,
@@ -127,6 +130,8 @@ final class AppModel: ObservableObject {
             ?? EditorFontCatalog.systemMonospaced
         let savedFontSize = defaults.double(forKey: Self.editorFontSizeKey)
         editorFontSize = savedFontSize == 0 ? 13 : min(32, max(10, savedFontSize))
+        let savedInterfaceScale = defaults.double(forKey: Self.interfaceFontScaleKey)
+        interfaceFontScale = savedInterfaceScale == 0 ? 1 : min(1.6, max(0.85, savedInterfaceScale))
         do {
             let support = try resolvedSupportDirectory()
             profilesStore = JSONFileStore(url: support.appendingPathComponent("settings/providers.json"))
@@ -159,6 +164,30 @@ final class AppModel: ObservableObject {
         appLanguage = language
         defaults.set(language.rawValue, forKey: L10n.languageDefaultsKey)
         objectWillChange.send()
+    }
+
+    func setInterfaceFontScale(_ scale: Double) {
+        interfaceFontScale = min(1.6, max(0.85, scale))
+        defaults.set(interfaceFontScale, forKey: Self.interfaceFontScaleKey)
+    }
+
+    func presentPDFExportPanel() {
+        guard let pdfURL else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = pdfURL.lastPathComponent
+        panel.title = L10n.text("pdf.export")
+        panel.begin { [weak self] response in
+            guard response == .OK, let destination = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: pdfURL)
+                try data.write(to: destination, options: .atomic)
+                self?.statusText = L10n.text("status.pdfExported")
+            } catch {
+                self?.report(error)
+            }
+        }
     }
 
     func selectProvider(_ id: UUID?) {

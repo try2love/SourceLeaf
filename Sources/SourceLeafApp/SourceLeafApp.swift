@@ -10,6 +10,7 @@ struct SourceLeafApplication: App {
             WorkspaceView()
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
                 .preferredColorScheme(model.editorTheme.colorScheme)
                 .frame(minWidth: 900, minHeight: 600)
         }
@@ -23,6 +24,7 @@ struct SourceLeafApplication: App {
                 FloatingPanelView(panel: panel)
                     .environmentObject(model)
                     .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                    .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
                     .preferredColorScheme(model.editorTheme.colorScheme)
                     .frame(minWidth: 420, minHeight: 360)
             }
@@ -33,8 +35,9 @@ struct SourceLeafApplication: App {
             SettingsView()
                 .environmentObject(model)
                 .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
+                .dynamicTypeSize(InterfaceFontScale.dynamicTypeSize(for: model.interfaceFontScale))
                 .preferredColorScheme(model.editorTheme.colorScheme)
-                .frame(width: 680, height: 540)
+                .frame(minWidth: 680, minHeight: 540)
         }
     }
 }
@@ -61,7 +64,7 @@ private struct SourceLeafCommands: Commands {
         }
         CommandMenu(L10n.build) {
             Button(L10n.compile) { model.compile() }
-                .keyboardShortcut("b")
+                .keyboardShortcut("b", modifiers: [.command, .shift])
             Toggle(L10n.autoCompile, isOn: Binding(
                 get: { model.configuration.build.autoBuild },
                 set: {
@@ -69,6 +72,19 @@ private struct SourceLeafCommands: Commands {
                     model.persistConfiguration()
                 }
             ))
+        }
+        CommandMenu(L10n.text("source.menu.format")) {
+            Button(L10n.text("source.format.bold")) { model.performLaTeXEdit(.bold) }
+                .keyboardShortcut("b", modifiers: .command)
+            Button(L10n.text("source.format.italic")) { model.performLaTeXEdit(.italic) }
+                .keyboardShortcut("i", modifiers: .command)
+            Button(L10n.text("source.format.underline")) { model.performLaTeXEdit(.underline) }
+                .keyboardShortcut("u", modifiers: .command)
+            Divider()
+            Button(L10n.text("source.findReplace")) {
+                NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .option])
         }
     }
 }

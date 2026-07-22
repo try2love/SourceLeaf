@@ -45,6 +45,8 @@ struct ProjectPanel: View {
                 Button { model.openFile(file) } label: {
                     Label(file.relativePath, systemImage: file.symbolName)
                         .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -98,6 +100,8 @@ struct ProjectPanel: View {
                             Text("\(node.item.line)").foregroundStyle(.tertiary)
                         }
                         .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     }
@@ -123,6 +127,8 @@ private struct ProjectTreeRow: View {
             Button { model.openFile(file) } label: {
                 Label(node.name, systemImage: file.symbolName)
                     .font(file.kind == .tex ? .caption.monospaced() : .caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -142,22 +148,33 @@ private struct ProjectTreeRow: View {
 
 struct ImagePanel: View {
     @EnvironmentObject private var model: AppModel
+    @State private var zoomScale = 1.0
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 7) {
                 Image(systemName: "photo")
                 Text(model.selectedImageFile?.relativePath ?? L10n.text("image.none"))
                     .font(.caption.monospaced())
                     .lineLimit(1)
                 Spacer()
+                Button { zoomScale = max(0.1, zoomScale / 1.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                    .disabled(zoomScale <= 0.1)
+                Text("\(Int((zoomScale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .frame(minWidth: 42)
+                Button { zoomScale = min(8, zoomScale * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                    .disabled(zoomScale >= 8)
+                Button { zoomScale = 1 } label: { Image(systemName: "arrow.counterclockwise") }
+                    .help(L10n.text("preview.actualSize"))
             }
+            .buttonStyle(.borderless)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .frame(height: 28)
             .background(.bar)
 
             if let url = model.selectedImageFile?.url {
-                QuickLookPreview(url: url)
+                ZoomableImagePreview(url: url, zoomScale: $zoomScale)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(L10n.text("image.none"), systemImage: "photo")
@@ -166,34 +183,100 @@ struct ImagePanel: View {
     }
 }
 
-private struct QuickLookPreview: NSViewRepresentable {
+struct ZoomableImagePreview: NSViewRepresentable {
     let url: URL
+    @Binding var zoomScale: Double
 
-    func makeNSView(context: Context) -> QLPreviewView {
-        let view = QLPreviewView(frame: .zero, style: .normal)
-        view?.autostarts = true
-        view?.shouldCloseWithWindow = false
-        view?.previewItem = url as NSURL
-        return view ?? QLPreviewView(frame: .zero, style: .normal)!
+    func makeNSView(context: Context) -> ZoomableImageScrollView {
+        let view = ZoomableImageScrollView()
+        view.load(url: url)
+        view.onScaleChanged = { zoomScale = $0 }
+        return view
     }
 
-    func updateNSView(_ view: QLPreviewView, context: Context) {
-        if (view.previewItem as? NSURL)?.filePathURL != url { view.previewItem = url as NSURL }
+    func updateNSView(_ view: ZoomableImageScrollView, context: Context) {
+        if view.loadedURL != url { view.load(url: url) }
+        view.setZoomScale(zoomScale)
+    }
+}
+
+final class ZoomableImageScrollView: NSScrollView {
+    private let imageView = NSImageView()
+    private(set) var loadedURL: URL?
+    var onScaleChanged: ((Double) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        drawsBackground = true
+        backgroundColor = .windowBackgroundColor
+        hasVerticalScroller = true
+        hasHorizontalScroller = true
+        autohidesScrollers = true
+        allowsMagnification = true
+        minMagnification = 0.1
+        maxMagnification = 8
+        imageView.imageScaling = .scaleNone
+        imageView.imageAlignment = .alignCenter
+        documentView = imageView
     }
 
-    static func dismantleNSView(_ view: QLPreviewView, coordinator: Void) {
-        view.autostarts = false
-        view.previewItem = nil
-        view.close()
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func load(url: URL) {
+        loadedURL = url
+        imageView.image = NSImage(contentsOf: url)
+        let size = imageView.image?.size ?? NSSize(width: 1, height: 1)
+        imageView.frame = NSRect(origin: .zero, size: size)
+        magnification = 1
+        onScaleChanged?(1)
     }
+
+    func setZoomScale(_ scale: Double) {
+        let bounded = min(8, max(0.1, scale))
+        if abs(magnification - bounded) > 0.005 { setMagnification(bounded, centeredAt: visibleRect.center) }
+    }
+
+    override func magnify(with event: NSEvent) {
+        super.magnify(with: event)
+        onScaleChanged?(magnification)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard event.modifierFlags.contains(.control) else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let next = Self.zoomedScale(from: magnification, scrollingDeltaY: event.scrollingDeltaY)
+        setMagnification(next, centeredAt: convert(event.locationInWindow, from: nil))
+        onScaleChanged?(next)
+    }
+
+    static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
+        min(8, max(0.1, scale * pow(1.12, scrollingDeltaY)))
+    }
+}
+
+private extension NSRect {
+    var center: NSPoint { NSPoint(x: midX, y: midY) }
 }
 
 struct PDFPanel: View {
     @EnvironmentObject private var model: AppModel
+    @State private var zoomScale = 0.0
+    @State private var showsThumbnails = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 7) {
+                Button { showsThumbnails.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .help(L10n.text("pdf.thumbnails"))
+                Button { zoomScale = max(0.1, (zoomScale > 0 ? zoomScale : 1) / 1.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                Text(zoomScale > 0 ? "\(Int((zoomScale * 100).rounded()))%" : L10n.text("pdf.fit"))
+                    .font(.caption.monospacedDigit())
+                    .frame(minWidth: 42)
+                Button { zoomScale = min(8, (zoomScale > 0 ? zoomScale : 1) * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                Button { zoomScale = 0 } label: { Image(systemName: "arrow.counterclockwise") }
+                    .help(L10n.text("pdf.fit"))
                 Button {
                     if model.buildRunning { model.cancelCompile() }
                     else { model.compile() }
@@ -206,6 +289,15 @@ struct PDFPanel: View {
                 .labelStyle(.iconOnly)
                 .foregroundStyle(model.buildRunning ? .red : .primary)
                 .help(model.buildRunning ? L10n.text("build.stop") : L10n.compile)
+                Toggle(isOn: Binding(
+                    get: { model.configuration.build.autoBuild },
+                    set: {
+                        model.configuration.build.autoBuild = $0
+                        model.persistConfiguration()
+                    }
+                )) { Image(systemName: model.configuration.build.autoBuild ? "bolt.fill" : "bolt.slash") }
+                    .toggleStyle(.button)
+                    .help(L10n.autoCompile)
                 if model.pdfPageCount > 0 {
                     Divider().frame(height: 16)
                     Button {
@@ -217,9 +309,11 @@ struct PDFPanel: View {
                     .disabled(model.pdfPageIndex == 0)
                     .help(L10n.text("pdf.previousPage"))
 
-                    Text(String(format: L10n.text("pdf.pageIndicator"), model.pdfPageIndex + 1, model.pdfPageCount))
+                    Text("\(model.pdfPageIndex + 1)/\(model.pdfPageCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(String(format: L10n.text("pdf.pageIndicator"), model.pdfPageIndex + 1, model.pdfPageCount))
 
                     Button {
                         model.pdfPageIndex = min(model.pdfPageCount - 1, model.pdfPageIndex + 1)
@@ -254,8 +348,13 @@ struct PDFPanel: View {
                     .foregroundStyle(succeeded ? .green : .orange)
                     .font(.caption)
                 }
+                Button { model.presentPDFExportPanel() } label: { Image(systemName: "square.and.arrow.down") }
+                    .disabled(model.pdfURL == nil)
+                    .help(L10n.text("pdf.export"))
             }
-            .padding(7)
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
             .background(.bar)
 
             if let url = model.pdfURL {
@@ -265,6 +364,8 @@ struct PDFPanel: View {
                         selection: $model.pdfSelection,
                         pageIndex: $model.pdfPageIndex,
                         pageCount: $model.pdfPageCount,
+                        zoomScale: $zoomScale,
+                        showThumbnails: showsThumbnails,
                         navigationTarget: model.pdfNavigationTarget,
                         onCommandClick: model.locatePDFPointInSource
                     )
@@ -303,21 +404,46 @@ struct PDFKitView: NSViewRepresentable {
     @Binding var selection: String
     @Binding var pageIndex: Int
     @Binding var pageCount: Int
+    @Binding var zoomScale: Double
+    var showThumbnails: Bool
     var navigationTarget: PDFNavigationTarget?
     var onCommandClick: (Int, Double, Double, String?) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(selection: $selection, pageIndex: $pageIndex, pageCount: $pageCount)
+    init(
+        url: URL,
+        selection: Binding<String>,
+        pageIndex: Binding<Int>,
+        pageCount: Binding<Int>,
+        zoomScale: Binding<Double> = .constant(0),
+        showThumbnails: Bool = false,
+        navigationTarget: PDFNavigationTarget?,
+        onCommandClick: @escaping (Int, Double, Double, String?) -> Void
+    ) {
+        self.url = url
+        _selection = selection
+        _pageIndex = pageIndex
+        _pageCount = pageCount
+        _zoomScale = zoomScale
+        self.showThumbnails = showThumbnails
+        self.navigationTarget = navigationTarget
+        self.onCommandClick = onCommandClick
     }
 
-    func makeNSView(context: Context) -> PDFView {
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection, pageIndex: $pageIndex, pageCount: $pageCount, zoomScale: $zoomScale)
+    }
+
+    func makeNSView(context: Context) -> PDFPreviewContainerView {
         let view = NavigablePDFView()
         view.autoScales = true
-        view.displayMode = .singlePage
+        view.minScaleFactor = 0.1
+        view.maxScaleFactor = 8
+        view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.displaysPageBreaks = true
         view.document = PDFDocument(url: url)
         view.onCommandClick = onCommandClick
+        view.onScaleChanged = { context.coordinator.scaleChanged(to: $0) }
         NotificationCenter.default.addObserver(
             context.coordinator,
             selector: #selector(Coordinator.selectionChanged(_:)),
@@ -331,16 +457,22 @@ struct PDFKitView: NSViewRepresentable {
             object: view
         )
         context.coordinator.updatePageState(from: view)
-        return view
+        return PDFPreviewContainerView(pdfView: view, showsThumbnails: showThumbnails)
     }
 
-    func updateNSView(_ view: PDFView, context: Context) {
+    func updateNSView(_ container: PDFPreviewContainerView, context: Context) {
+        let view = container.pdfView
+        container.showsThumbnails = showThumbnails
+        if zoomScale == 0, !view.autoScales { view.autoScales = true }
         if view.document?.documentURL != url {
             view.document = PDFDocument(url: url)
             context.coordinator.updatePageState(from: view)
         }
-        if let navigableView = view as? NavigablePDFView {
-            navigableView.onCommandClick = onCommandClick
+        view.onCommandClick = onCommandClick
+        view.onScaleChanged = { context.coordinator.scaleChanged(to: $0) }
+        if zoomScale > 0, abs(view.scaleFactor - zoomScale) > 0.005 {
+            view.autoScales = false
+            view.scaleFactor = min(view.maxScaleFactor, max(view.minScaleFactor, zoomScale))
         }
         guard let document = view.document, document.pageCount > 0 else { return }
         let requestedIndex = min(max(pageIndex, 0), document.pageCount - 1)
@@ -359,7 +491,7 @@ struct PDFKitView: NSViewRepresentable {
         }
     }
 
-    static func dismantleNSView(_ view: PDFView, coordinator: Coordinator) {
+    static func dismantleNSView(_ view: PDFPreviewContainerView, coordinator: Coordinator) {
         NotificationCenter.default.removeObserver(coordinator)
     }
 
@@ -368,14 +500,16 @@ struct PDFKitView: NSViewRepresentable {
         @Binding var selection: String
         @Binding var pageIndex: Int
         @Binding var pageCount: Int
+        @Binding var zoomScale: Double
         var lastNavigationID: UUID?
         private weak var highlightedPage: PDFPage?
         private var highlightAnnotation: PDFAnnotation?
 
-        init(selection: Binding<String>, pageIndex: Binding<Int>, pageCount: Binding<Int>) {
+        init(selection: Binding<String>, pageIndex: Binding<Int>, pageCount: Binding<Int>, zoomScale: Binding<Double>) {
             _selection = selection
             _pageIndex = pageIndex
             _pageCount = pageCount
+            _zoomScale = zoomScale
         }
 
         @objc func selectionChanged(_ notification: Notification) {
@@ -400,6 +534,10 @@ struct PDFKitView: NSViewRepresentable {
             } else {
                 pageIndex = 0
             }
+        }
+
+        func scaleChanged(to scale: Double) {
+            if abs(zoomScale - scale) > 0.005 { zoomScale = scale }
         }
 
         func highlight(target: PDFNavigationTarget, page: PDFPage, in view: PDFView) {
@@ -428,6 +566,21 @@ struct PDFKitView: NSViewRepresentable {
 
 final class NavigablePDFView: PDFView {
     var onCommandClick: ((Int, Double, Double, String?) -> Void)?
+    var onScaleChanged: ((Double) -> Void)?
+
+    static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
+        min(8, max(0.1, scale * pow(1.12, scrollingDeltaY)))
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard event.modifierFlags.contains(.control) else {
+            super.scrollWheel(with: event)
+            return
+        }
+        autoScales = false
+        scaleFactor = Self.zoomedScale(from: scaleFactor, scrollingDeltaY: event.scrollingDeltaY)
+        onScaleChanged?(scaleFactor)
+    }
 
     static func shouldTriggerSourceLookup(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
         clickCount >= 2 || modifierFlags.contains(.command)
@@ -454,6 +607,38 @@ final class NavigablePDFView: PDFView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.onCommandClick?(pageIndex, x, yFromTop, self.currentSelection?.string)
+        }
+    }
+}
+
+final class PDFPreviewContainerView: NSView {
+    let pdfView: NavigablePDFView
+    private let thumbnailView = PDFThumbnailView()
+    var showsThumbnails: Bool {
+        didSet { thumbnailView.isHidden = !showsThumbnails; needsLayout = true }
+    }
+
+    init(pdfView: NavigablePDFView, showsThumbnails: Bool) {
+        self.pdfView = pdfView
+        self.showsThumbnails = showsThumbnails
+        super.init(frame: .zero)
+        thumbnailView.pdfView = pdfView
+        thumbnailView.thumbnailSize = NSSize(width: 92, height: 120)
+        thumbnailView.isHidden = !showsThumbnails
+        addSubview(thumbnailView)
+        addSubview(pdfView)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        let sidebarWidth: CGFloat = showsThumbnails ? min(132, max(96, bounds.width * 0.22)) : 0
+        thumbnailView.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)
+        pdfView.frame = NSRect(x: sidebarWidth, y: 0, width: max(0, bounds.width - sidebarWidth), height: bounds.height)
+        if pdfView.autoScales {
+            let scale = pdfView.scaleFactor
+            DispatchQueue.main.async { [weak pdfView] in pdfView?.onScaleChanged?(scale) }
         }
     }
 }

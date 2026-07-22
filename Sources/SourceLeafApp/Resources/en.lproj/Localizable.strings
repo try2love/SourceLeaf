@@ -234,4 +234,14 @@
 "theme.dark" = "Dark";
 "settings.editorFont" = "Editor Font";
 "settings.editorFontSize" = "Editor Font Size";
+"settings.interfaceFontSize" = "Interface Text Size";
+"preview.actualSize" = "Actual Size";
+"pdf.thumbnails" = "Thumbnails";
+"pdf.export" = "Save PDF As…";
+"pdf.fit" = "Fit";
+"status.pdfExported" = "PDF saved";
+"source.findReplace" = "Find and Replace";
+"source.insert.table" = "Table";
+"source.insert.figure" = "Image / Figure";
+"source.menu.format" = "LaTeX Format";
 "font.systemMonospaced" = "System Monospaced";

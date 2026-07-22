@@ -124,11 +124,15 @@ import Testing
     first.setEditorTheme(.dark)
     first.setEditorFontFamily("Menlo")
     first.setEditorFontSize(17)
+    first.setInterfaceFontScale(1.45)
 
     let restored = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
     #expect(restored.editorTheme == .dark)
     #expect(restored.editorFontFamily == "Menlo")
     #expect(restored.editorFontSize == 17)
+    #expect(restored.interfaceFontScale == 1.45)
+    #expect(InterfaceFontScale.dynamicTypeSize(for: 1) == .large)
+    #expect(InterfaceFontScale.dynamicTypeSize(for: restored.interfaceFontScale) == .xxxLarge)
 }
 
 @MainActor

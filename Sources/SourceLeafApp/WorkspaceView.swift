@@ -251,6 +251,8 @@ struct DockZoneView: View {
                 .padding(.vertical, 6)
                 .background(selected == panel ? Color.accentColor.opacity(0.15) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectPanel(panel, in: zone) }
                 .draggable(panel.rawValue)
                 .help(L10n.text("dock.dragHint"))
             }

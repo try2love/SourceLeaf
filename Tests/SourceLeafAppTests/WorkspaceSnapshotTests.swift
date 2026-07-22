@@ -61,16 +61,19 @@ import Testing
     #expect(textView.textContainer?.containerSize.width ?? 0 > 500)
     #expect(usedRect.width > 100)
     #expect(usedRect.height > 40)
+    #expect(textView.usesFindBar)
+    #expect(textView.isIncrementalSearchingEnabled)
 }
 
 @MainActor
-@Test func pdfPreviewUsesOnePagePerViewport() throws {
+@Test func pdfPreviewUsesContinuousVerticalScrolling() throws {
     let hostingView = NSHostingView(
         rootView: PDFKitView(
             url: URL(fileURLWithPath: "/tmp/nonexistent.pdf"),
             selection: .constant(""),
             pageIndex: .constant(0),
             pageCount: .constant(0),
+            showThumbnails: true,
             navigationTarget: nil,
             onCommandClick: { _, _, _, _ in }
         )
@@ -80,7 +83,19 @@ import Testing
     hostingView.layoutSubtreeIfNeeded()
 
     let pdfView = try #require(findPDFView(in: hostingView))
-    #expect(pdfView.displayMode == .singlePage)
+    #expect(pdfView.displayMode == .singlePageContinuous)
+    #expect(pdfView.displayDirection == .vertical)
+    #expect(pdfView.displaysPageBreaks)
+    let thumbnails = try #require(findPDFThumbnailView(in: hostingView))
+    #expect(!thumbnails.isHidden)
+}
+
+@MainActor
+@Test func pdfControlWheelZoomUsesBoundedMultiplicativeSteps() {
+    #expect(NavigablePDFView.zoomedScale(from: 1, scrollingDeltaY: 1) > 1)
+    #expect(NavigablePDFView.zoomedScale(from: 1, scrollingDeltaY: -1) < 1)
+    #expect(NavigablePDFView.zoomedScale(from: 7.9, scrollingDeltaY: 100) == 8)
+    #expect(NavigablePDFView.zoomedScale(from: 0.11, scrollingDeltaY: -100) == 0.1)
 }
 
 @MainActor
@@ -88,6 +103,39 @@ import Testing
     #expect(NavigablePDFView.shouldTriggerSourceLookup(clickCount: 2, modifierFlags: []))
     #expect(NavigablePDFView.shouldTriggerSourceLookup(clickCount: 1, modifierFlags: [.command]))
     #expect(!NavigablePDFView.shouldTriggerSourceLookup(clickCount: 1, modifierFlags: []))
+}
+
+@MainActor
+@Test func builtInLongPromptUsesAReadOnlyScrollableSurface() throws {
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-prompt-scroll-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.prompt-scroll.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    let hostingView = NSHostingView(
+        rootView: PromptEditor(index: 0)
+            .environmentObject(model)
+            .frame(width: 620, height: 420)
+    )
+    hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 420)
+    let window = NSWindow(
+        contentRect: hostingView.frame,
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    hostingView.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+
+    let scrollViews = findScrollViews(in: hostingView)
+    #expect(scrollViews.contains { scroll in
+        scroll.hasVerticalScroller && scroll.verticalScrollElasticity != .none
+    })
 }
 
 @MainActor
@@ -402,6 +450,8 @@ import Testing
     textView.undoManager?.undo()
     try await Task.sleep(for: .milliseconds(50))
     #expect(state.text == "alpha")
+    #expect(textView.selectedRange() == NSRange(location: 0, length: 5))
+    #expect(state.selection == NSRange(location: 0, length: 5))
 }
 
 @MainActor
@@ -629,6 +679,22 @@ private func findPDFView(in view: NSView) -> PDFView? {
         if let result = findPDFView(in: child) { return result }
     }
     return nil
+}
+
+@MainActor
+private func findPDFThumbnailView(in view: NSView) -> PDFThumbnailView? {
+    if let thumbnailView = view as? PDFThumbnailView { return thumbnailView }
+    for child in view.subviews {
+        if let result = findPDFThumbnailView(in: child) { return result }
+    }
+    return nil
+}
+
+@MainActor
+private func findScrollViews(in view: NSView) -> [NSScrollView] {
+    var result = view is NSScrollView ? [view as! NSScrollView] : []
+    for child in view.subviews { result.append(contentsOf: findScrollViews(in: child)) }
+    return result
 }
 
 @MainActor

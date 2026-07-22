@@ -49,7 +49,7 @@ struct SourcePanel: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .frame(height: 28)
             .background(.bar)
 
             if model.selectedFile?.kind == .tex {
@@ -77,6 +77,14 @@ private struct LaTeXSourceToolbar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 9) {
+                Button { NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil) } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.text("source.findReplace"))
+
+                Divider().frame(height: 17)
+
                 formatButton(.bold, key: "source.format.bold", symbol: "bold")
                 formatButton(.italic, key: "source.format.italic", symbol: "italic")
                 formatButton(.underline, key: "source.format.underline", symbol: "underline")
@@ -123,6 +131,8 @@ private struct LaTeXSourceToolbar: View {
                     menuButton(.emphasis, key: "source.format.emphasis")
                     menuButton(.itemize, key: "source.insert.itemize")
                     menuButton(.enumerate, key: "source.insert.enumerate")
+                    menuButton(.table, key: "source.insert.table")
+                    menuButton(.figure, key: "source.insert.figure")
                     Divider()
                     menuButton(.cite, key: "source.insert.cite")
                     menuButton(.reference, key: "source.insert.reference")
@@ -188,6 +198,8 @@ struct SourceTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -326,6 +338,20 @@ struct SourceTextView: NSViewRepresentable {
                 name: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView
             )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(showFindAndReplace),
+                name: .sourceLeafShowFind,
+                object: nil
+            )
+        }
+
+        @objc private func showFindAndReplace() {
+            guard let textView, textView.window?.isKeyWindow == true else { return }
+            textView.window?.makeFirstResponder(textView)
+            let item = NSMenuItem()
+            item.tag = NSTextFinder.Action.showReplaceInterface.rawValue
+            textView.performFindPanelAction(item)
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
@@ -393,14 +419,41 @@ struct SourceTextView: NSViewRepresentable {
                     source: textView.string,
                     selection: textView.selectedRange()
                 )
+                let originalSelection = textView.selectedRange()
+                let undoManager = textView.undoManager
+                undoManager?.beginUndoGrouping()
+                undoManager?.registerUndo(withTarget: self) { target in
+                    MainActor.assumeIsolated {
+                        target.restoreSelection(originalSelection, opposite: edit.resultingSelection)
+                    }
+                }
                 textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
                 textView.setSelectedRange(edit.resultingSelection)
+                undoManager?.endUndoGrouping()
                 textView.scrollRangeToVisible(edit.resultingSelection)
                 self.parent.selection = edit.resultingSelection
                 self.updateAskButton()
                 self.glyphOverlay?.needsDisplay = true
                 self.parent.onCommandApplied(request.id)
             }
+        }
+
+        private func restoreSelection(_ requested: NSRange, opposite: NSRange) {
+            guard let textView else { return }
+            let length = (textView.string as NSString).length
+            let range = NSRange(
+                location: min(max(0, requested.location), length),
+                length: min(max(0, requested.length), max(0, length - min(max(0, requested.location), length)))
+            )
+            textView.setSelectedRange(range)
+            parent.selection = range
+            textView.scrollRangeToVisible(range)
+            textView.undoManager?.registerUndo(withTarget: self) { target in
+                MainActor.assumeIsolated {
+                    target.restoreSelection(opposite, opposite: requested)
+                }
+            }
+            glyphOverlay?.selectionDidChange()
         }
 
         func scheduleInitialHighlighting(attempt: Int = 0) {
@@ -542,6 +595,7 @@ final class SourceGlyphOverlayView: NSView {
     var palette: SourceEditorPalette
     private(set) var lastSelectionRectCount = 0
     private(set) var lastCaretRect: NSRect?
+    private(set) var lastPaintedSelection = NSRange(location: NSNotFound, length: 0)
     private let caretLayer = CALayer()
     var caretBlinkAnimationActive: Bool { caretLayer.animation(forKey: "SourceLeafCaretBlink") != nil }
 
@@ -578,6 +632,7 @@ final class SourceGlyphOverlayView: NSView {
     func selectionDidChange() {
         restartCaretBlink()
         needsDisplay = true
+        displayIfNeeded()
     }
 
     func restartCaretBlink() {
@@ -607,6 +662,7 @@ final class SourceGlyphOverlayView: NSView {
         caretLayer.isHidden = true
         caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
         let selectedRange = textView.selectedRange()
+        lastPaintedSelection = selectedRange
         if selectedRange.length > 0 {
             let selectedGlyphs = layoutManager.glyphRange(
                 forCharacterRange: selectedRange,
@@ -674,6 +730,10 @@ final class SourceGlyphOverlayView: NSView {
         guard extra.height > 0 else { return nil }
         return NSRect(x: extra.minX + origin.x, y: extra.minY + origin.y, width: 2, height: extra.height)
     }
+}
+
+extension Notification.Name {
+    static let sourceLeafShowFind = Notification.Name("SourceLeaf.showFindAndReplace")
 }
 
 final class SourceEditorContainerView: NSView {

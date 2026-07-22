@@ -10,6 +10,52 @@
 - 自动保存和自动编译是独立开关；自动编译默认 1.5 秒防抖且可配置。
 - 编译缓存、会话、历史、索引与密钥不进入论文项目目录。
 
+## 2026-07-22 第五轮真实使用反馈：预览与专业编辑
+- Texifier 参考图展示的是单行紧凑 PDF 工具栏：缩略图、缩放比例与加减、首/前/后/末页、自动编译控制、导出/文件入口集中在同一高度；SourceLeaf 当前 PDF 页码工具栏另占一行，造成右侧内容起点低于源码和图片预览。
+- 用户明确要求 PDF 默认纵向连续滚动，而不是左右单页翻动；PDF 与图片均需支持按钮缩放以及 Control + 滚轮缩放。
+- 第二张截图确认停靠区标签栏本身大致同高，但 PDF 独有的第二行页码栏让各主内容区上边界不齐；本阶段应统一 panel chrome，而非只微调 PDF 页面边距。
+- 字号需求已从“编辑器字体”扩展为应用级界面缩放：项目树、标签、工具栏、设置和对话等文字都必须随全局设置变化，以适配外接显示器。
+- 标签、文件树条目当前存在文字级命中区；预期是整块标签和整行条目都可点击。
+- 专业编辑基线新增：系统查找/替换、表格和图片插入、Command+B 等快捷键、包裹命令二次执行解除、撤销恢复编辑前选区，以及鼠标拖选过程中的逐帧可见反馈。
+
+## 阶段 12 初始诊断假设
+1. PDFKit 仍配置为单页或横向显示，切换到 `singlePageContinuous + vertical` 并把控制合并到统一工具栏可同时解决连续滚动与边界错位。
+2. 标签和文件条目把手势挂在 `Text` 上且缺少全宽 `contentShape`，所以留白处不会命中。
+3. 自绘选区覆盖层只标记 `needsDisplay`，AppKit 在鼠标 event-tracking loop 中延迟刷新，导致松开鼠标后才看见选区。
+4. LaTeX formatter 是纯包裹式变换，且 AppKit 原生 undo 只恢复文本、不恢复业务选区，因此出现嵌套包裹和撤销后的选区漂移。
+5. 提示词页和对话输入区存在固定尺寸/上限，界面字号也只绑定 `EditorPreferences`，需要分别改为弹性滚动布局、无硬上限拖动和应用级界面缩放。
+
+## 阶段 12 代码复现证据
+- `PDFKitView.makeNSView` 明确设置 `displayMode = .singlePage`，虽方向为 vertical，但仍是逐页导航；现有快照测试还把 `.singlePage` 写成了预期，问题可稳定复现。
+- 图片使用 `QLPreviewView` 黑盒预览，没有可测试的缩放状态、按钮或滚轮处理；为获得一致缩放体验，应给常见位图提供原生可缩放 `NSScrollView`，其他 Quick Look 类型继续回退。
+- `PDFPanel` 在停靠标签之外又固定绘制一条 `.padding(7)` 工具栏；图片也有自己的路径栏，但高度和 padding 不同，正是截图中的内容边界不齐来源。
+- 对话输入高度直接写死为 `min(360, max(64, ...))`，确认 360pt 上限是产品代码而非系统限制。
+- Prompt 编辑器把一个 `TextEditor` 放在 `HSplitView` 的弹性区域，但外层没有明确最小高度/可滚动表单容器；需要用真实窗口回归确认滚轮事件和内容尺寸，而不是只看到滚动条就假设有效。
+- 文件树普通/筛选行虽使用 `Button`，label 没有 `.frame(maxWidth: .infinity, alignment: .leading)` 与 row-level `contentShape`；整行留白没有纳入命中。标签实现还需继续检查 `WorkspaceView`。
+- `LaTeXSourceFormatter.wrapped` 无条件生成 `prefix + selected + suffix`，因此二次加粗必然嵌套；修复应在 Core 层统一处理所有可逆包裹命令。
+- `DockZoneView` 的选中动作只挂在内部 `Button`（Label）上，外层带背景和 padding 的标签胶囊没有点击动作；因此视觉标签面积大于真实命中面积，解释了“点了但没有切换”。
+- SourceLeaf 主场景目前只将字体选择传给源码编辑器；应用根视图没有统一的界面缩放环境。设置窗口还固定为 680×540，使长 Prompt 编辑更容易被压缩。
+- `SourceLeafCommands` 目前只有打开、保存、工作区和编译菜单；不存在查找/替换或格式快捷键。标准 `NSTextView` 也未显式开启 `usesFindBar`。
+- `SourceGlyphOverlayView.selectionDidChange()` 只执行 `needsDisplay = true`；这验证了“event-tracking loop 延迟刷新”假设，修复后需用连续选区变化测试确认无需等待 mouse-up 即产生新选择矩形。
+
+## 阶段 12 实现决策
+- PDF 采用 PDFKit 原生 `.singlePageContinuous + .vertical`，缩略图使用同一 `PDFView` 绑定的 `PDFThumbnailView`，避免复制文档或让页码状态分叉。
+- PDF 和图片缩放统一为 0.1×–8×，按钮与 Control+滚轮共享同一倍率函数；普通滚轮仍只负责纵向滚动。
+- 位图/SVG 图片改由 `NSImageView + NSScrollView` 管理，从而获得原生滚动、缩放和可测试状态；旧 Quick Look 黑盒测试同步升级为缩放预览测试。
+- 应用级文字大小使用 SwiftUI `dynamicTypeSize` 环境，不缩放整个窗口像素；源码编辑器继续保留独立字体族与 pt 设置。
+- 内置 Prompt 不再用 `.disabled(true)` 的 `TextEditor`：禁用会同时禁用滚轮交互。改为只读 `ScrollView + Text`，既不可修改又可正常滚动和复制。
+- 格式切换放在 Core UTF-16 变换层统一处理；如果选区已经被对应前后缀包围，则扩大替换范围并解除，而不是在 UI 层猜测文本。
+
+## 阶段 12 视觉复核
+- 1440×900、1024×700、1728×1050 浅/深色真实工作区快照确认：三列标签基线对齐，PDF 的页码、缩放、编译、自动编译与导出已合并为单行，不再额外挤压 PDF 内容起点。
+- 紧凑 1024 宽度下 PDF 控件仍保持单行且无文字溢出；源码工具栏的查找、格式、标题、字号、公式和插入入口均可见。
+- 初版快照同时暴露 PDF 以 100% 实际大小打开时窄栏仍出现水平滚动条；已把应用初始倍率改为 PDFKit 自动适配，首次布局后再同步真实百分比，保留用户后续手动缩放。
+- 最终自动适配快照确认窄栏不再水平滚动，并能同时看到上下相邻页面；同时发现中文“第 1 / 24 页”在紧凑栏换行，已改为不换行的 `1/24`，完整本地化说明保留在悬停提示。
+
+## 阶段 12 最终结果
+- 16 项反馈均落到产品实现或自动回归，不修改用户的 `MutedRAG.tex` / `MutedRAG.pdf`；所有新增构建、测试和快照产物均保存在分类 `临时文件/阶段12` 或既有构建分类目录。
+- 安装版为 SourceLeaf 0.3.5（build 8），Universal `x86_64 arm64`，ad-hoc 签名有效，内置 Tectonic 0.16.9 双架构并正常启动。
+
 ## 研究发现
 - 本机 Texifier 1.9.33 只暴露基础文档 AppleScript 能力，没有可嵌入侧栏的公开插件接口。
 - Codex CLI 与扩展共享 `~/.codex` 状态；`codex exec` 是稳定的非交互接口，`codex app-server` 目前仍标为实验性。

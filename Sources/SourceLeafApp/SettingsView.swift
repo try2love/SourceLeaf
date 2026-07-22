@@ -33,6 +33,18 @@ private struct GeneralSettingsView: View {
                     Text("English").tag(AppLanguage.english)
                     Text("简体中文").tag(AppLanguage.simplifiedChinese)
                 }
+                LabeledContent(L10n.text("settings.interfaceFontSize")) {
+                    HStack {
+                        Slider(value: Binding(
+                            get: { model.interfaceFontScale },
+                            set: { model.setInterfaceFontScale($0) }
+                        ), in: 0.85...1.6, step: 0.05)
+                        Text("\(Int((model.interfaceFontScale * 100).rounded()))%")
+                            .monospacedDigit()
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                    .frame(width: 250)
+                }
             }
             Section(L10n.text("settings.editor")) {
                 Picker(L10n.text("settings.theme"), selection: Binding(
@@ -258,7 +270,7 @@ private struct PromptSettingsView: View {
     }
 }
 
-private struct PromptEditor: View {
+struct PromptEditor: View {
     @EnvironmentObject private var model: AppModel
     let index: Int
     @State private var language: PromptBodyLanguage = .english
@@ -297,13 +309,25 @@ private struct PromptEditor: View {
             }
             Text(language == .english ? L10n.text("prompt.bodyEnglish") : L10n.text("prompt.bodyChinese"))
                 .font(.headline)
-            TextEditor(text: bodyBinding)
-                .font(.body.monospaced())
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(7)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                .disabled(prompt.builtIn)
+            Group {
+                if prompt.builtIn {
+                    ScrollView {
+                        Text(bodyBinding.wrappedValue)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(10)
+                    }
+                } else {
+                    TextEditor(text: bodyBinding)
+                        .font(.body.monospaced())
+                        .padding(7)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+            .layoutPriority(1)
             if !prompt.variables.isEmpty {
                 LabeledContent(L10n.text("prompt.variables")) {
                     Text(prompt.variables.map { "{{\($0)}}" }.joined(separator: ", "))

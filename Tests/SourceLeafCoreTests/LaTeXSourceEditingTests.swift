@@ -45,3 +45,32 @@ import Testing
     )
     #expect(list.replacement == "\\begin{itemize}\n  \\item first\n  \\item second\n\\end{itemize}")
 }
+
+@Test func latexFormattingTogglesAnExistingWrapperWithoutNesting() {
+    let source = "Prefix \\textbf{important} suffix"
+    let inner = (source as NSString).range(of: "important")
+    let edit = LaTeXSourceFormatter.edit(command: .bold, source: source, selection: inner)
+
+    #expect(edit.replacementRange == (source as NSString).range(of: "\\textbf{important}"))
+    #expect(edit.replacement == "important")
+    #expect(edit.resultingSelection == NSRange(location: inner.location - 8, length: inner.length))
+}
+
+@Test func latexFormattingProvidesProfessionalTableAndFigureTemplates() {
+    let table = LaTeXSourceFormatter.edit(
+        command: .table,
+        source: "",
+        selection: NSRange(location: 0, length: 0)
+    )
+    #expect(table.replacement.contains("\\begin{tabular}"))
+    #expect(table.replacement.contains("\\caption{"))
+    #expect(table.replacement.contains("Column 1 & Column 2 \\\\\n"))
+
+    let figure = LaTeXSourceFormatter.edit(
+        command: .figure,
+        source: "",
+        selection: NSRange(location: 0, length: 0)
+    )
+    #expect(figure.replacement.contains("\\includegraphics"))
+    #expect(figure.replacement.contains("figures/image.png"))
+}

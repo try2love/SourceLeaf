@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.4" src="https://img.shields.io/badge/version-0.3.4-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.5" src="https://img.shields.io/badge/version-0.3.5-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -49,7 +49,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 
 - **原生源码编辑器**：接近 Overleaf 的语义配色、注释高亮、清晰选区与光标、固定行号、自动换行、系统/浅色/深色主题，以及可持久化的字体设置。
 - **项目导航**：可折叠文件树、图片预览，以及可逐级折叠并跳转到源码位置的跨文件文档结构。
-- **LaTeX 编辑工具**：支持文字样式、标题等级、字号、公式、列表、引用、交叉引用、标签和网址。
+- **LaTeX 编辑工具**：支持查找替换、可切换文字样式、常用快捷键、标题等级、字号、公式、表格、图片、列表、引用、交叉引用、标签和网址。
 - **明确保存能力**：未保存状态提示、工具栏操作和 `⌘S`。
 
 ### 编译与 PDF
@@ -58,6 +58,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 - 支持外部 `latexmk` 和更完整的 TeX Live 工具链。
 - 支持无修改快速复用、重启后自动恢复上次成功 PDF、实时编译阶段、结构化日志摘要和手动清理缓存。
 - 支持源码与 PDF 之间的 SyncTeX 双向定位，不修改磁盘上的生成 PDF。
+- PDF 默认纵向连续阅读，支持缩略图、0.1×–8× 缩放、Control+滚轮缩放、紧凑导航、自动编译控制和 PDF 另存为；图片预览使用相同缩放范围。
 
 ### 可审阅的 AI 辅助
 
@@ -73,6 +74,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 
 - 源码、PDF、对话、项目导航和日志面板均可显示、隐藏、重新排列、停靠或独立浮动。
 - 对话输入区可纵向拖动调整，并记住用户设置的高度。
+- 界面文字大小可独立于源码字体调整，适配外接显示器。
 - 关闭独立面板窗口后，对应面板会回到主工作区。
 - 界面语言可在 English、简体中文和跟随系统之间即时切换。
 - 自动恢复上次打开的项目和源码文件。

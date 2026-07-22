@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.4" src="https://img.shields.io/badge/version-0.3.4-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.5" src="https://img.shields.io/badge/version-0.3.5-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -49,7 +49,7 @@ The rest of the application follows the same local-first boundary. Project metad
 
 - **Native source editor** with Overleaf-style semantic colors, comment highlighting, readable selections and caret, fixed line numbers, line wrapping, light/dark/system themes, and persistent font preferences.
 - **Project navigation** with a collapsible folder tree, image preview, and a recursively collapsible document outline that jumps to the owning source location.
-- **LaTeX editing tools** for text styles, heading levels, font sizes, formulas, lists, citations, references, labels, and URLs.
+- **LaTeX editing tools** with Find/Replace, toggleable styles, common shortcuts, heading levels, font sizes, formulas, tables, figures, lists, citations, references, labels, and URLs.
 - **Explicit saving** with dirty-state feedback, toolbar actions, and `⌘S`.
 
 ### Compilation and PDF
@@ -58,6 +58,7 @@ The rest of the application follows the same local-first boundary. Project metad
 - **External toolchain support** for `latexmk` and broader TeX Live compatibility.
 - **Fast unchanged-project reuse**, automatic restoration of the last successful PDF after relaunch, live compilation phases, structured build-log summaries, and manual cache cleanup.
 - **Forward and reverse SyncTeX** between source lines and PDF positions without modifying the generated PDF.
+- **Continuous vertical PDF reading** with thumbnails, 0.1×–8× zoom, Control-wheel zoom, compact navigation, auto-build control, and Save PDF As; image previews use the same zoom range.
 
 ### Reviewable AI assistance
 
@@ -73,6 +74,7 @@ The rest of the application follows the same local-first boundary. Project metad
 
 - Source, PDF, conversation, project navigation, and logs can be shown, hidden, rearranged, docked, or detached.
 - The conversation composer can be resized vertically and remembers its height.
+- Interface text size is adjustable independently from the source editor font, including layouts used on external displays.
 - Detached panels return to the main workspace when their windows close.
 - Interface language can switch immediately between English, Simplified Chinese, and Follow System.
 - The most recent project and source file reopen automatically.

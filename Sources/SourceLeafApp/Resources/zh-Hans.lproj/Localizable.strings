@@ -234,4 +234,14 @@
 "theme.dark" = "深色";
 "settings.editorFont" = "编辑器字体";
 "settings.editorFontSize" = "编辑器字号";
+"settings.interfaceFontSize" = "界面文字大小";
+"preview.actualSize" = "实际大小";
+"pdf.thumbnails" = "缩略图";
+"pdf.export" = "PDF 另存为…";
+"pdf.fit" = "适合";
+"status.pdfExported" = "PDF 已保存";
+"source.findReplace" = "查找与替换";
+"source.insert.table" = "插入表格";
+"source.insert.figure" = "插入图片 / 图环境";
+"source.menu.format" = "LaTeX 格式";
 "font.systemMonospaced" = "系统等宽字体";

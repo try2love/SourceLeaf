@@ -48,3 +48,17 @@ enum EditorFontCatalog {
             ?? .monospacedSystemFont(ofSize: clampedSize, weight: .regular)
     }
 }
+
+enum InterfaceFontScale {
+    static func dynamicTypeSize(for scale: Double) -> DynamicTypeSize {
+        switch scale {
+        case ..<0.90: .small
+        case ..<0.98: .medium
+        case ..<1.10: .large
+        case ..<1.23: .xLarge
+        case ..<1.38: .xxLarge
+        case ..<1.53: .xxxLarge
+        default: .accessibility1
+        }
+    }
+}

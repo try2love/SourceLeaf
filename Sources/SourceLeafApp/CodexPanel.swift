@@ -157,7 +157,7 @@ struct CodexPanel: View {
                     DragGesture(minimumDistance: 1)
                         .onChanged { value in
                             if composerDragStart == nil { composerDragStart = composerHeight }
-                            composerHeight = min(360, max(64, (composerDragStart ?? composerHeight) - value.translation.height))
+                            composerHeight = max(64, (composerDragStart ?? composerHeight) - value.translation.height)
                         }
                         .onEnded { _ in composerDragStart = nil }
                 )
