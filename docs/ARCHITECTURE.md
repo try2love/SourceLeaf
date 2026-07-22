@@ -26,3 +26,7 @@ Local Codex does not run inside the paper project. It runs from an empty per-pro
 - API credentials: macOS Keychain.
 
 No SourceLeaf metadata is added to the paper project unless a future shared-project configuration is explicitly enabled.
+
+## SyncTeX navigation
+
+SourceLeaf parses the compressed SyncTeX index emitted by Tectonic or `latexmk` without requiring a separately installed `synctex` executable. Input tags retain the absolute owning `.tex` path. Forward search maps the active source line to a PDF page and scaled-point coordinate; reverse search maps a command-clicked PDF coordinate to the nearest source record, then validates that the resulting path belongs to the open project before opening it. PDF highlights are in-memory annotations and never modify the generated PDF on disk.

@@ -56,11 +56,18 @@ struct WorkspaceView: View {
             }
             .toggleStyle(.button)
 
-            Button { model.compile() } label: {
-                if model.buildRunning { ProgressView().controlSize(.small) }
-                else { Label(L10n.compile, systemImage: "play.fill") }
+            Button {
+                if model.buildRunning { model.cancelCompile() }
+                else { model.compile() }
+            } label: {
+                if model.buildRunning {
+                    Label(L10n.text("build.stop"), systemImage: "stop.fill")
+                        .foregroundStyle(.red)
+                } else {
+                    Label(L10n.compile, systemImage: "play.fill")
+                }
             }
-            .disabled(model.projectRoot == nil || model.buildRunning)
+            .disabled(model.projectRoot == nil)
         }
         ToolbarItem(placement: .status) {
             Text(model.statusText)
@@ -136,9 +143,9 @@ private struct DockCanvasView: View {
 
             DockZoneView(zone: .bottom)
                 .frame(
-                    minHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 72,
-                    idealHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 104,
-                    maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 220
+                    minHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 58,
+                    idealHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 82,
+                    maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 180
                 )
         }
     }

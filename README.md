@@ -38,7 +38,7 @@ swift run SourceLeaf
 
 ## Current status / 当前状态
 
-The current `0.2.0` build is a functional technical preview. Its central workflow is available now:
+The current `0.3.0` build is a product-tested preview. Its central workflow is available now:
 
 1. Open a LaTeX project folder and select text in a `.tex` file.
 2. Attach that selection with the floating button, context command, or `⌥⌘K`.
@@ -48,13 +48,17 @@ The current `0.2.0` build is a functional technical preview. Its central workflo
 
 已经可用的核心流程是：打开 LaTeX 项目、选中源码、附加为严格可写目标、选择上下文范围、让本机 Codex 或 API 生成建议、审阅 Diff 后再决定是否写入。
 
-Before acceptance, SourceLeaf now compiles the proposal in an isolated temporary project copy by default. A failed candidate leaves the real source untouched; the user can inspect the build log or explicitly force acceptance. History restoration is routed back through the same reviewable diff instead of silently overwriting source.
+Before acceptance, SourceLeaf compiles the proposal in an isolated temporary project copy by default. A failed candidate leaves the real source untouched; the user can inspect the build log or explicitly force acceptance. History restoration is routed back through the same reviewable diff instead of silently overwriting source.
 
-Still in development: SyncTeX source/PDF navigation and the safety review for custom CLI providers. A managed Tectonic engine is bundled by the installer; external `latexmk` remains supported for broader TeX Live compatibility.
+The workspace includes a collapsible project tree, project-wide LaTeX outline, native raster/vector image preview, one-page PDF navigation, live compile phases, and SyncTeX in both directions. Use the source header's locate button to reveal the cursor in PDF; command-click a PDF position to open its owning `.tex` file and line.
+
+Still in development: the safety review for custom CLI providers. A managed Tectonic engine is bundled by the installer; external `latexmk` remains supported for broader TeX Live compatibility.
 
 接受修改前，SourceLeaf 现在默认在隔离的临时项目副本中试编译。失败时真实源码保持不变；用户可以检查日志，也可以明确选择强制接受。历史恢复同样会先回到 Diff 审阅，不会静默覆盖源码。
 
-仍在开发：SyncTeX 双向定位和自定义 CLI 的安全校验。安装脚本会自动打包受管理 Tectonic；系统已有 `latexmk` 时仍可用于更完整的 TeX Live 兼容性。
+工作区现在包含可折叠项目树、跨文件文档结构、原生位图/矢量图预览、单页 PDF 导航、实时编译阶段和 SyncTeX 双向定位。源码栏按钮可在 PDF 中定位当前光标；按住 ⌘ 点击 PDF 可打开对应 `.tex` 文件与行号。
+
+仍在开发：自定义 CLI 的安全校验。安装脚本会自动打包受管理 Tectonic；系统已有 `latexmk` 时仍可用于更完整的 TeX Live 兼容性。
 
 ## Privacy boundary / 隐私边界
 

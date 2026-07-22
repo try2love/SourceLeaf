@@ -18,6 +18,14 @@ import Testing
     #expect(!context.contains("Results body."))
 }
 
+@Test func outlineKeepsTheOwningSourceFileForCrossFileNavigation() {
+    let source = "\\section{Implementation}\nBody"
+    let outline = ProjectIndexer.outline(for: source, relativePath: "sections/deep/details.tex")
+    #expect(outline.first?.title == "Implementation")
+    #expect(outline.first?.relativePath == "sections/deep/details.tex")
+    #expect(outline.first?.line == 1)
+}
+
 @Test func nearbyContextIsBounded() throws {
     let source = (1...100).map { "line \($0)" }.joined(separator: "\n")
     let target = try SourceTargetService.target(in: source, relativePath: "main.tex", startLine: 50, endLine: 50)

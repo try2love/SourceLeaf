@@ -7,8 +7,17 @@
 "workspace" = "工作区";
 "build" = "编译";
 "build.compile" = "立即编译";
+"build.stop" = "停止";
 "build.auto" = "自动编译";
 "build.noLog" = "编译输出将显示在这里。";
+"build.downloads" = "已下载资源";
+"build.copyLog" = "复制编译日志";
+"build.phase.idle" = "准备就绪";
+"build.phase.preparingResources" = "正在准备资源";
+"build.phase.typesetting" = "正在排版";
+"build.phase.bibliography" = "正在生成参考文献";
+"build.phase.renderingPDF" = "正在生成 PDF";
+"build.phase.finished" = "已完成";
 "panel.source" = "源码";
 "panel.image" = "图片预览";
 "panel.pdf" = "PDF";
@@ -18,6 +27,7 @@
 "panel.history" = "AI 修改历史";
 "action.show" = "显示";
 "action.ok" = "确定";
+"action.copy" = "复制消息";
 "action.hide" = "隐藏";
 "action.detach" = "移到独立窗口";
 "action.accept" = "接受";
@@ -31,6 +41,14 @@
 "pdf.compileHint" = "编译主文档后，这里会保留最后一次成功的 PDF。";
 "pdf.sendSelection" = "发送给 Codex";
 "pdf.selectionInstruction" = "分析这段 PDF 选区并定位对应的源码修改；在映射得到确认前不要修改源码：";
+"pdf.previousPage" = "上一页";
+"pdf.nextPage" = "下一页";
+"pdf.pageIndicator" = "第 %d / %d 页";
+"synctex.showInPDF" = "在 PDF 中定位源码光标";
+"synctex.commandClickHint" = "⌘ 点按定位源码";
+"synctex.unavailable" = "暂无可用的 SyncTeX 位置，请启用 SyncTeX 后重新编译。";
+"synctex.pdfLocated" = "已在 PDF 中定位源码位置。";
+"synctex.sourceLocated" = "已定位到 %@ 第 %d 行。";
 "image.none" = "选择项目中的图片或 PDF 后可在此预览。";
 "dock.moveTo" = "移动面板到";
 "dock.zone.leading" = "左侧";
@@ -48,6 +66,7 @@
 "ai.thinking" = "正在生成可审阅的修改建议……";
 "ai.chatOnlyHint" = "尚未附加可写目标；本条消息仅用于分析。";
 "ai.targetHint" = "AI 只能修改已附加的源码范围。";
+"ai.composerPlaceholder" = "描述希望如何修改源码…";
 "ai.adjustInstruction" = "继续调整 %@ 的建议修改：";
 "ai.attachedTarget" = "已附加目标";
 "validation.error" = "错误";
@@ -64,6 +83,7 @@
 "status.saved" = "已保存";
 "status.buildSucceeded" = "编译成功";
 "status.buildFailed" = "编译失败";
+"status.buildCancelled" = "已停止编译";
 "status.cacheCleared" = "编译缓存已清理";
 "context.selection" = "仅选区";
 "context.nearby" = "附近内容";

@@ -22,6 +22,15 @@ struct SourcePanel: View {
                     .buttonStyle(.borderless)
                     .keyboardShortcut("k", modifiers: [.option, .command])
                 }
+                if model.syncTeXDocument != nil, model.selectedFile?.kind == .tex {
+                    Button {
+                    model.locateSourceInPDF()
+                    } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L10n.text("synctex.showInPDF"))
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -46,15 +55,18 @@ struct SourceTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView()
-        let scrollView = NSScrollView()
+        let scrollView = NSTextView.scrollableTextView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
+        scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        let textView = NSTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+        guard let textView = scrollView.documentView as? NSTextView else {
+            assertionFailure("NSTextView.scrollableTextView() did not provide a text view")
+            return NSView()
+        }
+        let container = SourceEditorContainerView(scrollView: scrollView, textView: textView)
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
@@ -73,14 +85,12 @@ struct SourceTextView: NSViewRepresentable {
         ]
         textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.string = text
-        scrollView.documentView = textView
 
         let ruler = LineNumberRulerView(textView: textView)
         scrollView.verticalRulerView = ruler
@@ -109,6 +119,7 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.ruler = ruler
         context.coordinator.askButton = askButton
         context.coordinator.observeScrollView(scrollView)
+        container.layoutEditor()
         context.coordinator.applyHighlighting()
         return container
     }
@@ -127,7 +138,7 @@ struct SourceTextView: NSViewRepresentable {
             textView.scrollRangeToVisible(selection)
         }
         textView.backgroundColor = .textBackgroundColor
-        textView.textColor = .labelColor
+        (nsView as? SourceEditorContainerView)?.layoutEditor()
         context.coordinator.askButton?.title = L10n.text("selection.askAI")
         context.coordinator.updateAskButton()
         context.coordinator.ruler?.needsDisplay = true
@@ -154,7 +165,7 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
-            ruler?.needsDisplay = true
+            ruler?.scrollPositionDidChange()
         }
 
         func textDidChange(_ notification: Notification) {
@@ -190,7 +201,7 @@ struct SourceTextView: NSViewRepresentable {
             apply(#"%.*$"#, color: .systemGreen, storage: storage, source: textView.string, options: [.anchorsMatchLines])
             apply(#"\\[A-Za-z@]+\*?"#, color: .systemBlue, storage: storage, source: textView.string)
             apply(#"\$[^$\n]*\$"#, color: .systemPurple, storage: storage, source: textView.string)
-            apply(#"\{[^{}\n]*\}"#, color: .systemOrange, storage: storage, source: textView.string)
+            apply(#"[{}]"#, color: .systemOrange, storage: storage, source: textView.string)
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
@@ -216,8 +227,41 @@ struct SourceTextView: NSViewRepresentable {
     }
 }
 
+final class SourceEditorContainerView: NSView {
+    private let editorScrollView: NSScrollView
+    private let editorTextView: NSTextView
+
+    init(scrollView: NSScrollView, textView: NSTextView) {
+        editorScrollView = scrollView
+        editorTextView = textView
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        layoutEditor()
+    }
+
+    func layoutEditor() {
+        let width = max(editorScrollView.contentSize.width, 1)
+        guard width.isFinite else { return }
+        if abs(editorTextView.frame.width - width) > 0.5 {
+            editorTextView.setFrameSize(NSSize(width: width, height: max(editorTextView.frame.height, 1)))
+        }
+        if let textContainer = editorTextView.textContainer {
+            textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+            textContainer.widthTracksTextView = true
+            editorTextView.layoutManager?.ensureLayout(for: textContainer)
+        }
+    }
+}
+
 final class LineNumberRulerView: NSRulerView {
     weak var textView: NSTextView?
+    private(set) var lastDrawnLines: [Int] = []
+    private(set) var scrollChangeCount = 0
 
     init(textView: NSTextView) {
         self.textView = textView
@@ -227,6 +271,11 @@ final class LineNumberRulerView: NSRulerView {
     }
 
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func scrollPositionDidChange() {
+        scrollChangeCount += 1
+        needsDisplay = true
+    }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView,
@@ -239,7 +288,9 @@ final class LineNumberRulerView: NSRulerView {
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
         let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         let source = textView.string
-        for item in SourceLineMap.visibleLineStarts(in: source, utf16Range: characterRange) {
+        let visibleLines = SourceLineMap.visibleLineStarts(in: source, utf16Range: characterRange)
+        lastDrawnLines = visibleLines.map(\.line)
+        for item in visibleLines {
             guard item.utf16Location < (source as NSString).length else { continue }
             let glyph = layoutManager.glyphIndexForCharacter(at: item.utf16Location)
             let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)

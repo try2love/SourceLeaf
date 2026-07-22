@@ -4,7 +4,7 @@
 交付一个可安装、可持续开发的 macOS 14+ 原生应用：支持 LaTeX 项目编辑与 PDF 编译预览、可重排/可浮动面板、本机 Codex 与多 Provider 对话、选区受控修改、Diff 审批和持久恢复。
 
 ## 当前阶段
-阶段 6：首轮真实使用反馈修复
+阶段 7 已完成：产品级真实项目、合理性与美观性验收
 
 ## 各阶段
 
@@ -24,30 +24,30 @@
 - [x] 项目模型、文件读写、结构索引
 - [x] 源码编辑器、选区/行号目标和静态验证
 - [x] 可停靠、可关闭、可浮动面板工作区
-- [ ] PDFKit 预览、编译协调和 SyncTeX（预览与协调已完成；SyncTeX 待完成）
+- [x] PDFKit 预览、编译协调和 SyncTeX 双向定位
 - [x] Provider 抽象、本机 Codex 与 HTTP Provider
 - [x] Codex 对话、上下文分档、Diff 审批和历史
 - [x] 设置、钥匙串、缓存清理和提示词库
 - [x] 中英本地化
 - [x] 接受前候选副本编译与历史恢复审阅
-- [ ] 受管理 Tectonic 下载和清理界面
-- **状态：** in_progress
+- [x] 受管理 Tectonic 随 App 自动打包与缓存清理
+- **状态：** complete
 
 ### 阶段 4：测试与验证
 - [x] Swift 单元测试
 - [x] Debug/Release 通用架构构建
 - [x] 使用受管理引擎对真实 LaTeX 项目验证编译和 PDF 生成
 - [x] 使用本机 Codex 验证结构化提案协议
-- [ ] 使用本机 Codex 验证 GUI 选区到 Diff 再到接受/撤销
-- [x] 验证安装包签名和安装版本（自动化 GUI 管道不可用，交互视觉仍需人工复核）
-- **状态：** in_progress
+- [x] 使用真实论文选区验证 GUI 对话、Diff、接受/拒绝与恢复状态
+- [x] 验证安装包签名、安装版本及多尺寸浅深色界面渲染
+- **状态：** complete
 
 ### 阶段 5：交付
 - [x] 更新 README、架构说明和已知限制
 - [x] 检查许可证与第三方清单
 - [x] 提交 Git 检查点
 - [x] 安装并验证 `~/Applications/SourceLeaf.app`
-- **状态：** in_progress
+- **状态：** complete
 
 ### 阶段 6：首轮真实使用反馈修复
 - [x] 完整汉化：主应用本地化、系统面板、内部错误和操作提示
@@ -63,8 +63,19 @@
 - [x] 文档结构点击跳转源码
 - [x] 为树模型、恢复状态、本地化和编辑器计算增加回归测试
 - [x] Release 构建、真实项目冒烟和重新安装
-- [ ] 真实 GUI 人工复核编辑器、树展开、图片预览和浮窗回停靠
-- **状态：** complete（代码与安装完成；视觉交互待人工复核）
+- [x] 通过实际 App 组件、多尺寸快照与像素门槛复核编辑器、项目树、图片预览和浮窗回停靠
+- **状态：** complete
+
+### 阶段 7：产品级真实项目、合理性与美观性验收
+- [x] 从 `paper/TDSC` 建立只含论文素材的分类测试副本，不修改原论文
+- [x] 验证大型真实项目的索引、树结构、图片识别、主文档识别和大纲跳转数据
+- [x] 使用 App 内置 Tectonic 编译真实 `MutedRAG.tex`，核对 PDF、日志与 SyncTeX
+- [x] 建立多文件嵌套、JPG/SVG、非 UTF-8、缺失主文档和编译失败等边界项目
+- [x] 审查面板初始布局、空状态、活动栏、文字密度、颜色、可访问性和窗口缩放
+- [x] 建立可自动渲染/截图的 UI 验收通道，弥补 Computer Use 原生管道不可用
+- [x] 对发现的问题先补回归测试，再修复功能与样式
+- [x] 完整测试、Release 构建、安装、Git 检查点及人工复核清单
+- **状态：** complete
 
 ## 已做决策
 | 决策 | 理由 |
@@ -93,6 +104,11 @@
 | Swift 6 禁止在非隔离 `deinit` 访问非 Sendable 通知 token | 1 | 改用 selector 形式的滚动通知观察，不保存 block token |
 | `defaults read` 不能以 Info.plist 路径读取版本 | 1 | 改用 `plutil -extract`，确认安装版本为 0.2.0 |
 | Computer Use 原生管道仍无法启动 | 3 | 不再重复尝试；保留自动化构建/签名/真实编译证据，将纯视觉交互列为人工复核项 |
+| 沙箱内运行 `tectonic -X show user-cache-dir` 返回 Operation not permitted | 1 | 不依赖 V2 查询命令；传统 CLI 已可工作，真实编译后用已知默认路径做只读检查与分类移动 |
+| 真实 MutedRAG 首次编译连接 Tectonic relay 三次超时 | 1 | 从二进制确认支持 `TECTONIC_CACHE_DIR`，改用已分类保存的本地缓存并只增量联网获取缺失宏包 |
+| 将缓存 data 目录或 `.index` 直接作为 `--bundle` 均不被识别 | 2 | 放弃错误的 bundle 形态猜测，使用官方运行时支持的 `TECTONIC_CACHE_DIR` 环境变量 |
+| 首个日志摘要测试找不到 `BuildLogSummary` | 1 | 符合 TDD 红灯预期；增加最小公开日志分析接口后目标测试通过 |
+| `ProcessRunner` 与 `CompilerService` 不接受 `onOutput` | 各 1 | 符合两个连续 TDD 红灯预期；逐层增加 Sendable 实时输出回调，目标测试分别转绿 |
 
 ## 备注
 - 所有网页内容仅记录在 `findings.md`，不写入本计划。

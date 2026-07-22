@@ -35,6 +35,7 @@ public final class ProcessRunner: @unchecked Sendable {
         arguments: [String],
         currentDirectoryURL: URL? = nil,
         environment: [String: String]? = nil,
+        onOutput: (@Sendable (String) -> Void)? = nil,
         input: Data? = nil
     ) async throws -> ProcessOutput {
         let process = Process()
@@ -53,11 +54,17 @@ public final class ProcessRunner: @unchecked Sendable {
 
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if !data.isEmpty { stdoutBuffer.append(data) }
+            if !data.isEmpty {
+                stdoutBuffer.append(data)
+                onOutput?(String(decoding: data, as: UTF8.self))
+            }
         }
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if !data.isEmpty { stderrBuffer.append(data) }
+            if !data.isEmpty {
+                stderrBuffer.append(data)
+                onOutput?(String(decoding: data, as: UTF8.self))
+            }
         }
 
         return try await withTaskCancellationHandler {
@@ -65,8 +72,12 @@ public final class ProcessRunner: @unchecked Sendable {
                 process.terminationHandler = { completed in
                     stdout.fileHandleForReading.readabilityHandler = nil
                     stderr.fileHandleForReading.readabilityHandler = nil
-                    stdoutBuffer.append(stdout.fileHandleForReading.readDataToEndOfFile())
-                    stderrBuffer.append(stderr.fileHandleForReading.readDataToEndOfFile())
+                    let stdoutTail = stdout.fileHandleForReading.readDataToEndOfFile()
+                    let stderrTail = stderr.fileHandleForReading.readDataToEndOfFile()
+                    stdoutBuffer.append(stdoutTail)
+                    stderrBuffer.append(stderrTail)
+                    if !stdoutTail.isEmpty { onOutput?(String(decoding: stdoutTail, as: UTF8.self)) }
+                    if !stderrTail.isEmpty { onOutput?(String(decoding: stderrTail, as: UTF8.self)) }
                     continuation.resume(returning: ProcessOutput(
                         exitCode: completed.terminationStatus,
                         standardOutput: String(decoding: stdoutBuffer.value, as: UTF8.self),

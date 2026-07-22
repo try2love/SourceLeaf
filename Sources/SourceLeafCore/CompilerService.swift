@@ -99,7 +99,8 @@ public actor CompilerService {
         projectRoot: URL,
         rootDocument: String,
         configuration: BuildConfiguration,
-        managedTectonicURL: URL? = nil
+        managedTectonicURL: URL? = nil,
+        onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> BuildResult {
         activeBuild?.cancel()
         let task = Task {
@@ -107,7 +108,8 @@ public actor CompilerService {
                 projectRoot: projectRoot,
                 rootDocument: rootDocument,
                 configuration: configuration,
-                managedTectonicURL: managedTectonicURL
+                managedTectonicURL: managedTectonicURL,
+                onOutput: onOutput
             )
         }
         activeBuild = task
@@ -121,7 +123,8 @@ public actor CompilerService {
         editedRelativePath: String,
         editedText: String,
         configuration: BuildConfiguration,
-        managedTectonicURL: URL? = nil
+        managedTectonicURL: URL? = nil,
+        onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> BuildResult {
         let cache = try ApplicationDirectories.cacheDirectory()
         let trialRoot = cache
@@ -143,7 +146,8 @@ public actor CompilerService {
             projectRoot: trialRoot,
             rootDocument: rootDocument,
             configuration: configuration,
-            managedTectonicURL: managedTectonicURL
+            managedTectonicURL: managedTectonicURL,
+            onOutput: onOutput
         )
         generatedOutput = result.outputDirectory
         return result
@@ -153,7 +157,8 @@ public actor CompilerService {
         projectRoot: URL,
         rootDocument: String,
         configuration: BuildConfiguration,
-        managedTectonicURL: URL?
+        managedTectonicURL: URL?,
+        onOutput: (@Sendable (String) -> Void)?
     ) async throws -> BuildResult {
         let rootURL = try SourceTargetService.validatedURL(relativePath: rootDocument, projectRoot: projectRoot)
         guard fileManager.fileExists(atPath: rootURL.path) else { throw CompilerError.rootDocumentMissing }
@@ -172,7 +177,8 @@ public actor CompilerService {
         let output = try await runner.run(
             executableURL: invocation.executable,
             arguments: invocation.arguments,
-            currentDirectoryURL: projectRoot
+            currentDirectoryURL: projectRoot,
+            onOutput: onOutput
         )
         let finishedAt = Date()
         let basename = rootURL.deletingPathExtension().lastPathComponent

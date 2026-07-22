@@ -3,6 +3,13 @@ import Combine
 import Foundation
 import SourceLeafCore
 
+struct PDFNavigationTarget: Equatable, Identifiable {
+    var id = UUID()
+    var pageIndex: Int
+    var x: Double
+    var yFromTop: Double
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var projectRoot: URL?
@@ -17,9 +24,14 @@ final class AppModel: ObservableObject {
     @Published var layout = DockLayout()
     @Published var pdfURL: URL?
     @Published var pdfSelection = ""
+    @Published var pdfPageIndex = 0
+    @Published var pdfPageCount = 0
+    @Published var pdfNavigationTarget: PDFNavigationTarget?
+    @Published var syncTeXDocument: SyncTeXDocument?
     @Published var buildLog = ""
     @Published var buildRunning = false
     @Published var buildSucceeded: Bool?
+    @Published var buildPhase: BuildPhase = .idle
     @Published var messages: [ChatMessage] = []
     @Published var editTargets: [SourceTarget] = []
     @Published var pendingProposal: AIProposal?
@@ -51,12 +63,21 @@ final class AppModel: ObservableObject {
     private var chatStore: JSONFileStore<[ChatMessage]>?
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
     private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
+    private let supportDirectoryOverride: URL?
+    private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
 
-    init() {
-        appLanguage = L10n.selectedLanguage
+    init(
+        restoreLastProject: Bool = true,
+        supportDirectory: URL? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        supportDirectoryOverride = supportDirectory
+        self.defaults = defaults
+        appLanguage = defaults.string(forKey: L10n.languageDefaultsKey)
+            .flatMap(AppLanguage.init(rawValue:)) ?? L10n.selectedLanguage
         do {
-            let support = try ApplicationDirectories.supportDirectory()
+            let support = try resolvedSupportDirectory()
             profilesStore = JSONFileStore(url: support.appendingPathComponent("settings/providers.json"))
             promptsStore = JSONFileStore(url: support.appendingPathComponent("settings/prompts.json"))
             providerProfiles = try profilesStore?.load(default: [.localCodex]) ?? [.localCodex]
@@ -75,12 +96,12 @@ final class AppModel: ObservableObject {
         } catch {
             lastError = L10n.userMessage(for: error)
         }
-        restoreLastProjectIfAvailable()
+        if restoreLastProject { restoreLastProjectIfAvailable() }
     }
 
     func setAppLanguage(_ language: AppLanguage) {
         appLanguage = language
-        UserDefaults.standard.set(language.rawValue, forKey: L10n.languageDefaultsKey)
+        defaults.set(language.rawValue, forKey: L10n.languageDefaultsKey)
         objectWillChange.send()
     }
 
@@ -97,10 +118,24 @@ final class AppModel: ObservableObject {
     func openProject(_ root: URL) {
         do {
             try saveCurrentFileIfNeeded()
+            selectedFile = nil
+            selectedImageFile = nil
+            sourceText = ""
+            selectedRange = NSRange(location: 0, length: 0)
+            outline = []
+            pdfURL = nil
+            pdfSelection = ""
+            pdfPageIndex = 0
+            pdfPageCount = 0
+            pdfNavigationTarget = nil
+            syncTeXDocument = nil
+            buildLog = ""
+            buildSucceeded = nil
+            buildPhase = .idle
             projectRoot = root.standardizedFileURL
             projectFiles = ProjectIndexer.discoverFiles(root: root)
             projectTree = ProjectIndexer.tree(files: projectFiles)
-            let support = try ApplicationDirectories.supportDirectory()
+            let support = try resolvedSupportDirectory()
             let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
             let stateRoot = support.appendingPathComponent("Projects/\(key)", isDirectory: true)
             projectConfigStore = JSONFileStore(url: stateRoot.appendingPathComponent("configuration.json"))
@@ -113,15 +148,22 @@ final class AppModel: ObservableObject {
             messages = configuration.privateChatMode ? [] : (try chatStore?.load(default: []) ?? [])
 
             let lastFileKey = "SourceLeaf.lastFile.\(key)"
-            let lastFile = UserDefaults.standard.string(forKey: lastFileKey)
+            let lastFile = defaults.string(forKey: lastFileKey)
                 .flatMap { path in projectFiles.first { $0.relativePath == path } }
-            let rootDocumentFile = configuration.rootDocument.flatMap { path in projectFiles.first { $0.relativePath == path } }
-                ?? ProjectIndexer.detectRootDocument(files: projectFiles)
-                ?? projectFiles.first(where: { $0.kind == .tex })
-            if configuration.rootDocument == nil { configuration.rootDocument = rootDocumentFile?.relativePath }
-            if let initialFile = lastFile ?? rootDocumentFile { openFile(initialFile) }
+            let configuredRootFile = configuration.rootDocument.flatMap { path in
+                projectFiles.first { $0.relativePath == path && $0.kind == .tex }
+            }
+            let detectedRootFile = ProjectIndexer.detectRootDocument(files: projectFiles)
+            let rootDocumentFile = configuredRootFile ?? detectedRootFile
+            if configuredRootFile == nil { configuration.rootDocument = detectedRootFile?.relativePath }
+            let initialFile = lastFile
+                ?? rootDocumentFile
+                ?? projectFiles.first(where: { [.tex, .bibliography, .style].contains($0.kind) })
+                ?? projectFiles.first
+            if let initialFile { openFile(initialFile) }
+            refreshProjectOutline()
             persistConfiguration()
-            UserDefaults.standard.set(root.standardizedFileURL.path, forKey: Self.lastProjectPathKey)
+            defaults.set(root.standardizedFileURL.path, forKey: Self.lastProjectPathKey)
             statusText = root.lastPathComponent
         } catch {
             report(error)
@@ -141,7 +183,7 @@ final class AppModel: ObservableObject {
             selectedImageFile = nil
             sourceText = text
             selectedRange = NSRange(location: 0, length: 0)
-            outline = ProjectIndexer.outline(for: text)
+            refreshActiveFileOutline()
             suppressTextChange = false
             layout.show(.source, in: .center)
             if let zone = layout.zone(containing: .source) { layout.selected[zone] = .source }
@@ -168,7 +210,7 @@ final class AppModel: ObservableObject {
     func sourceChanged(_ text: String) {
         guard !suppressTextChange else { return }
         sourceText = text
-        outline = ProjectIndexer.outline(for: text)
+        refreshActiveFileOutline()
         scheduleSave()
         scheduleCompile()
     }
@@ -230,9 +272,57 @@ final class AppModel: ObservableObject {
     }
 
     func jumpToOutline(_ item: DocumentOutlineItem) {
+        if let relativePath = item.relativePath,
+           selectedFile?.relativePath != relativePath,
+           let file = projectFiles.first(where: { $0.relativePath == relativePath }) {
+            openFile(file)
+        }
         let location = SourceLineMap.utf16Location(in: sourceText, line: item.line)
         selectedRange = NSRange(location: location, length: 0)
         revealPanel(.source, in: .center)
+    }
+
+    func locateSourceInPDF() {
+        guard let selectedFile,
+              let syncTeXDocument,
+              let location = syncTeXDocument.pdfLocation(
+                sourceURL: selectedFile.url,
+                line: SourceLineMap.lineNumber(in: sourceText, utf16Location: selectedRange.location)
+              ) else {
+            statusText = L10n.text("synctex.unavailable")
+            return
+        }
+        pdfNavigationTarget = PDFNavigationTarget(
+            pageIndex: location.pageIndex,
+            x: location.x,
+            yFromTop: location.yFromTop
+        )
+        pdfPageIndex = location.pageIndex
+        revealPanel(.pdf, in: .trailing)
+        statusText = L10n.text("synctex.pdfLocated")
+    }
+
+    func locatePDFPointInSource(pageIndex: Int, x: Double, yFromTop: Double) {
+        guard let root = projectRoot,
+              let location = syncTeXDocument?.sourceLocation(
+                pageIndex: pageIndex,
+                x: x,
+                yFromTop: yFromTop
+              ),
+              location.sourceURL.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/"),
+              let file = projectFiles.first(where: {
+                $0.url.standardizedFileURL == location.sourceURL.standardizedFileURL
+              }) else {
+            statusText = L10n.text("synctex.unavailable")
+            return
+        }
+        openFile(file)
+        selectedRange = NSRange(
+            location: SourceLineMap.utf16Location(in: sourceText, line: location.line),
+            length: 0
+        )
+        revealPanel(.source, in: .center)
+        statusText = String(format: L10n.text("synctex.sourceLocated"), file.relativePath, location.line)
     }
 
     func movePanel(_ panel: WorkspacePanel, to zone: DockZone) {
@@ -415,7 +505,10 @@ final class AppModel: ObservableObject {
                     editedRelativePath: target.relativePath,
                     editedText: candidate,
                     configuration: configuration.build,
-                    managedTectonicURL: managed
+                    managedTectonicURL: managed,
+                    onOutput: { [weak self] chunk in
+                        Task { @MainActor [weak self] in self?.receiveBuildOutput(chunk) }
+                    }
                 )
                 buildLog = result.log
                 guard result.status == .succeeded else {
@@ -444,8 +537,11 @@ final class AppModel: ObservableObject {
         activeCompileTask?.cancel()
         buildRunning = true
         buildSucceeded = nil
+        buildLog = ""
+        buildPhase = .idle
         layout.show(.pdf, in: .trailing)
         activeCompileTask = Task {
+            defer { buildRunning = false }
             do {
                 try saveCurrentFileIfNeeded()
                 let managed = managedTectonicURL()
@@ -453,22 +549,43 @@ final class AppModel: ObservableObject {
                     projectRoot: root,
                     rootDocument: rootDocument,
                     configuration: configuration.build,
-                    managedTectonicURL: managed
+                    managedTectonicURL: managed,
+                    onOutput: { [weak self] chunk in
+                        Task { @MainActor [weak self] in self?.receiveBuildOutput(chunk) }
+                    }
                 )
                 if Task.isCancelled { return }
                 buildLog = result.log
+                buildPhase = result.status == .succeeded ? .finished : BuildLogSummary(log: result.log).phase
                 buildSucceeded = result.status == .succeeded
-                if let pdfURL = result.pdfURL { self.pdfURL = pdfURL }
+                if result.status == .succeeded {
+                    if let pdfURL = result.pdfURL { self.pdfURL = pdfURL }
+                    if let syncTeXURL = result.syncTeXURL {
+                        syncTeXDocument = try? await SyncTeXDocument.load(from: syncTeXURL)
+                    } else {
+                        syncTeXDocument = nil
+                    }
+                }
                 statusText = result.status == .succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed")
             } catch is CancellationError {
+                buildPhase = .idle
+                statusText = L10n.text("status.buildCancelled")
                 return
             } catch {
                 buildSucceeded = false
                 buildLog += "\n" + L10n.userMessage(for: error)
                 report(error)
             }
-            buildRunning = false
         }
+    }
+
+    func cancelCompile() {
+        activeCompileTask?.cancel()
+        activeCompileTask = nil
+        buildRunning = false
+        buildPhase = .idle
+        statusText = L10n.text("status.buildCancelled")
+        Task { await compiler.cancel() }
     }
 
     func persistConfiguration() {
@@ -486,7 +603,7 @@ final class AppModel: ObservableObject {
         #endif
         return ManagedTectonicLocator.resolve(
             bundleResourceURL: Bundle.main.resourceURL,
-            supportDirectory: try? ApplicationDirectories.supportDirectory(),
+            supportDirectory: try? resolvedSupportDirectory(),
             architecture: architecture
         )
     }
@@ -611,11 +728,58 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func refreshProjectOutline() {
+        let rootDocument = configuration.rootDocument
+        let textFiles = projectFiles.filter { $0.kind == .tex }.sorted { lhs, rhs in
+            if lhs.relativePath == rootDocument { return true }
+            if rhs.relativePath == rootDocument { return false }
+            return lhs.relativePath.localizedStandardCompare(rhs.relativePath) == .orderedAscending
+        }
+        outline = textFiles.flatMap { file in
+            let source: String?
+            if selectedFile?.relativePath == file.relativePath {
+                source = sourceText
+            } else {
+                source = try? String(contentsOf: file.url, encoding: .utf8)
+            }
+            return ProjectIndexer.outline(
+                for: source ?? "",
+                relativePath: file.relativePath
+            )
+        }
+    }
+
+    private func refreshActiveFileOutline() {
+        guard let selectedFile, selectedFile.kind == .tex else { return }
+        let updated = ProjectIndexer.outline(
+            for: sourceText,
+            relativePath: selectedFile.relativePath
+        )
+        let grouped = Dictionary(grouping: outline.filter { $0.relativePath != selectedFile.relativePath }) {
+            $0.relativePath ?? ""
+        }
+        let rootDocument = configuration.rootDocument
+        let orderedPaths = projectFiles.filter { $0.kind == .tex }.map(\.relativePath).sorted { lhs, rhs in
+            if lhs == rootDocument { return true }
+            if rhs == rootDocument { return false }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+        outline = orderedPaths.flatMap { path in
+            path == selectedFile.relativePath ? updated : (grouped[path] ?? [])
+        }
+    }
+
+    private func receiveBuildOutput(_ chunk: String) {
+        buildLog += chunk
+        buildPhase = BuildLogSummary(log: buildLog).phase
+        statusText = L10n.buildPhase(buildPhase)
+    }
+
     private func restoreLastProjectIfAvailable() {
-        guard let path = UserDefaults.standard.string(forKey: Self.lastProjectPathKey) else { return }
+        guard let path = defaults.string(forKey: Self.lastProjectPathKey) else { return }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            UserDefaults.standard.removeObject(forKey: Self.lastProjectPathKey)
+            defaults.removeObject(forKey: Self.lastProjectPathKey)
             return
         }
         openProject(URL(fileURLWithPath: path, isDirectory: true))
@@ -624,7 +788,15 @@ final class AppModel: ObservableObject {
     private func rememberLastOpenedFile(_ file: ProjectFile) {
         guard let root = projectRoot else { return }
         let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
-        UserDefaults.standard.set(file.relativePath, forKey: "SourceLeaf.lastFile.\(key)")
+        defaults.set(file.relativePath, forKey: "SourceLeaf.lastFile.\(key)")
+    }
+
+    private func resolvedSupportDirectory() throws -> URL {
+        if let supportDirectoryOverride {
+            try FileManager.default.createDirectory(at: supportDirectoryOverride, withIntermediateDirectories: true)
+            return supportDirectoryOverride
+        }
+        return try ApplicationDirectories.supportDirectory()
     }
 
     private func scheduleCompile() {

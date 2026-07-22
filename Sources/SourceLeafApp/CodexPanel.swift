@@ -1,8 +1,10 @@
+import AppKit
 import SwiftUI
 import SourceLeafCore
 
 struct CodexPanel: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +35,7 @@ struct CodexPanel: View {
             Divider()
             composer
         }
+        .background(colorScheme == .dark ? Color(red: 0.055, green: 0.055, blue: 0.06) : Color.white)
     }
 
     private var controls: some View {
@@ -103,10 +106,23 @@ struct CodexPanel: View {
                 .scrollIndicators(.hidden)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                TextEditor(text: $model.instruction)
-                    .font(.body)
-                    .frame(minHeight: 52, maxHeight: 120)
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $model.instruction)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(3)
+                    if model.instruction.isEmpty {
+                        Text(L10n.text("ai.composerPlaceholder"))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 10)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(minHeight: 52, maxHeight: 120)
+                .background(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.035))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
                 Button { model.sendToAI() } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.title2)
                 }
@@ -124,14 +140,26 @@ struct CodexPanel: View {
 
 private struct ChatBubble: View {
     let message: ChatMessage
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 24) }
             Text(message.text)
-                .textSelection(.enabled)
+                .foregroundStyle(message.role == .user ? Color.white : Color.primary)
                 .padding(9)
-                .background(message.role == .user ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10))
+                .background(
+                    message.role == .user
+                        ? Color.accentColor
+                        : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .contextMenu {
+                    Button(L10n.text("action.copy")) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message.text, forType: .string)
+                    }
+                }
             if message.role != .user { Spacer(minLength: 24) }
         }
     }

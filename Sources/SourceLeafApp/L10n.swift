@@ -44,8 +44,13 @@ enum L10n {
     static func text(_ key: String) -> String {
         let language = selectedLanguage
         guard language != .system,
-              let path = Bundle.module.path(forResource: language.localeIdentifier, ofType: "lproj"),
-              let localizedBundle = Bundle(path: path) else {
+              let stringsURL = Bundle.module.url(
+                forResource: "Localizable",
+                withExtension: "strings",
+                subdirectory: nil,
+                localization: language.localeIdentifier
+              ),
+              let localizedBundle = Bundle(url: stringsURL.deletingLastPathComponent()) else {
             return NSLocalizedString(key, bundle: .module, comment: "")
         }
         return NSLocalizedString(key, bundle: localizedBundle, comment: "")
@@ -84,6 +89,7 @@ enum L10n {
     static func provider(_ kind: ProviderKind) -> String { text("provider." + kind.rawValue) }
     static func engine(_ engine: BuildEngine) -> String { text("engine." + engine.rawValue) }
     static func dockZone(_ zone: DockZone) -> String { text("dock.zone." + zone.rawValue) }
+    static func buildPhase(_ phase: BuildPhase) -> String { text("build.phase." + phase.rawValue) }
 
     static func validationMessage(_ issue: ValidationIssue) -> String {
         switch issue.kind {

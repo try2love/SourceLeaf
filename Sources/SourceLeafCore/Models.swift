@@ -290,6 +290,15 @@ public struct SourceLineLocation: Equatable, Sendable {
 }
 
 public enum SourceLineMap {
+    public static func lineNumber(in source: String, utf16Location requestedLocation: Int) -> Int {
+        let text = source as NSString
+        let location = min(max(0, requestedLocation), text.length)
+        guard location > 0 else { return 1 }
+        return 1 + text.substring(to: location).reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+    }
+
     public static func utf16Location(in source: String, line requestedLine: Int) -> Int {
         guard requestedLine > 1 else { return 0 }
         let text = source as NSString

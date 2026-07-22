@@ -72,5 +72,39 @@
 ## 视觉/浏览器发现
 - `TeXloom`、`Syntaxis`、`Scholion` 等候选名称已有活跃产品，最终选择 `SourceLeaf`。
 
+## 2026-07-22 产品级验收发现
+- 真实论文根目录的有效素材规模并不大：`MutedRAG.tex` 799 行、`reference.bib` 488 行，正文引用 11 张 PNG，另有 5 张作者 JPG；项目总体 1.6GB 的体积主要来自与本轮 UI 冒烟无关的更深层内容，因此应复制“主文档 + Bib + figures”而不是盲目复制整个目录。
+- `MutedRAG.tex` 使用 `acmart`、算法、子图、表格、颜色和图像宏，包含多层 section/subsection、参考文献与作者照片，是比最小 article 更能证明 SourceLeaf 项目树、图片预览、大纲和真实编译能力的代表性样本。
+- 图像覆盖大尺寸 RGB/RGBA PNG、嵌套 `figures/author/*.jpg` 和不同宽高比，可同时测试目录展开、图片路由、Quick Look 缩放和内存合理性。
+- Tectonic 0.16.9 的传统 CLI 支持显式 `--bundle`、`--only-cached`、SyncTeX 和输出目录，但没有直接暴露缓存目录参数；V2 `show user-cache-dir` 可以报告默认缓存位置。真实回归要么使用本轮已分类保存的本地 bundle/cache，要么在完成后再次把默认缓存移回“临时文件”。
+- 进一步检查官方二进制字符串确认 Tectonic 支持 `TECTONIC_CACHE_DIR`。这比移动 `~/Library/Caches` 或把内部 data/index 误当 bundle 更可靠，也能确保真实项目编译产生的所有资源缓存留在 `临时文件/引擎缓存`。
+- 安装版内置 Tectonic 已完整编译真实 `MutedRAG.tex`：输出 24 页 Letter PDF（3,590,135 bytes）、155KB SyncTeX 和 BibTeX 日志，说明 `acmart`、参考文献、PNG/JPG、复杂数学字体和多轮重编译链路均可用。
+- 首次复杂编译的日志会被大量字体请求与中继重试淹没；SourceLeaf 当前把整个原始日志平铺在底部，不足以区分“正在准备资源”“论文警告”“真正错误”。合理的产品行为应增加阶段化状态、错误/警告摘要和可展开原始日志。
+- 24 页 PDF 联系表及第 5、12、20、24 页原尺寸抽查均正常：无空白页、黑块、缺图、裁切、字体乱码或表格重叠；overview 图、六联参数图、Discussion 正文、参考文献和 5 张作者照片均正确渲染。真实编译成功证据足够强。
+- PDF 自身存在论文级 overfull/underfull 警告和个别 JPEG DPI 元数据不一致，但视觉抽查未见由 SourceLeaf/Tectonic 引入的版式破坏；这些应在 App 中归入“警告”而不是“编译失败”。
+- 代码审查发现 `ProcessRunner` 直到进程结束才把 stdout/stderr 一次性交给 `AppModel`；复杂论文首次编译期间，用户只能看到无文本进度的 spinner，无法知道是在下载宏包、运行 TeX、跑 BibTeX 还是卡住。这与真实编译中数十秒中继重试结合后，属于明确的人类友好性缺陷。
+- 编译运行时工具栏按钮被禁用，当前没有“停止编译”入口；`CompilerService` 与 `ProcessRunner` 已具备取消基础，但 UI 没有暴露。应改为编译中显示停止按钮，并保证取消后状态一致。
+- 编译日志面板当前只有整段等宽文本与复制按钮，没有警告/错误/资源下载摘要。应抽出纯函数日志分析器，增加可测试的统计和当前阶段，原始日志仍保留用于诊断。
+- `openProject` 切换项目时没有先清空 `selectedFile/sourceText/selectedImageFile`；如果上一项目正在显示源码而新项目的最近文件为图片，旧项目源码状态可能残留。需要项目切换状态回归测试或显式重置边界。
+- 编辑器开启了水平滚动条，但 TextKit 容器同时启用随宽度换行且禁止水平 resize，因此水平滚动条没有实际意义，会制造视觉噪声。
+- 新建立的真实 `WorkspaceView` 离屏浅/深色截图直接复现了用户最关键的缺陷：源码区行号与 799 行布局存在，但 LaTeX 字符完全没有绘制。此前“设置 textColor + 修正无限容器”的证据不足，不能视为问题已解决。
+- 源码空白的高概率根因进一步收敛为 AppKit 几何初始化：手工创建零 frame `NSScrollView`，再用其当时为零的 `contentSize` 初始化 `NSTextView` 和 text container；后续 Auto Layout 扩大外层时，文档视图/容器没有可靠得到有效宽度。应采用 AppKit 标准 `NSTextView.scrollableTextView()` 或显式布局同步，并用截图像素/实际 NSTextView 绘制做回归门槛。
+- 真实工作区截图还解释了用户所谓“PDF 分成两个区域”：`PDFView.displayMode = .singlePageContinuous` 会在同一面板上下呈现连续页面及页间分隔；离屏时页面内容没绘制，只剩两块白纸，更显得像两个区域。默认改为单页模式并提供页码/前后页控制更符合其明确预期。
+- 视觉层级整体方向正确（44pt 活动栏、项目树、源码、PDF、紧凑底栏），但仍有明显粗糙点：项目树与大纲之间出现纯黑分隔带；浅色模式大纲标题疑似未绘制；英文标签在中文目标截图中仍显示 Project/Build Log/Compile/Build succeeded，说明 L10n 静态 Bundle 仍读取全局设置而非注入的模型语言，动态汉化边界需继续改进。
+- 源码编辑器专用像素截图证明标准滚动 `NSTextView` 已能在 820×780 可见区域真实绘制 799 行论文的首屏字符；整窗离屏截图仍不含嵌套 AppKit 文本/PDF 内容，这是 `NSHostingView.cacheDisplay` 对异步/子 AppKit 视图的离屏捕获限制，不能再用整窗图单独判定源码是否绘制。后续以“实际 NSTextView 几何 + 专用像素截图 + 安装版人工冒烟”三重证据验收。
+- `PDFView` 已从 `.singlePageContinuous` 改为 `.singlePage`，并接入页数状态与前后页控制；真实 24 页文档截图显示工具栏为 1/24 且只保留一张纸面区域，用户反馈的“双区域”根因已消除。
+- 项目/大纲分界已改为 28pt 语义标题栏并限制大纲默认高度；黑色粗分隔带消失，文件树继续保留目录折叠层级。双语资源当前各 170 个 key 且集合完全一致，可见字符串扫描只剩品牌名、语言自称、秒单位和命令示例等无需翻译项。
+- 多文件边界论文（根文档、两层 `sections/`、Bib、嵌套 PNG）已由内置 Tectonic 完整编译，生成 417KB PDF、SyncTeX 和 BibTeX 日志；故意缺右括号的项目稳定退出 1 并产出明确 `File ended while scanning use of \\textbf` 错误日志。
+- 边界测试揭示原大纲只属于当前文件，无法完成多文件 Overleaf 式跳转。`DocumentOutlineItem` 现携带 `relativePath`，App 打开项目时构建项目级结构、编辑时只增量更新活动文件；点击 `sections/deep/details.tex` 的小节会先切换文件再定位对应 UTF-16 行位置，避免每次按键重扫整个项目。
+- “没有 `\\documentclass`”的项目原先会错误把第一个 `.tex` 猜成主文档；现在仍可打开 notes.tex 阅读，但不会虚构 root document，点击编译会立即显示本地化的“选择主文档”提示。JPG/SVG 图片项目和非 UTF-8 `.tex` 也已覆盖：前者路由到预览，后者不显示旧项目文本且安全报错。
+- 运行时汉化的真正缺陷不是缺 key，而是 `Bundle.module.path(forResource: "zh-Hans", ofType: "lproj")` 在 SwiftPM 资源包中返回不到目标目录，导致所有显式中文选择静默回退英文。改为按 `localization:` 定位 `Localizable.strings` 后，项目、编译、日志、成功状态和引擎错误五个代表性界面均通过中文精确值测试，最新真实工作区截图也已全中文。
+- 项目图片预览不仅通过类型识别：真实 `vector.svg` 已进入 `QLPreviewView.previewItem`。行号尺测试也从不可靠的 `needsDisplay` 中间标志改为“滚动通知计数 + 实际可见字符范围”，确认从第 500 行向上跳到第 40 行时通知发生且可见行回到 80 以内。
+- 二次启动体验现有直接回归：自定义提示词的中英文名称、正文与启停状态跨 AppModel 持久化；最近项目及两层嵌套源码恢复；浮动 PDF 面板关闭后回到原 trailing 区。三者均通过，覆盖用户最容易在长期使用中感知的状态丢失风险。
+- 本机没有独立 `synctex` 命令，但 Tectonic 生成的 `.synctex.gz` 包含完整 Input tag、页码、源码行和 scaled-point 坐标；因此 SourceLeaf 内置解析器即可实现双向定位，不需要用户再安装 MacTeX。真实多文件索引已完成 `sections/deep/details.tex:1 → PDF 第 1 页坐标 → 同文件第 1 行` 往返。
+- 反向定位只接受打开项目根目录内且已被项目索引识别的路径，避免 SyncTeX 中异常 Input 路径触发任意文件打开；源码正向定位会切换 PDF 单页并添加仅存在于内存的橙色圆形 annotation，不写回 PDF 文件。
+- 1024×700 压力截图发现 PDF 内重复“立即编译”文字会截断；改为具备中文 tooltip/无障碍标签的播放或停止图标后，页码、SyncTeX 图标和成功状态在紧凑宽度均完整显示。1728×1050 宽屏仍保持三栏比例和 82pt 紧凑日志层级。
+- Codex 核心面板快照最初暴露两项可读性风险：动态气泡颜色在浅/深离屏组合中可能吞掉助手文字，`Text.textSelection` 的 AppKit 选择层会在深色用户气泡中只留下标点。现改为显式浅/深背景与前景、右键复制消息，并为输入框增加本地化 placeholder；复核图中两类消息、选区胶囊、Diff、静态检查与操作按钮均清晰。
+- 0.3.0 新增构建时生成的原生 `.icns`：蓝绿渐变底、源码花括号、文稿与叶片意象；16–1024px iconset 经 `iconutil` 生成 782KB 有效 ICNS，并通过 Info.plist/签名打包检查。
+
 ---
 *每执行2次查看/浏览器/搜索操作后更新此文件*

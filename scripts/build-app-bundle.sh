@@ -49,9 +49,11 @@ cp "$PROJECT_ROOT/LICENSE" "$STAGING_PATH/Contents/Resources/LICENSE"
 cp "$PROJECT_ROOT/NOTICE" "$STAGING_PATH/Contents/Resources/NOTICE"
 cp "$PROJECT_ROOT/THIRD_PARTY_LICENSES.md" "$STAGING_PATH/Contents/Resources/THIRD_PARTY_LICENSES.md"
 cp "$PROJECT_ROOT/ThirdParty/Tectonic-LICENSE.txt" "$STAGING_PATH/Contents/Resources/Tectonic-LICENSE.txt"
+ICON_PATH=$("$SCRIPT_DIR/generate-app-icon.sh")
+cp "$ICON_PATH" "$STAGING_PATH/Contents/Resources/SourceLeaf.icns"
 
 sed \
-  -e "s/__VERSION__/${SOURCELEAF_VERSION:-0.2.0}/g" \
+  -e "s/__VERSION__/${SOURCELEAF_VERSION:-0.3.0}/g" \
   "$PROJECT_ROOT/scripts/Info.plist.in" > "$STAGING_PATH/Contents/Info.plist"
 
 codesign --force --deep --sign - "$STAGING_PATH"

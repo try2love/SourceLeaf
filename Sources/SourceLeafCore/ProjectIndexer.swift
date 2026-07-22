@@ -5,11 +5,13 @@ public struct DocumentOutlineItem: Identifiable, Equatable, Sendable {
     public var level: Int
     public var title: String
     public var line: Int
+    public var relativePath: String?
 
-    public init(level: Int, title: String, line: Int) {
+    public init(level: Int, title: String, line: Int, relativePath: String? = nil) {
         self.level = level
         self.title = title
         self.line = line
+        self.relativePath = relativePath
     }
 }
 
@@ -107,7 +109,7 @@ public enum ProjectIndexer {
         return root.nodes()
     }
 
-    public static func outline(for source: String) -> [DocumentOutlineItem] {
+    public static func outline(for source: String, relativePath: String? = nil) -> [DocumentOutlineItem] {
         let pattern = #"\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*\{([^}]*)\}"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsSource = source as NSString
@@ -120,7 +122,12 @@ public enum ProjectIndexer {
                 if character == "\n" { count += 1 }
             }
             let levels = ["part": 0, "chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4, "paragraph": 5]
-            return DocumentOutlineItem(level: levels[command] ?? 2, title: title, line: line)
+            return DocumentOutlineItem(
+                level: levels[command] ?? 2,
+                title: title,
+                line: line,
+                relativePath: relativePath
+            )
         }
     }
 

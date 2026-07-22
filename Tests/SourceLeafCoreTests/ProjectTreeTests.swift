@@ -30,4 +30,5 @@ import Testing
     let visible = SourceLineMap.visibleLineStarts(in: source, utf16Range: rangeAfterScrollingUp)
     #expect(visible.first?.line == 40)
     #expect(visible.map(\.line) == visible.map(\.line).sorted())
+    #expect(SourceLineMap.lineNumber(in: source, utf16Location: location150) == 150)
 }

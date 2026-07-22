@@ -33,6 +33,10 @@ let package = Package(
         .testTarget(
             name: "SourceLeafCoreTests",
             dependencies: ["SourceLeafCore"]
+        ),
+        .testTarget(
+            name: "SourceLeafAppTests",
+            dependencies: ["SourceLeafApp"]
         )
     ]
 )

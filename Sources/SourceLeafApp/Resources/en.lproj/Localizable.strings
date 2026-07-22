@@ -7,8 +7,17 @@
 "workspace" = "Workspace";
 "build" = "Build";
 "build.compile" = "Compile";
+"build.stop" = "Stop";
 "build.auto" = "Auto Compile";
 "build.noLog" = "Build output will appear here.";
+"build.downloads" = "Resources downloaded";
+"build.copyLog" = "Copy build log";
+"build.phase.idle" = "Ready";
+"build.phase.preparingResources" = "Preparing resources";
+"build.phase.typesetting" = "Typesetting";
+"build.phase.bibliography" = "Building references";
+"build.phase.renderingPDF" = "Rendering PDF";
+"build.phase.finished" = "Finished";
 "panel.source" = "Source";
 "panel.image" = "Image Preview";
 "panel.pdf" = "PDF";
@@ -18,6 +27,7 @@
 "panel.history" = "AI History";
 "action.show" = "Show";
 "action.ok" = "OK";
+"action.copy" = "Copy message";
 "action.hide" = "Hide";
 "action.detach" = "Move to Separate Window";
 "action.accept" = "Accept";
@@ -31,6 +41,14 @@
 "pdf.compileHint" = "Compile the root document to preview the last successful PDF.";
 "pdf.sendSelection" = "Send to Codex";
 "pdf.selectionInstruction" = "Analyze this PDF selection and identify the corresponding source change. Do not modify source until the mapping is confirmed:";
+"pdf.previousPage" = "Previous page";
+"pdf.nextPage" = "Next page";
+"pdf.pageIndicator" = "%d / %d";
+"synctex.showInPDF" = "Reveal the source cursor in PDF";
+"synctex.commandClickHint" = "⌘-click to reveal source";
+"synctex.unavailable" = "No SyncTeX location is available. Compile the document with SyncTeX enabled.";
+"synctex.pdfLocated" = "Located the source position in PDF.";
+"synctex.sourceLocated" = "Located %@ at line %d.";
 "image.none" = "Select an image or project PDF to preview it.";
 "dock.moveTo" = "Move Panel To";
 "dock.zone.leading" = "Left";
@@ -48,6 +66,7 @@
 "ai.thinking" = "Preparing a reviewable proposal…";
 "ai.chatOnlyHint" = "No writable target attached. This message is analysis-only.";
 "ai.targetHint" = "Only the attached source ranges may be changed.";
+"ai.composerPlaceholder" = "Describe how the source should be revised…";
 "ai.adjustInstruction" = "Adjust the proposed change for %@: ";
 "ai.attachedTarget" = "the attached target";
 "validation.error" = "Error";
@@ -64,6 +83,7 @@
 "status.saved" = "Saved";
 "status.buildSucceeded" = "Build succeeded";
 "status.buildFailed" = "Build failed";
+"status.buildCancelled" = "Build cancelled";
 "status.cacheCleared" = "Build cache cleared";
 "context.selection" = "Selection";
 "context.nearby" = "Nearby";

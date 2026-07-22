@@ -3,6 +3,12 @@ import Security
 
 public enum ApplicationDirectories {
     public static func supportDirectory(fileManager: FileManager = .default) throws -> URL {
+        if let override = ProcessInfo.processInfo.environment["SOURCELEAF_SUPPORT_DIRECTORY"],
+           !override.isEmpty {
+            let directory = URL(fileURLWithPath: override, isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory
+        }
         let base = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -15,6 +21,12 @@ public enum ApplicationDirectories {
     }
 
     public static func cacheDirectory(fileManager: FileManager = .default) throws -> URL {
+        if let override = ProcessInfo.processInfo.environment["SOURCELEAF_CACHE_DIRECTORY"],
+           !override.isEmpty {
+            let directory = URL(fileURLWithPath: override, isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory
+        }
         let base = try fileManager.url(
             for: .cachesDirectory,
             in: .userDomainMask,
