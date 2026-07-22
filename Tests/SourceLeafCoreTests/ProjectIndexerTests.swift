@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SourceLeafCore
 
@@ -33,4 +34,15 @@ import Testing
     #expect(context.contains("line 48"))
     #expect(context.contains("line 52"))
     #expect(!context.contains("line 47\n"))
+}
+
+@Test func sourceLineMapSelectsThePDFWordOnTheLocatedLine() throws {
+    let source = "First line\nImplementation details and evidence.\nFinal line"
+    let range = try #require(SourceLineMap.utf16Range(
+        of: "Implementation",
+        in: source,
+        line: 2
+    ))
+    #expect((source as NSString).substring(with: range) == "Implementation")
+    #expect(SourceLineMap.utf16Range(of: "First", in: source, line: 2) == nil)
 }

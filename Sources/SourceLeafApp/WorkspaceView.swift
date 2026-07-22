@@ -273,7 +273,7 @@ extension WorkspacePanel {
         case .source: "chevron.left.forwardslash.chevron.right"
         case .image: "photo"
         case .pdf: "doc.richtext"
-        case .codex: "sparkles"
+        case .codex: "bubble.left.and.bubble.right"
         case .buildLog: "terminal"
         case .history: "clock.arrow.circlepath"
         }

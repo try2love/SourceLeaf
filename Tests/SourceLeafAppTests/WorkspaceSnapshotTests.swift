@@ -72,7 +72,7 @@ import Testing
             pageIndex: .constant(0),
             pageCount: .constant(0),
             navigationTarget: nil,
-            onCommandClick: { _, _, _ in }
+            onCommandClick: { _, _, _, _ in }
         )
         .frame(width: 600, height: 700)
     )
@@ -81,6 +81,13 @@ import Testing
 
     let pdfView = try #require(findPDFView(in: hostingView))
     #expect(pdfView.displayMode == .singlePage)
+}
+
+@MainActor
+@Test func pdfReverseSyncAcceptsDoubleClickAndCommandClick() {
+    #expect(NavigablePDFView.shouldTriggerSourceLookup(clickCount: 2, modifierFlags: []))
+    #expect(NavigablePDFView.shouldTriggerSourceLookup(clickCount: 1, modifierFlags: [.command]))
+    #expect(!NavigablePDFView.shouldTriggerSourceLookup(clickCount: 1, modifierFlags: []))
 }
 
 @MainActor
@@ -233,6 +240,111 @@ import Testing
 }
 
 @MainActor
+@Test func dockHostedSourceEditorHasAVisibleDocumentView() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-dock-editor-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.dock-editor.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    model.openProject(URL(fileURLWithPath: projectPath, isDirectory: true))
+
+    let hostingView = NSHostingView(
+        rootView: WorkspaceView()
+            .environmentObject(model)
+            .frame(width: 1440, height: 900)
+    )
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    hostingView.frame = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.3))
+
+    let textView = try #require(findTextView(in: hostingView))
+    let layoutManager = try #require(textView.layoutManager)
+    let textContainer = try #require(textView.textContainer)
+    layoutManager.ensureLayout(for: textContainer)
+    let usedRect = layoutManager.usedRect(for: textContainer)
+    #expect(textView.string == model.sourceText)
+    #expect(textView.visibleRect.width > 250)
+    #expect(textView.visibleRect.height > 300)
+    #expect(textView.frame.height >= min(usedRect.maxY + 20, 500))
+    #expect(usedRect.width > 100)
+    let visible = textView.visibleRect
+    let representation = try #require(textView.bitmapImageRepForCachingDisplay(in: visible))
+    textView.cacheDisplay(in: visible, to: representation)
+    #expect(visibleInkPixelCount(in: representation) > 1_000)
+    if let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_SNAPSHOT_OUTPUT"],
+       let data = representation.representation(using: .png, properties: [:]) {
+        let output = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try data.write(to: output.appendingPathComponent("源码编辑器-Dock宿主.png"), options: .atomic)
+    }
+}
+
+@MainActor
+@Test func sourceTabRemainsVisibleAfterImageSwitchesAndPanelResizing() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let project = URL(fileURLWithPath: projectPath, isDirectory: true)
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-editor-switch-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.editor-switch.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    model.openProject(project)
+    let source = try #require(model.selectedFile)
+    let expectedSource = try String(contentsOf: source.url, encoding: .utf8)
+    let image = try #require(model.projectFiles.first {
+        $0.kind == .image && ["png", "jpg", "jpeg", "svg"].contains($0.url.pathExtension.lowercased())
+    })
+    model.openFile(image)
+
+    let hostingView = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+
+    for width in [1180.0, 760.0, 1360.0, 900.0] {
+        model.selectPanel(.source, in: .center)
+        window.setContentSize(NSSize(width: width, height: 760))
+        hostingView.frame = window.contentView?.bounds ?? .zero
+        hostingView.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.12))
+
+        let textView = try #require(findTextView(in: hostingView))
+        #expect(textView.string == model.sourceText)
+        #expect(textView.string == expectedSource)
+        #expect(textView.visibleRect.width > 200)
+        #expect(textView.visibleRect.height > 250)
+        let visible = textView.visibleRect
+        let representation = try #require(textView.bitmapImageRepForCachingDisplay(in: visible))
+        textView.cacheDisplay(in: visible, to: representation)
+        #expect(visibleInkPixelCount(in: representation) > 500)
+
+        model.selectPanel(.image, in: .center)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        #expect(model.layout.selected[.center] == .image)
+    }
+}
+
+@MainActor
 @Test func codexReviewPanelRendersARealSelectionAndDiff() throws {
     guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"],
           let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_SNAPSHOT_OUTPUT"] else { return }
@@ -307,6 +419,10 @@ private func render<V: View>(_ view: V, size: NSSize) throws -> Data {
         defer: false
     )
     window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
     hostingView.layoutSubtreeIfNeeded()
     window.layoutIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))

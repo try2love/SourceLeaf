@@ -23,6 +23,71 @@ import Testing
     #expect(CodexCLIProvider.lastAgentMessage(in: lines) == "last")
 }
 
+@Test func localCodexInvocationUsesTheSelectedModelAndReasoningEffort() {
+    let profile = ProviderProfile(
+        name: "Local Codex",
+        kind: .localCodex,
+        model: "gpt-5.6-terra",
+        reasoningEffort: .high
+    )
+    let arguments = CodexCLIProvider.invocationArguments(for: profile)
+
+    let modelIndex = arguments.firstIndex(of: "--model")
+    let configIndex = arguments.firstIndex(of: "--config")
+    let sandboxIndex = arguments.firstIndex(of: "--sandbox")
+    #expect(modelIndex.map { arguments[$0 + 1] } == "gpt-5.6-terra")
+    #expect(configIndex.map { arguments[$0 + 1] } == "model_reasoning_effort=\"high\"")
+    #expect(sandboxIndex.map { arguments[$0 + 1] } == "read-only")
+    #expect(arguments.contains("--ephemeral"))
+}
+
+@Test func legacyProviderProfileDefaultsToCodexManagedReasoning() throws {
+    let id = UUID()
+    let data = Data("""
+    {"id":"\(id.uuidString)","name":"Local Codex","kind":"localCodex","model":"","baseURL":null,"headers":{},"command":null,"enabled":true}
+    """.utf8)
+    let profile = try JSONDecoder().decode(ProviderProfile.self, from: data)
+    #expect(profile.reasoningEffort == nil)
+}
+
+@Test func reasoningEffortMapsToOpenAIAndCompatibleRequestBodies() throws {
+    let openAI = HTTPAIProvider(
+        profile: ProviderProfile(name: "OpenAI", kind: .openAI, model: "gpt-test", reasoningEffort: .high),
+        apiKey: "test-key"
+    )
+    let openAIRequest = try openAI.makeRequest(prompt: "Review")
+    let openAIData = try #require(openAIRequest.httpBody)
+    let openAIBody = try #require(
+        JSONSerialization.jsonObject(with: openAIData) as? [String: Any]
+    )
+    let reasoning = try #require(openAIBody["reasoning"] as? [String: String])
+    #expect(reasoning["effort"] == "high")
+
+    let compatible = HTTPAIProvider(
+        profile: ProviderProfile(
+            name: "Compatible",
+            kind: .openAICompatible,
+            model: "model-test",
+            baseURL: "http://127.0.0.1:1234/v1/chat/completions",
+            reasoningEffort: .xhigh
+        ),
+        apiKey: nil
+    )
+    let compatibleRequest = try compatible.makeRequest(prompt: "Review")
+    let compatibleData = try #require(compatibleRequest.httpBody)
+    let compatibleBody = try #require(
+        JSONSerialization.jsonObject(with: compatibleData) as? [String: Any]
+    )
+    #expect(compatibleBody["reasoning_effort"] as? String == "xhigh")
+}
+
+@Test func builtInPromptsContainTheTemperedAcademicReviewer() throws {
+    let prompt = try #require(BuiltInPrompts.all.first { $0.id == "reviewer-tempered.v1" })
+    #expect(prompt.nameZH == "略微缓和的审稿人")
+    #expect(prompt.bodyZH.contains("严苛、精准且富有洞察"))
+    #expect(prompt.bodyZH.contains("必须解决的核心问题"))
+}
+
 @Test func promptClearlySeparatesTargetsFromContext() throws {
     let target = try SourceTargetService.target(
         in: "Selected text",

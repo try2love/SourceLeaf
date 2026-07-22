@@ -134,16 +134,23 @@ public enum AIEditPromptBuilder {
 }
 
 public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
-    public let displayName = "Local Codex"
+    public let displayName: String
     private let executableURL: URL
     private let runner: ProcessRunner
+    private let profile: ProviderProfile
 
-    public init(executableURL: URL? = nil, runner: ProcessRunner = ProcessRunner()) throws {
+    public init(
+        profile: ProviderProfile = .localCodex,
+        executableURL: URL? = nil,
+        runner: ProcessRunner = ProcessRunner()
+    ) throws {
         guard let executableURL = executableURL ?? ExecutableLocator.find("codex") else {
             throw AIProviderError.executableNotFound("codex")
         }
         self.executableURL = executableURL
         self.runner = runner
+        self.profile = profile
+        displayName = profile.name
     }
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
@@ -156,16 +163,29 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
         let output = try await runner.run(
             executableURL: executableURL,
-            arguments: [
-                "exec", "--json", "--color", "never", "--ephemeral",
-                "--sandbox", "read-only", "--skip-git-repo-check", "-"
-            ],
+            arguments: Self.invocationArguments(for: profile),
             currentDirectoryURL: sandboxDirectory,
             input: Data(prompt.utf8)
         )
         guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
         let message = Self.lastAgentMessage(in: output.standardOutput) ?? output.standardOutput
         return try AIProposalCodec.decode(message, providerName: displayName)
+    }
+
+    public static func invocationArguments(for profile: ProviderProfile) -> [String] {
+        var arguments = ["exec"]
+        let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !model.isEmpty {
+            arguments += ["--model", model]
+        }
+        if let effort = profile.reasoningEffort {
+            arguments += ["--config", "model_reasoning_effort=\"\(effort.rawValue)\""]
+        }
+        arguments += [
+            "--json", "--color", "never", "--ephemeral",
+            "--sandbox", "read-only", "--skip-git-repo-check", "-"
+        ]
+        return arguments
     }
 
     public static func lastAgentMessage(in jsonLines: String) -> String? {

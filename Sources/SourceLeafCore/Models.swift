@@ -114,6 +114,19 @@ public enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable 
     public var id: String { rawValue }
 }
 
+public enum ModelReasoningEffort: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+    case ultra
+
+    public var id: String { rawValue }
+}
+
 public struct ProviderProfile: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
@@ -123,6 +136,7 @@ public struct ProviderProfile: Codable, Identifiable, Equatable, Sendable {
     public var headers: [String: String]
     public var command: String?
     public var enabled: Bool
+    public var reasoningEffort: ModelReasoningEffort?
 
     public init(
         id: UUID = UUID(),
@@ -132,7 +146,8 @@ public struct ProviderProfile: Codable, Identifiable, Equatable, Sendable {
         baseURL: String? = nil,
         headers: [String: String] = [:],
         command: String? = nil,
-        enabled: Bool = true
+        enabled: Bool = true,
+        reasoningEffort: ModelReasoningEffort? = nil
     ) {
         self.id = id
         self.name = name
@@ -142,6 +157,7 @@ public struct ProviderProfile: Codable, Identifiable, Equatable, Sendable {
         self.headers = headers
         self.command = command
         self.enabled = enabled
+        self.reasoningEffort = reasoningEffort
     }
 
     public static let localCodex = ProviderProfile(
@@ -312,6 +328,26 @@ public enum SourceLineMap {
             line += 1
         }
         return min(location, text.length)
+    }
+
+    public static func utf16Range(of selectedText: String, in source: String, line requestedLine: Int) -> NSRange? {
+        let needle = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
+        let text = source as NSString
+        let lineStart = utf16Location(in: source, line: requestedLine)
+        guard lineStart < text.length else { return nil }
+        var start = 0
+        var end = 0
+        var contentsEnd = 0
+        text.getLineStart(
+            &start,
+            end: &end,
+            contentsEnd: &contentsEnd,
+            for: NSRange(location: lineStart, length: 0)
+        )
+        let lineRange = NSRange(location: start, length: max(0, contentsEnd - start))
+        let match = text.range(of: needle, options: [.caseInsensitive], range: lineRange)
+        return match.location == NSNotFound ? nil : match
     }
 
     public static func visibleLineStarts(in source: String, utf16Range: NSRange) -> [SourceLineLocation] {

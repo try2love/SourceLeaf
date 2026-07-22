@@ -38,7 +38,7 @@ swift run SourceLeaf
 
 ## Current status / 当前状态
 
-The current `0.3.0` build is a product-tested preview. Its central workflow is available now:
+The current `0.3.1` build is a product-tested preview. Its central workflow is available now:
 
 1. Open a LaTeX project folder and select text in a `.tex` file.
 2. Attach that selection with the floating button, context command, or `⌥⌘K`.

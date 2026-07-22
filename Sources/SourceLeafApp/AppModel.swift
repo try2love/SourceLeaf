@@ -51,6 +51,18 @@ final class AppModel: ObservableObject {
     @Published var appLanguage: AppLanguage
     @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
 
+    var selectedProviderModel: String {
+        get { selectedProviderProfile?.model ?? "" }
+        set { updateSelectedProvider { $0.model = newValue } }
+    }
+
+    var selectedReasoningEffort: ModelReasoningEffort? {
+        get { selectedProviderProfile?.reasoningEffort }
+        set { updateSelectedProvider { $0.reasoningEffort = newValue } }
+    }
+
+    var selectedProviderKind: ProviderKind? { selectedProviderProfile?.kind }
+
     private let compiler = CompilerService()
     private let keychain = KeychainStore()
     private var saveTask: Task<Void, Never>?
@@ -66,6 +78,7 @@ final class AppModel: ObservableObject {
     private let supportDirectoryOverride: URL?
     private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
+    private static let selectedProviderIDKey = "SourceLeaf.selectedProviderID"
 
     init(
         restoreLastProject: Bool = true,
@@ -84,7 +97,9 @@ final class AppModel: ObservableObject {
             if !providerProfiles.contains(where: { $0.kind == .localCodex }) {
                 providerProfiles.insert(.localCodex, at: 0)
             }
-            selectedProviderID = providerProfiles.first?.id
+            let savedProviderID = defaults.string(forKey: Self.selectedProviderIDKey).flatMap(UUID.init(uuidString:))
+            selectedProviderID = providerProfiles.first(where: { $0.id == savedProviderID && $0.enabled })?.id
+                ?? providerProfiles.first(where: \.enabled)?.id
             let savedPrompts = try promptsStore?.load(default: []) ?? []
             var savedBuiltIns: [String: PromptTemplate] = [:]
             for prompt in savedPrompts where prompt.builtIn { savedBuiltIns[prompt.id] = prompt }
@@ -103,6 +118,12 @@ final class AppModel: ObservableObject {
         appLanguage = language
         defaults.set(language.rawValue, forKey: L10n.languageDefaultsKey)
         objectWillChange.send()
+    }
+
+    func selectProvider(_ id: UUID?) {
+        selectedProviderID = id
+        if let id { defaults.set(id.uuidString, forKey: Self.selectedProviderIDKey) }
+        else { defaults.removeObject(forKey: Self.selectedProviderIDKey) }
     }
 
     func presentOpenProjectPanel() {
@@ -180,15 +201,15 @@ final class AppModel: ObservableObject {
             let text = try String(contentsOf: file.url, encoding: .utf8)
             suppressTextChange = true
             selectedFile = file
-            selectedImageFile = nil
             sourceText = text
             selectedRange = NSRange(location: 0, length: 0)
             refreshActiveFileOutline()
             suppressTextChange = false
-            layout.show(.source, in: .center)
-            if let zone = layout.zone(containing: .source) { layout.selected[zone] = .source }
+            updateLayout { layout in
+                layout.show(.source, in: .center)
+                if let zone = layout.zone(containing: .source) { layout.selected[zone] = .source }
+            }
             rememberLastOpenedFile(file)
-            objectWillChange.send()
         } catch {
             suppressTextChange = false
             report(error)
@@ -199,11 +220,11 @@ final class AppModel: ObservableObject {
         do {
             try saveCurrentFileIfNeeded()
             selectedImageFile = file
-            layout.show(.image, in: .center)
-            if let zone = layout.zone(containing: .image) { layout.selected[zone] = .image }
-            configuration.layout = layout
+            updateLayout { layout in
+                layout.show(.image, in: .center)
+                if let zone = layout.zone(containing: .image) { layout.selected[zone] = .image }
+            }
             rememberLastOpenedFile(file)
-            persistConfiguration()
         } catch { report(error) }
     }
 
@@ -250,10 +271,10 @@ final class AppModel: ObservableObject {
 
     func revealPanel(_ panel: WorkspacePanel, in preferredZone: DockZone? = nil) {
         guard !floatingPanels.contains(panel) else { return }
-        if let zone = layout.zone(containing: panel) { layout.selected[zone] = panel }
-        else { layout.show(panel, in: preferredZone) }
-        configuration.layout = layout
-        persistConfiguration()
+        updateLayout { layout in
+            if let zone = layout.zone(containing: panel) { layout.selected[zone] = panel }
+            else { layout.show(panel, in: preferredZone) }
+        }
     }
 
     func detachPanel(_ panel: WorkspacePanel) {
@@ -302,7 +323,7 @@ final class AppModel: ObservableObject {
         statusText = L10n.text("synctex.pdfLocated")
     }
 
-    func locatePDFPointInSource(pageIndex: Int, x: Double, yFromTop: Double) {
+    func locatePDFPointInSource(pageIndex: Int, x: Double, yFromTop: Double, selectedText: String? = nil) {
         guard let root = projectRoot,
               let location = syncTeXDocument?.sourceLocation(
                 pageIndex: pageIndex,
@@ -317,7 +338,10 @@ final class AppModel: ObservableObject {
             return
         }
         openFile(file)
-        selectedRange = NSRange(
+        let word = selectedText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedRange = word.flatMap {
+            SourceLineMap.utf16Range(of: $0, in: sourceText, line: location.line)
+        } ?? NSRange(
             location: SourceLineMap.utf16Location(in: sourceText, line: location.line),
             length: 0
         )
@@ -326,21 +350,16 @@ final class AppModel: ObservableObject {
     }
 
     func movePanel(_ panel: WorkspacePanel, to zone: DockZone) {
-        layout.move(panel, to: zone)
-        configuration.layout = layout
-        persistConfiguration()
+        updateLayout { $0.move(panel, to: zone) }
     }
 
     func closePanel(_ panel: WorkspacePanel) {
-        layout.close(panel)
-        configuration.layout = layout
-        persistConfiguration()
+        updateLayout { $0.close(panel) }
     }
 
     func selectPanel(_ panel: WorkspacePanel, in zone: DockZone) {
-        layout.selected[zone] = panel
-        configuration.layout = layout
-        persistConfiguration()
+        guard layout.zones[zone]?.contains(panel) == true else { return }
+        updateLayout { $0.selected[zone] = panel }
     }
 
     func attachCurrentSelection() {
@@ -566,7 +585,9 @@ final class AppModel: ObservableObject {
                         syncTeXDocument = nil
                     }
                 }
-                statusText = result.status == .succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed")
+                statusText = result.status == .succeeded
+                    ? L10n.text(result.reusedOutput ? "status.buildUpToDate" : "status.buildSucceeded")
+                    : L10n.text("status.buildFailed")
             } catch is CancellationError {
                 buildPhase = .idle
                 statusText = L10n.text("status.buildCancelled")
@@ -856,7 +877,7 @@ final class AppModel: ObservableObject {
         let profile = providerProfiles.first(where: { $0.id == selectedProviderID }) ?? .localCodex
         switch profile.kind {
         case .localCodex:
-            return try CodexCLIProvider()
+            return try CodexCLIProvider(profile: profile)
         case .openAI, .openAICompatible, .anthropic, .gemini, .ollama, .lmStudio:
             return HTTPAIProvider(profile: profile, apiKey: try keychain.get(account: profile.id.uuidString))
         case .customCLI:
@@ -867,6 +888,26 @@ final class AppModel: ObservableObject {
     private func persistMessages() {
         guard !configuration.privateChatMode else { return }
         do { try chatStore?.save(messages) } catch { report(error) }
+    }
+
+    private var selectedProviderProfile: ProviderProfile? {
+        providerProfiles.first { $0.id == selectedProviderID }
+            ?? providerProfiles.first(where: { $0.enabled })
+    }
+
+    private func updateSelectedProvider(_ update: (inout ProviderProfile) -> Void) {
+        guard let id = selectedProviderID,
+              let index = providerProfiles.firstIndex(where: { $0.id == id }) else { return }
+        update(&providerProfiles[index])
+        saveProviderProfiles()
+    }
+
+    private func updateLayout(_ update: (inout DockLayout) -> Void) {
+        var next = layout
+        update(&next)
+        layout = next
+        configuration.layout = next
+        persistConfiguration()
     }
 
     private func report(_ error: Error) {

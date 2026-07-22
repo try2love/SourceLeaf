@@ -1,4 +1,5 @@
 import Foundation
+import SourceLeafCore
 import Testing
 @testable import SourceLeafApp
 
@@ -52,6 +53,28 @@ import Testing
     model.restoreFloatingPanel(.pdf)
     #expect(!model.floatingPanels.contains(.pdf))
     #expect(model.layout.zone(containing: .pdf) == originalZone)
+}
+
+@MainActor
+@Test func selectedConversationProviderPersistsAcrossLaunches() throws {
+    let state = try productTestState(named: "selected-provider")
+    defer { state.cleanup() }
+    let first = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    let profile = ProviderProfile(
+        name: "Lab API",
+        kind: .openAICompatible,
+        model: "research-model",
+        baseURL: "http://127.0.0.1:1234/v1/chat/completions",
+        reasoningEffort: .high
+    )
+    first.providerProfiles.append(profile)
+    first.saveProviderProfiles()
+    first.selectProvider(profile.id)
+
+    let restored = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    #expect(restored.selectedProviderID == profile.id)
+    #expect(restored.selectedProviderModel == "research-model")
+    #expect(restored.selectedReasoningEffort == .high)
 }
 
 private struct ProductTestState {

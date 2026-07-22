@@ -27,7 +27,7 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
         return try AIProposalCodec.decode(text, providerName: displayName)
     }
 
-    private func makeRequest(prompt: String) throws -> URLRequest {
+    func makeRequest(prompt: String) throws -> URLRequest {
         let endpoint = try endpointURL()
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -40,8 +40,25 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
         case .openAI:
             guard let apiKey, !apiKey.isEmpty else { throw AIProviderError.missingCredential }
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            body = ["model": profile.model, "input": prompt]
-        case .openAICompatible, .lmStudio:
+            var openAIBody: [String: Any] = ["model": profile.model, "input": prompt]
+            if let effort = profile.reasoningEffort {
+                openAIBody["reasoning"] = ["effort": effort.rawValue]
+            }
+            body = openAIBody
+        case .openAICompatible:
+            if let apiKey, !apiKey.isEmpty {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
+            var compatibleBody: [String: Any] = [
+                "model": profile.model,
+                "messages": [["role": "user", "content": prompt]],
+                "temperature": 0
+            ]
+            if let effort = profile.reasoningEffort {
+                compatibleBody["reasoning_effort"] = effort.rawValue
+            }
+            body = compatibleBody
+        case .lmStudio:
             if let apiKey, !apiKey.isEmpty {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }

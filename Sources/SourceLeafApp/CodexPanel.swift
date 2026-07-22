@@ -39,47 +39,82 @@ struct CodexPanel: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 8) {
-            Picker(L10n.text("ai.provider"), selection: $model.selectedProviderID) {
-                ForEach(model.providerProfiles.filter(\.enabled)) { profile in
-                    Text(profile.name).tag(Optional(profile.id))
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Picker(L10n.text("ai.provider"), selection: Binding(
+                    get: { model.selectedProviderID },
+                    set: { model.selectProvider($0) }
+                )) {
+                    ForEach(model.providerProfiles.filter(\.enabled)) { profile in
+                        Text(profile.name).tag(Optional(profile.id))
+                    }
                 }
-            }
-            .labelsHidden()
-            .frame(maxWidth: 150)
-            Picker(L10n.text("ai.context"), selection: $model.contextScope) {
-                ForEach(ContextScope.allCases) { scope in
-                    Text(L10n.context(scope)).tag(scope)
+                .labelsHidden()
+                .frame(maxWidth: 170)
+                Picker(L10n.text("ai.context"), selection: $model.contextScope) {
+                    ForEach(ContextScope.allCases) { scope in
+                        Text(L10n.context(scope)).tag(scope)
+                    }
                 }
-            }
-            .labelsHidden()
-            if model.contextScope == .custom {
+                .labelsHidden()
+                if model.contextScope == .custom {
+                    Menu {
+                        ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
+                            Toggle(file.relativePath, isOn: Binding(
+                                get: { model.customContextPaths.contains(file.relativePath) },
+                                set: { enabled in
+                                    if enabled { model.customContextPaths.insert(file.relativePath) }
+                                    else { model.customContextPaths.remove(file.relativePath) }
+                                }
+                            ))
+                        }
+                    } label: {
+                        Label("\(model.customContextPaths.count)", systemImage: "doc.badge.plus")
+                    }
+                    .help(L10n.text("ai.customContextFiles"))
+                }
                 Menu {
-                    ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
-                        Toggle(file.relativePath, isOn: Binding(
-                            get: { model.customContextPaths.contains(file.relativePath) },
-                            set: { enabled in
-                                if enabled { model.customContextPaths.insert(file.relativePath) }
-                                else { model.customContextPaths.remove(file.relativePath) }
-                            }
-                        ))
+                    ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
+                        Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
+                            model.usePrompt(prompt)
+                        }
                     }
                 } label: {
-                    Label("\(model.customContextPaths.count)", systemImage: "doc.badge.plus")
+                    Label(L10n.text("ai.prompts"), systemImage: "text.badge.star")
                 }
-                .help(L10n.text("ai.customContextFiles"))
+                .labelStyle(.iconOnly)
+                Spacer()
             }
-            Menu {
-                ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
-                    Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
-                        model.usePrompt(prompt)
+            HStack(spacing: 8) {
+                TextField(
+                    L10n.text("provider.modelDefault"),
+                    text: Binding(
+                        get: { model.selectedProviderModel },
+                        set: { model.selectedProviderModel = $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.caption.monospaced())
+                .help(L10n.text("provider.modelHint"))
+                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
+                    Picker(
+                        L10n.text("provider.reasoning"),
+                        selection: Binding(
+                            get: { model.selectedReasoningEffort },
+                            set: { model.selectedReasoningEffort = $0 }
+                        )
+                    ) {
+                        Text(L10n.text("provider.reasoningDefault"))
+                            .tag(Optional<ModelReasoningEffort>.none)
+                        ForEach(ModelReasoningEffort.allCases) { effort in
+                            Text(L10n.text("reasoning.\(effort.rawValue)"))
+                                .tag(Optional(effort))
+                        }
                     }
+                    .labelsHidden()
+                    .frame(maxWidth: 135)
                 }
-            } label: {
-                Label(L10n.text("ai.prompts"), systemImage: "text.badge.star")
             }
-            .labelStyle(.iconOnly)
-            Spacer()
         }
         .padding(7)
         .background(.bar)

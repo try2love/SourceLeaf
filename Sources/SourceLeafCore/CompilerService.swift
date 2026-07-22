@@ -16,6 +16,7 @@ public struct BuildResult: Sendable {
     public var exitCode: Int32
     public var startedAt: Date
     public var finishedAt: Date
+    public var reusedOutput: Bool
 
     public init(
         status: BuildStatus,
@@ -26,7 +27,8 @@ public struct BuildResult: Sendable {
         log: String,
         exitCode: Int32,
         startedAt: Date,
-        finishedAt: Date
+        finishedAt: Date,
+        reusedOutput: Bool = false
     ) {
         self.status = status
         self.command = command
@@ -37,6 +39,7 @@ public struct BuildResult: Sendable {
         self.exitCode = exitCode
         self.startedAt = startedAt
         self.finishedAt = finishedAt
+        self.reusedOutput = reusedOutput
     }
 }
 
@@ -81,6 +84,11 @@ public enum ManagedTectonicLocator {
 }
 
 public actor CompilerService {
+    private struct BuildManifest: Codable {
+        var fingerprint: String
+        var command: [String]
+    }
+
     private let runner: ProcessRunner
     private let fileManager: FileManager
     private var activeBuild: Task<BuildResult, Error>?
@@ -173,25 +181,78 @@ public actor CompilerService {
             managedTectonicURL: managedTectonicURL
         )
 
-        let startedAt = Date()
-        let output = try await runner.run(
-            executableURL: invocation.executable,
-            arguments: invocation.arguments,
-            currentDirectoryURL: projectRoot,
-            onOutput: onOutput
+        let command = [invocation.executable.path] + invocation.arguments
+        let fingerprint = try buildFingerprint(
+            projectRoot: projectRoot,
+            rootDocument: rootDocument,
+            configuration: configuration,
+            command: command
         )
-        let finishedAt = Date()
+        let manifestURL = outputDirectory.appendingPathComponent(".sourceleaf-build-manifest.json")
         let basename = rootURL.deletingPathExtension().lastPathComponent
         let pdfURL = outputDirectory.appendingPathComponent(basename).appendingPathExtension("pdf")
         let syncURL = outputDirectory.appendingPathComponent(basename).appendingPathExtension("synctex.gz")
-        let succeeded = output.exitCode == 0 && fileManager.fileExists(atPath: pdfURL.path)
-        let log = (["$ " + ([invocation.executable.path] + invocation.arguments).joined(separator: " "), output.standardOutput, output.standardError])
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        if let data = try? Data(contentsOf: manifestURL),
+           let manifest = try? JSONDecoder().decode(BuildManifest.self, from: data),
+           manifest.fingerprint == fingerprint,
+           manifest.command == command,
+           fileManager.fileExists(atPath: pdfURL.path) {
+            let now = Date()
+            onOutput?("SourceLeaf: project unchanged; reusing the last successful PDF.\n")
+            return BuildResult(
+                status: .succeeded,
+                command: command,
+                outputDirectory: outputDirectory,
+                pdfURL: pdfURL,
+                syncTeXURL: fileManager.fileExists(atPath: syncURL.path) ? syncURL : nil,
+                log: "$ " + command.joined(separator: " ") + "\nSourceLeaf: project unchanged; reused the last successful PDF.",
+                exitCode: 0,
+                startedAt: now,
+                finishedAt: now,
+                reusedOutput: true
+            )
+        }
 
-        return BuildResult(
+        let startedAt = Date()
+        var actualArguments = invocation.arguments
+        var attemptLogs: [String] = []
+        if let cachedArguments = Self.cachedTectonicArguments(
+            executableURL: invocation.executable,
+            arguments: invocation.arguments
+        ) {
+            actualArguments = cachedArguments
+        }
+        var output = try await runner.run(
+            executableURL: invocation.executable,
+            arguments: actualArguments,
+            currentDirectoryURL: projectRoot,
+            onOutput: onOutput
+        )
+        attemptLogs.append(
+            Self.log(executableURL: invocation.executable, arguments: actualArguments, output: output)
+        )
+        if actualArguments != invocation.arguments, Self.requiresNetworkRetry(output) {
+            let fallback = "SourceLeaf: a required TeX resource is not cached; retrying with network access.\n"
+            onOutput?(fallback)
+            output = try await runner.run(
+                executableURL: invocation.executable,
+                arguments: invocation.arguments,
+                currentDirectoryURL: projectRoot,
+                onOutput: onOutput
+            )
+            actualArguments = invocation.arguments
+            attemptLogs.append(fallback.trimmingCharacters(in: .whitespacesAndNewlines))
+            attemptLogs.append(
+                Self.log(executableURL: invocation.executable, arguments: actualArguments, output: output)
+            )
+        }
+        let finishedAt = Date()
+        let succeeded = output.exitCode == 0 && fileManager.fileExists(atPath: pdfURL.path)
+        let log = attemptLogs.joined(separator: "\n")
+
+        let result = BuildResult(
             status: succeeded ? .succeeded : .failed,
-            command: [invocation.executable.path] + invocation.arguments,
+            command: command,
             outputDirectory: outputDirectory,
             pdfURL: succeeded ? pdfURL : nil,
             syncTeXURL: fileManager.fileExists(atPath: syncURL.path) ? syncURL : nil,
@@ -200,6 +261,12 @@ public actor CompilerService {
             startedAt: startedAt,
             finishedAt: finishedAt
         )
+        if succeeded {
+            let manifest = BuildManifest(fingerprint: fingerprint, command: command)
+            let data = try JSONEncoder().encode(manifest)
+            try data.write(to: manifestURL, options: .atomic)
+        }
+        return result
     }
 
     private func resolveInvocation(
@@ -258,6 +325,71 @@ public actor CompilerService {
         let cacheRoot = try ApplicationDirectories.cacheDirectory()
         let key = SourceTargetService.hash(projectRoot.standardizedFileURL.path)
         return cacheRoot.appendingPathComponent("Build", isDirectory: true).appendingPathComponent(String(key.prefix(16)), isDirectory: true)
+    }
+
+    static func cachedTectonicArguments(executableURL: URL, arguments: [String]) -> [String]? {
+        guard executableURL.lastPathComponent == "tectonic",
+              !arguments.contains("--only-cached"),
+              !arguments.contains("-C") else { return nil }
+        return ["--only-cached"] + arguments
+    }
+
+    static func requiresNetworkRetry(_ output: ProcessOutput) -> Bool {
+        guard output.exitCode != 0 else { return false }
+        let message = (output.standardOutput + "\n" + output.standardError).lowercased()
+        return message.contains("not found")
+            || message.contains("not available in the cache")
+            || message.contains("cache miss")
+            || message.contains("no such file")
+            || message.contains("failed to retrieve")
+    }
+
+    private static func log(executableURL: URL, arguments: [String], output: ProcessOutput) -> String {
+        (["$ " + ([executableURL.path] + arguments).joined(separator: " "), output.standardOutput, output.standardError])
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private func buildFingerprint(
+        projectRoot: URL,
+        rootDocument: String,
+        configuration: BuildConfiguration,
+        command: [String]
+    ) throws -> String {
+        let supportedExtensions: Set<String> = [
+            "tex", "bib", "sty", "cls", "bst", "bbx", "cbx", "def", "cfg", "clo",
+            "png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "svg", "eps", "pdf"
+        ]
+        let excludedDirectories: Set<String> = [".git", ".build", "build", "DerivedData", "临时文件"]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let enumerator = fileManager.enumerator(
+            at: projectRoot,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return SourceTargetService.hash(rootDocument) }
+        let prefix = projectRoot.path.hasSuffix("/") ? projectRoot.path : projectRoot.path + "/"
+        var records: [String] = []
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: keys)
+            if values.isDirectory == true, excludedDirectories.contains(url.lastPathComponent) {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard values.isRegularFile == true,
+                  supportedExtensions.contains(url.pathExtension.lowercased()),
+                  url.path.hasPrefix(prefix) else { continue }
+            let relativePath = String(url.path.dropFirst(prefix.count))
+            let modified = values.contentModificationDate?.timeIntervalSince1970 ?? 0
+            records.append("\(relativePath)|\(values.fileSize ?? 0)|\(modified)")
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let configurationData = try encoder.encode(configuration)
+        let configurationText = String(decoding: configurationData, as: UTF8.self)
+        return SourceTargetService.hash(
+            ([rootDocument, configurationText, command.joined(separator: "\u{1f}")] + records.sorted())
+                .joined(separator: "\n")
+        )
     }
 
     private func copyProject(from sourceRoot: URL, to destinationRoot: URL) throws {

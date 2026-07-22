@@ -139,12 +139,19 @@ private struct QuickLookPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal)
         view?.autostarts = true
+        view?.shouldCloseWithWindow = false
         view?.previewItem = url as NSURL
         return view ?? QLPreviewView(frame: .zero, style: .normal)!
     }
 
     func updateNSView(_ view: QLPreviewView, context: Context) {
         if (view.previewItem as? NSURL)?.filePathURL != url { view.previewItem = url as NSURL }
+    }
+
+    static func dismantleNSView(_ view: QLPreviewView, coordinator: Void) {
+        view.autostarts = false
+        view.previewItem = nil
+        view.close()
     }
 }
 
@@ -264,7 +271,7 @@ struct PDFKitView: NSViewRepresentable {
     @Binding var pageIndex: Int
     @Binding var pageCount: Int
     var navigationTarget: PDFNavigationTarget?
-    var onCommandClick: (Int, Double, Double) -> Void
+    var onCommandClick: (Int, Double, Double, String?) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(selection: $selection, pageIndex: $pageIndex, pageCount: $pageCount)
@@ -386,11 +393,19 @@ struct PDFKitView: NSViewRepresentable {
     }
 }
 
-private final class NavigablePDFView: PDFView {
-    var onCommandClick: ((Int, Double, Double) -> Void)?
+final class NavigablePDFView: PDFView {
+    var onCommandClick: ((Int, Double, Double, String?) -> Void)?
+
+    static func shouldTriggerSourceLookup(clickCount: Int, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        clickCount >= 2 || modifierFlags.contains(.command)
+    }
 
     override func mouseDown(with event: NSEvent) {
-        guard event.modifierFlags.contains(.command),
+        let shouldLocate = Self.shouldTriggerSourceLookup(
+            clickCount: event.clickCount,
+            modifierFlags: event.modifierFlags
+        )
+        guard shouldLocate,
               let document,
               let page = page(for: convert(event.locationInWindow, from: nil), nearest: true) else {
             super.mouseDown(with: event)
@@ -399,11 +414,14 @@ private final class NavigablePDFView: PDFView {
         let viewPoint = convert(event.locationInWindow, from: nil)
         let pagePoint = convert(viewPoint, to: page)
         let bounds = page.bounds(for: .mediaBox)
-        onCommandClick?(
-            document.index(for: page),
-            pagePoint.x,
-            bounds.maxY - pagePoint.y
-        )
+        let pageIndex = document.index(for: page)
+        let x = pagePoint.x
+        let yFromTop = bounds.maxY - pagePoint.y
+        super.mouseDown(with: event)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.onCommandClick?(pageIndex, x, yFromTop, self.currentSelection?.string)
+        }
     }
 }
 

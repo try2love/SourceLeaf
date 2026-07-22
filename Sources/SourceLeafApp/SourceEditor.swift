@@ -139,6 +139,7 @@ struct SourceTextView: NSViewRepresentable {
         }
         textView.backgroundColor = .textBackgroundColor
         (nsView as? SourceEditorContainerView)?.layoutEditor()
+        context.coordinator.invalidateVisibleEditor()
         context.coordinator.askButton?.title = L10n.text("selection.askAI")
         context.coordinator.updateAskButton()
         context.coordinator.ruler?.needsDisplay = true
@@ -196,7 +197,7 @@ struct SourceTextView: NSViewRepresentable {
             storage.beginEditing()
             storage.setAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
-                .foregroundColor: NSColor.textColor
+                .foregroundColor: NSColor.labelColor
             ], range: full)
             apply(#"%.*$"#, color: .systemGreen, storage: storage, source: textView.string, options: [.anchorsMatchLines])
             apply(#"\\[A-Za-z@]+\*?"#, color: .systemBlue, storage: storage, source: textView.string)
@@ -208,7 +209,21 @@ struct SourceTextView: NSViewRepresentable {
                 .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
                 .foregroundColor: NSColor.labelColor
             ]
+            textView.layoutManager?.invalidateDisplay(forCharacterRange: full)
+            if let textContainer = textView.textContainer {
+                textView.layoutManager?.ensureLayout(for: textContainer)
+            }
+            textView.needsDisplay = true
             highlighting = false
+        }
+
+        func invalidateVisibleEditor() {
+            guard let textView else { return }
+            textView.isHidden = false
+            textView.alphaValue = 1
+            textView.setNeedsDisplay(textView.visibleRect)
+            textView.enclosingScrollView?.contentView.needsDisplay = true
+            ruler?.needsDisplay = true
         }
 
         private func apply(
@@ -244,6 +259,19 @@ final class SourceEditorContainerView: NSView {
         layoutEditor()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.layoutEditor()
+            self.editorTextView.isHidden = false
+            self.editorTextView.alphaValue = 1
+            self.editorTextView.setNeedsDisplay(self.editorTextView.visibleRect)
+            self.editorScrollView.contentView.needsDisplay = true
+        }
+    }
+
     func layoutEditor() {
         let width = max(editorScrollView.contentSize.width, 1)
         guard width.isFinite else { return }
@@ -255,6 +283,7 @@ final class SourceEditorContainerView: NSView {
             textContainer.widthTracksTextView = true
             editorTextView.layoutManager?.ensureLayout(for: textContainer)
         }
+        editorTextView.setNeedsDisplay(editorTextView.visibleRect)
     }
 }
 

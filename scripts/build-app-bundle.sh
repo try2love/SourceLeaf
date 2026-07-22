@@ -53,7 +53,7 @@ ICON_PATH=$("$SCRIPT_DIR/generate-app-icon.sh")
 cp "$ICON_PATH" "$STAGING_PATH/Contents/Resources/SourceLeaf.icns"
 
 sed \
-  -e "s/__VERSION__/${SOURCELEAF_VERSION:-0.3.0}/g" \
+  -e "s/__VERSION__/${SOURCELEAF_VERSION:-0.3.1}/g" \
   "$PROJECT_ROOT/scripts/Info.plist.in" > "$STAGING_PATH/Contents/Info.plist"
 
 codesign --force --deep --sign - "$STAGING_PATH"

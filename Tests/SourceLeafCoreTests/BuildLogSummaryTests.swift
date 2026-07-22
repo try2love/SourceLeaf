@@ -58,6 +58,95 @@ import Testing
     #expect(received.value.contains("Running TeX"))
 }
 
+@Test func tectonicPrefersCachedResourcesAndRetriesOnlyForMissingFiles() {
+    let arguments = ["--synctex", "--outdir", "/tmp/output", "main.tex"]
+    #expect(CompilerService.cachedTectonicArguments(
+        executableURL: URL(fileURLWithPath: "/tmp/tectonic"),
+        arguments: arguments
+    ) == ["--only-cached"] + arguments)
+    #expect(CompilerService.cachedTectonicArguments(
+        executableURL: URL(fileURLWithPath: "/tmp/latexmk"),
+        arguments: arguments
+    ) == nil)
+    #expect(CompilerService.requiresNetworkRetry(ProcessOutput(
+        exitCode: 1,
+        standardOutput: "note: using only cached resource files",
+        standardError: "LaTeX Error: File `article.cls' not found."
+    )))
+    #expect(!CompilerService.requiresNetworkRetry(ProcessOutput(
+        exitCode: 1,
+        standardOutput: "",
+        standardError: "Undefined control sequence."
+    )))
+}
+
+@Test func unchangedProjectReusesTheSuccessfulBuildWithoutLaunchingTheToolAgain() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-build-cache-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("\\documentclass{article}\n".utf8).write(to: root.appendingPathComponent("main.tex"))
+    let counter = root.appendingPathComponent("invocations.txt")
+    let escapedCounter = counter.path.replacingOccurrences(of: "'", with: "'\\''")
+    let configuration = BuildConfiguration(
+        engine: .custom,
+        customCommand: "print x >> '\(escapedCounter)'; /usr/bin/touch {{output}}/main.pdf",
+        autoBuild: false
+    )
+    let compiler = CompilerService()
+
+    let first = try await compiler.build(
+        projectRoot: root,
+        rootDocument: "main.tex",
+        configuration: configuration
+    )
+    let second = try await compiler.build(
+        projectRoot: root,
+        rootDocument: "main.tex",
+        configuration: configuration
+    )
+
+    #expect(first.status == .succeeded)
+    #expect(second.status == .succeeded)
+    let invocations = try String(contentsOf: counter, encoding: .utf8)
+        .split(whereSeparator: \.isNewline)
+    #expect(invocations.count == 1)
+}
+
+@Test func realProjectSecondBuildUsesTheFastPathWhenExplicitlyEnabled() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["SOURCELEAF_RUN_REAL_BUILD"] == "1",
+          let projectPath = environment["SOURCELEAF_REAL_PROJECT"],
+          let enginePath = environment["SOURCELEAF_MANAGED_TECTONIC"] else { return }
+    let root = URL(fileURLWithPath: projectPath, isDirectory: true)
+    let engine = URL(fileURLWithPath: enginePath)
+    let compiler = CompilerService()
+    let configuration = BuildConfiguration(engine: .tectonic, autoBuild: false)
+
+    let coldStart = Date()
+    let first = try await compiler.build(
+        projectRoot: root,
+        rootDocument: "MutedRAG.tex",
+        configuration: configuration,
+        managedTectonicURL: engine
+    )
+    let coldDuration = Date().timeIntervalSince(coldStart)
+    let warmStart = Date()
+    let second = try await compiler.build(
+        projectRoot: root,
+        rootDocument: "MutedRAG.tex",
+        configuration: configuration,
+        managedTectonicURL: engine
+    )
+    let warmDuration = Date().timeIntervalSince(warmStart)
+
+    #expect(first.status == .succeeded)
+    #expect(second.status == .succeeded)
+    #expect(second.reusedOutput)
+    #expect(warmDuration < 1)
+    print("SOURCELEAF_REAL_BUILD cold=\(coldDuration) warm=\(warmDuration)")
+}
+
 private final class ThreadSafeText: @unchecked Sendable {
     private let lock = NSLock()
     private var storage = ""

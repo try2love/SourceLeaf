@@ -136,8 +136,16 @@ private struct ProviderEditor: View {
             }
             .disabled(profile.kind == .localCodex)
             Toggle(L10n.text("provider.enabled"), isOn: $model.providerProfiles[index].enabled)
+            TextField(L10n.text("provider.model"), text: $model.providerProfiles[index].model)
+            if [.localCodex, .openAI, .openAICompatible].contains(profile.kind) {
+                Picker(L10n.text("provider.reasoning"), selection: $model.providerProfiles[index].reasoningEffort) {
+                    Text(L10n.text("provider.reasoningDefault")).tag(Optional<ModelReasoningEffort>.none)
+                    ForEach(ModelReasoningEffort.allCases) { effort in
+                        Text(L10n.text("reasoning.\(effort.rawValue)")).tag(Optional(effort))
+                    }
+                }
+            }
             if profile.kind != .localCodex {
-                TextField(L10n.text("provider.model"), text: $model.providerProfiles[index].model)
                 TextField(L10n.text("provider.baseURL"), text: Binding(
                     get: { model.providerProfiles[index].baseURL ?? "" },
                     set: { model.providerProfiles[index].baseURL = $0.isEmpty ? nil : $0 }

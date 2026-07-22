@@ -71,6 +71,33 @@ import Testing
 }
 
 @MainActor
+@Test func sourceAndImageTabsSwitchWithoutDiscardingEitherDocument() throws {
+    guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
+    let project = URL(fileURLWithPath: fixturesPath, isDirectory: true)
+        .appendingPathComponent("多文件论文", isDirectory: true)
+    let model = try isolatedModel(named: "source-image-tabs")
+    model.openProject(project)
+    let source = try #require(model.projectFiles.first { $0.kind == .tex })
+    let image = try #require(model.projectFiles.first { $0.kind == .image })
+
+    model.openFile(image)
+    model.openFile(source)
+
+    #expect(model.selectedFile?.relativePath == source.relativePath)
+    #expect(model.selectedImageFile?.relativePath == image.relativePath)
+    #expect(model.layout.zones[.center]?.contains(.source) == true)
+    #expect(model.layout.zones[.center]?.contains(.image) == true)
+    #expect(model.layout.selected[.center] == .source)
+
+    model.selectPanel(.image, in: .center)
+    #expect(model.layout.selected[.center] == .image)
+    #expect(model.selectedImageFile?.relativePath == image.relativePath)
+    model.selectPanel(.source, in: .center)
+    #expect(model.layout.selected[.center] == .source)
+    #expect(model.selectedImageFile?.relativePath == image.relativePath)
+}
+
+@MainActor
 @Test func invalidUTF8SourceFailsSafelyWithoutShowingStaleText() throws {
     guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
     let project = URL(fileURLWithPath: fixturesPath, isDirectory: true)
@@ -105,10 +132,13 @@ import Testing
     model.locatePDFPointInSource(
         pageIndex: target.pageIndex,
         x: target.x,
-        yFromTop: target.yFromTop
+        yFromTop: target.yFromTop,
+        selectedText: "Implementation"
     )
     #expect(model.selectedFile?.relativePath == "sections/deep/details.tex")
     #expect(SourceLineMap.lineNumber(in: model.sourceText, utf16Location: model.selectedRange.location) == 1)
+    #expect((model.sourceText as NSString).substring(with: model.selectedRange) == "Implementation")
+    #expect(model.layout.selected[model.layout.zone(containing: .source) ?? .center] == .source)
 }
 
 @MainActor
