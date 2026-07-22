@@ -1,82 +1,227 @@
-# SourceLeaf
+<h1 align="center">SourceLeaf</h1>
 
-SourceLeaf is a native macOS LaTeX workspace that keeps source editing, PDF preview, compilation, and AI-assisted revision in one user-controlled interface.
+<p align="center">
+  A native macOS workspace for writing LaTeX, reviewing PDFs, and applying AI-assisted revisions under explicit user control.
+</p>
 
-SourceLeaf 是一个原生 macOS LaTeX 工作区，将源码编辑、PDF 预览、编译和受控 AI 修改整合在同一个界面中。
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## Design principles / 设计原则
+<p align="center">
+  <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
+  <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.3" src="https://img.shields.io/badge/version-0.3.3-2ea44f"></a>
+  <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
+</p>
 
-- AI edits are suggestions until the user accepts a visible diff.
-- An explicit source selection, line range, or confirmed SyncTeX mapping defines every writable target.
-- Local Codex reuses the user's existing CLI login; API credentials stay in macOS Keychain.
-- Project files stay clean: chats, layouts, indexes, histories, and build artifacts live in Application Support or caches.
-- Panels can be opened, closed, rearranged, docked, or detached into separate windows.
+<p align="center">
+  <a href="#why-sourceleaf">Why SourceLeaf</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#controlled-ai-workflow">AI Workflow</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#development">Development</a>
+</p>
 
-## Requirements / 环境要求
+SourceLeaf brings the core academic writing loop into one native workspace: edit LaTeX, inspect the compiled PDF, navigate with SyncTeX, and ask a local Codex CLI or configured API provider for revisions. AI output remains a proposal until the user reviews a visible diff and explicitly accepts it.
+
+> [!IMPORTANT]
+> SourceLeaf is currently a product-tested preview for macOS 14 and newer. It is source-available for noncommercial use and is not yet distributed through the Mac App Store or as a notarized binary release.
+
+## Why SourceLeaf
+
+Most AI writing integrations either receive too much project access or return text that must be copied back manually. SourceLeaf uses a narrower contract:
+
+- the writable target is an explicit selection, line range, or confirmed SyncTeX mapping;
+- additional chapter, document, or project context is read-only;
+- every proposal is statically inspected and shown as a diff;
+- candidate LaTeX is trial-compiled in an isolated project copy before acceptance;
+- stale targets are rejected instead of silently overwriting newer edits.
+
+The rest of the application follows the same local-first boundary. Project metadata stays outside the paper folder, API keys stay in macOS Keychain, and the local Codex provider reuses the Codex CLI already installed and signed in on the Mac.
+
+## Features
+
+### LaTeX workspace
+
+- **Native source editor** with Overleaf-style semantic colors, comment highlighting, readable selections and caret, fixed line numbers, line wrapping, light/dark/system themes, and persistent font preferences.
+- **Project navigation** with a collapsible folder tree, image preview, and a recursively collapsible document outline that jumps to the owning source location.
+- **LaTeX editing tools** for text styles, heading levels, font sizes, formulas, lists, citations, references, labels, and URLs.
+- **Explicit saving** with dirty-state feedback, toolbar actions, and `⌘S`.
+
+### Compilation and PDF
+
+- **Managed Tectonic 0.16.9** bundled by the installer for both Apple Silicon and Intel Macs.
+- **External toolchain support** for `latexmk` and broader TeX Live compatibility.
+- **Fast unchanged-project reuse**, live compilation phases, structured build-log summaries, and manual cache cleanup.
+- **Forward and reverse SyncTeX** between source lines and PDF positions without modifying the generated PDF.
+
+### Reviewable AI assistance
+
+- **Local Codex CLI first**: reuse the Mac's existing Codex login and configuration without copying `auth.json`.
+- **Configurable providers**: local CLI profiles and OpenAI-compatible HTTP APIs with model and reasoning controls.
+- **Selectable context scope**: selection only, nearby text, section, full document, or project.
+- **Diff before write**: inspect warnings and original/proposed text before accepting or rejecting a change.
+- **Prompt library**: built-in and user-managed prompts, including create, duplicate, edit, enable/disable, and delete operations.
+- **History through review**: restoring an earlier change returns through the same diff workflow instead of overwriting source silently.
+
+### Flexible native interface
+
+- Source, PDF, conversation, project navigation, and logs can be shown, hidden, rearranged, docked, or detached.
+- Detached panels return to the main workspace when their windows close.
+- Interface language can switch immediately between English, Simplified Chinese, and Follow System.
+- The most recent project and source file reopen automatically.
+
+## Installation
+
+### Requirements
 
 - macOS 14 Sonoma or newer
-- Xcode 16 or newer for source builds
-- Optional: Codex CLI for the local Codex provider
-- Optional: MacTeX/TinyTeX for full `latexmk` compatibility; the default Tectonic engine is bundled automatically
+- Xcode 16 or newer, including the command-line tools
+- Internet access on the first installation to download the pinned Tectonic binaries
+- Optional: [Codex CLI](https://github.com/openai/codex) for the local Codex provider
+- Optional: MacTeX, TinyTeX, or another `latexmk` toolchain for packages outside Tectonic's compatibility envelope
 
-## Build and install / 构建与安装
+### Build and install
 
 ```bash
+git clone https://github.com/try2love/SourceLeaf.git
+cd SourceLeaf
 scripts/install.sh
 ```
 
-The script downloads the pinned official Tectonic 0.16.9 binaries for Apple Silicon and Intel, verifies their SHA-256 checksums, embeds them in the app, builds a universal release, verifies its signature, and installs it to `~/Applications/SourceLeaf.app` by default. Downloads and build artifacts stay under the categorized `临时文件` directory.
+The installer:
 
-该脚本会下载固定版本的 Tectonic 0.16.9 官方 Apple Silicon 与 Intel 二进制，校验 SHA-256 后随 App 一起打包；随后构建 Universal Release、验证签名，并默认安装到 `~/Applications/SourceLeaf.app`。下载与构建产物全部保存在分类后的 `临时文件` 目录中。
+1. downloads the official Tectonic 0.16.9 binaries for `arm64` and `x86_64`;
+2. verifies their pinned SHA-256 checksums;
+3. builds and ad-hoc signs a Universal SourceLeaf application;
+4. installs it to `~/Applications/SourceLeaf.app`;
+5. preserves the previous installation under the categorized `临时文件/安装备份` directory.
 
-开发构建：
+Open the installed application with:
 
 ```bash
-swift test
+open "$HOME/Applications/SourceLeaf.app"
+```
+
+Build downloads and intermediate artifacts remain under the repository's ignored `临时文件` directory. They are not added to LaTeX projects or Git commits.
+
+## Quick Start
+
+1. Launch SourceLeaf and choose a LaTeX project folder.
+2. Open the main `.tex` file and compile it with the toolbar button.
+3. Arrange the source, PDF, project, and conversation panels for the current task.
+4. Select source text, reference an explicit line range, or use a confirmed PDF-to-source mapping.
+5. Attach the target to the conversation, choose a context scope, and describe the desired revision.
+6. Review the warnings, trial-build result, and diff; then accept, reject, or continue refining.
+
+For ordinary LaTeX editing, the conversation panel and selection action can remain closed. The floating selection button can also be disabled in Settings.
+
+## Controlled AI Workflow
+
+```text
+Explicit source target
+        ↓
+Read-only context scope
+        ↓
+Provider proposal
+        ↓
+Target and LaTeX validation
+        ↓
+Isolated trial compilation
+        ↓
+Visible diff and user decision
+        ↓
+Atomic write or rejection
+```
+
+SourceLeaf records the target's original text and hash. If the source changes while a proposal is being generated, acceptance is refused and the user must create a fresh target.
+
+Local Codex runs from a source-free workspace in Application Support with ephemeral, read-only execution. HTTP providers receive only the assembled target and selected context and have no filesystem or tool access through SourceLeaf.
+
+## Data and Privacy
+
+| Data | Default location |
+| --- | --- |
+| LaTeX source and assets | Original project folder |
+| Per-project state, chat, history, provider workspaces | `~/Library/Application Support/SourceLeaf/` |
+| Generated PDFs, logs, and disposable build output | `~/Library/Caches/SourceLeaf/` |
+| API credentials | macOS Keychain |
+
+SourceLeaf does not add metadata to the paper project. Development and tests can isolate application data with:
+
+```bash
+SOURCELEAF_SUPPORT_DIRECTORY="$PWD/临时文件/开发/ApplicationSupport" \
+SOURCELEAF_CACHE_DIRECTORY="$PWD/临时文件/开发/Caches" \
 swift run SourceLeaf
 ```
 
-## Current status / 当前状态
+## Architecture
 
-The current `0.3.3` build is a product-tested preview. Its central workflow is available now:
+SourceLeaf separates deterministic editing and compilation rules from the native interface:
 
-1. Open a LaTeX project folder and select text in a `.tex` file.
-2. Attach that selection with the floating button, context command, or `⌥⌘K`.
-3. Choose the readable context scope and send an instruction to local Codex or a configured API.
-4. Review static LaTeX warnings and the original/proposed text side by side.
-5. Accept, reject, or continue adjusting. Source is written only after acceptance, and stale targets are refused.
+```text
+Sources/
+├── SourceLeafCore/       # project indexing, targets, validation, providers,
+│                        # compilation, SyncTeX, persistence, and prompts
+└── SourceLeafApp/        # SwiftUI workspace and settings, AppKit/TextKit editor,
+                         # PDFKit preview, conversation, and approval flow
 
-已经可用的核心流程是：打开 LaTeX 项目、选中源码、附加为严格可写目标、选择上下文范围、让本机 Codex 或 API 生成建议、审阅 Diff 后再决定是否写入。
+Tests/
+├── SourceLeafCoreTests/  # deterministic unit and real-project checks
+└── SourceLeafAppTests/   # AppKit, PDFKit, behavior, boundary, and visual checks
+```
 
-Before acceptance, SourceLeaf compiles the proposal in an isolated temporary project copy by default. A failed candidate leaves the real source untouched; the user can inspect the build log or explicitly force acceptance. History restoration is routed back through the same reviewable diff instead of silently overwriting source.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the source-target contract, storage boundaries, and SyncTeX design.
 
-The workspace includes a collapsible project tree, a recursively collapsible and vertically resizable project-wide LaTeX outline, native raster/vector image preview, one-page PDF navigation, live compile phases, explicit Save controls with `⌘S`, and SyncTeX in both directions. The source editor now provides Overleaf-style semantic LaTeX colors, readable selection and caret rendering, fixed line numbers without horizontal drift, system/light/dark themes, and persistent font-family/font-size preferences. The source toolbar applies LaTeX text styles, font sizes, heading levels, formulas, lists, citations, references, labels, and URLs to the current selection; with no selection it inserts an editable placeholder. Use the source header's locate button to reveal the cursor in PDF; double-click a PDF word or command-click a position to open its owning `.tex` file and line.
+## Development
 
-Still in development: the safety review for custom CLI providers. A managed Tectonic engine is bundled by the installer; external `latexmk` remains supported for broader TeX Live compatibility.
+Run the complete test suite:
 
-接受修改前，SourceLeaf 现在默认在隔离的临时项目副本中试编译。失败时真实源码保持不变；用户可以检查日志，也可以明确选择强制接受。历史恢复同样会先回到 Diff 审阅，不会静默覆盖源码。
+```bash
+swift test
+```
 
-工作区现在包含可折叠项目树、可逐级收起并可拖动边界的跨文件文档结构、原生位图/矢量图预览、单页 PDF 导航、实时编译阶段、明确的保存按钮与 `⌘S`，以及 SyncTeX 双向定位。源码编辑器提供接近 Overleaf 的 LaTeX 语义配色、清晰选区与插入光标、不会横向漂移的固定行号栏、跟随系统/浅色/深色主题，以及可持久化的字体与字号设置。源码工具栏可对当前选区应用文字样式、字号、标题等级、公式、列表、文献引用、交叉引用、标签和网址；未选中文字时会插入可继续编辑的占位模板。源码栏按钮可在 PDF 中定位当前光标；双击 PDF 单词或按住 ⌘ 点击位置可打开对应 `.tex` 文件与行号。
+Run the application from SwiftPM:
 
-仍在开发：自定义 CLI 的安全校验。安装脚本会自动打包受管理 Tectonic；系统已有 `latexmk` 时仍可用于更完整的 TeX Live 兼容性。
+```bash
+swift run SourceLeaf
+```
 
-## Privacy boundary / 隐私边界
+Build a local Universal application bundle:
 
-- Local Codex runs in a source-free app workspace with `--ephemeral --sandbox read-only`; it receives only the context assembled by SourceLeaf.
-- API providers receive the same explicit targets and selected read-only context, with no filesystem or tool access.
-- API keys are stored in macOS Keychain. SourceLeaf never reads or copies Codex `auth.json`.
-- Chat, layout, AI history, and generated files live outside the paper project by default.
+```bash
+scripts/build-app-bundle.sh
+```
 
-## Language and prompts / 语言与提示词
+Useful build overrides include `SOURCELEAF_TEMP_ROOT`, `SOURCELEAF_APP_OUTPUT`, `SOURCELEAF_INSTALL_ROOT`, `SOURCELEAF_ARCHS`, and `SOURCELEAF_SKIP_MANAGED_ENGINE=1`.
 
-The General settings page can switch the interface immediately between Follow System, English, and Simplified Chinese. Localization keys are checked in the test suite so the two translations stay aligned.
+## Current Limitations
 
-The Prompts page supports creating, duplicating, editing, enabling/disabling, and deleting personal prompts. Versioned built-in prompts are read-only; duplicate one to personalize it. Personal prompts are stored globally in SourceLeaf Application Support and never inside the paper project.
+- SourceLeaf is macOS-only and depends on SwiftUI, AppKit/TextKit, PDFKit, and Quick Look.
+- The current distribution path is a source-based installer with ad-hoc signing; notarized downloads are not published yet.
+- Tectonic covers the default installation path, but some projects still require a full TeX Live/`latexmk` toolchain.
+- Custom CLI provider safety review is still in progress.
+- Cloud sync, shared editing, and multi-user collaboration are outside the current scope.
 
-“通用”设置可在“跟随系统、English、简体中文”之间即时切换。提示词页支持新增、复制、修改、启用/停用和删除个性化提示词；内置提示词保持只读，复制后即可编辑。自定义提示词保存在 SourceLeaf 的 Application Support 中，不会写入论文目录。
+## Contributing
 
-## License / 许可证
+Contributions are welcome when they remain compatible with the project's noncommercial license and local-first safety boundary. Please read [CONTRIBUTING.md](CONTRIBUTING.md), sign commits with the [Developer Certificate of Origin](DCO.txt), and run:
 
-SourceLeaf is source-available under the PolyForm Noncommercial License 1.0.0. Commercial use is not granted. See `LICENSE` and `NOTICE`.
+```bash
+swift test
+swift build -c release
+```
 
-SourceLeaf 采用 PolyForm Noncommercial 1.0.0 源码可用许可证，不授权商业使用。详见 `LICENSE` 与 `NOTICE`。
+Do not commit API keys, personal paths, paper content, chat histories, or generated build artifacts.
+
+## License
+
+SourceLeaf is **source-available for noncommercial use** under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use is not granted.
+
+Third-party components and optional external tools remain under their respective licenses. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [NOTICE](NOTICE).
+
+SourceLeaf is an independent project and is not affiliated with or endorsed by OpenAI, Apple, the Tectonic project, or the developers of Texifier.
