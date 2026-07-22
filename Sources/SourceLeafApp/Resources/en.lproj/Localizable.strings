@@ -87,6 +87,7 @@
 "status.unsaved" = "Unsaved changes";
 "status.buildSucceeded" = "Build succeeded";
 "status.buildUpToDate" = "Project unchanged; reused the last PDF";
+"status.cachedPDFRestored" = "Restored the last successful PDF";
 "status.buildFailed" = "Build failed";
 "status.buildCancelled" = "Build cancelled";
 "status.cacheCleared" = "Build cache cleared";
@@ -122,6 +123,7 @@
 "provider.enabled" = "Enabled";
 "provider.model" = "Model";
 "provider.modelDefault" = "Use provider default model";
+"provider.modelDefaultShort" = "Default model";
 "provider.modelHint" = "Leave blank to use the CLI or API default, or type a model ID directly.";
 "provider.reasoning" = "Reasoning effort";
 "provider.reasoningDefault" = "Provider default";
@@ -129,7 +131,14 @@
 "provider.apiKey" = "API key";
 "provider.keychainHint" = "The API key is stored only in macOS Keychain.";
 "provider.localCodexHint" = "Uses the Codex CLI already installed and signed in on this Mac. SourceLeaf does not read or copy auth.json.";
+"provider.codeBuddyHint" = "Uses the CodeBuddy CLI installed and signed in on this Mac. SourceLeaf runs it headlessly in a source-free workspace with file and command tools disabled.";
 "provider.localCodex" = "Local Codex";
+"provider.codeBuddy" = "Local CodeBuddy";
+"provider.healthCheck" = "Test AI connection";
+"provider.healthUnknown" = "Connection not tested";
+"provider.healthChecking" = "Testing AI connection…";
+"provider.healthConnected" = "AI connection available";
+"provider.healthUnavailable" = "AI connection unavailable";
 "provider.openAI" = "OpenAI";
 "provider.openAICompatible" = "OpenAI-compatible";
 "provider.anthropic" = "Anthropic";
@@ -146,12 +155,15 @@
 "reasoning.max" = "Maximum";
 "reasoning.ultra" = "Ultra";
 "prompt.builtIn" = "Built-in";
+"ai.quickPrompt" = "Quick Prompt";
 "prompt.select" = "Select a prompt";
 "prompt.enabled" = "Enabled";
 "prompt.nameEnglish" = "English name";
 "prompt.nameChinese" = "Chinese name";
 "prompt.bodyEnglish" = "English prompt";
 "prompt.bodyChinese" = "Chinese prompt";
+"prompt.languageEnglish" = "English";
+"prompt.languageChinese" = "Chinese";
 "prompt.variables" = "Available variables";
 "prompt.readOnlyHint" = "Built-in prompts are versioned and read-only. Duplicate one to personalize it.";
 "prompt.duplicateToEdit" = "Duplicate to Edit";

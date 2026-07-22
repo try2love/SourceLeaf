@@ -103,6 +103,37 @@ public actor CompilerService {
         activeBuild = nil
     }
 
+    /// Returns the last successful artifact for a project without compiling.
+    /// The caller must present it as cached output because source files may
+    /// have changed since the manifest was written.
+    public func cachedSuccessfulBuild(
+        projectRoot: URL,
+        rootDocument: String
+    ) throws -> BuildResult? {
+        let rootURL = try SourceTargetService.validatedURL(relativePath: rootDocument, projectRoot: projectRoot)
+        let outputDirectory = try buildDirectory(for: projectRoot)
+        let manifestURL = outputDirectory.appendingPathComponent(".sourceleaf-build-manifest.json")
+        let basename = rootURL.deletingPathExtension().lastPathComponent
+        let pdfURL = outputDirectory.appendingPathComponent(basename).appendingPathExtension("pdf")
+        guard fileManager.fileExists(atPath: pdfURL.path),
+              let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(BuildManifest.self, from: data) else { return nil }
+        let syncURL = outputDirectory.appendingPathComponent(basename).appendingPathExtension("synctex.gz")
+        let modified = (try? pdfURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+        return BuildResult(
+            status: .succeeded,
+            command: manifest.command,
+            outputDirectory: outputDirectory,
+            pdfURL: pdfURL,
+            syncTeXURL: fileManager.fileExists(atPath: syncURL.path) ? syncURL : nil,
+            log: "SourceLeaf: restored the last successful PDF from cache.",
+            exitCode: 0,
+            startedAt: modified,
+            finishedAt: modified,
+            reusedOutput: true
+        )
+    }
+
     public func build(
         projectRoot: URL,
         rootDocument: String,

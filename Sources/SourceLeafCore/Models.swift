@@ -103,6 +103,7 @@ public enum ContextScope: String, Codable, CaseIterable, Identifiable, Sendable 
 
 public enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case localCodex
+    case codeBuddy
     case openAI
     case openAICompatible
     case anthropic
@@ -163,6 +164,11 @@ public struct ProviderProfile: Codable, Identifiable, Equatable, Sendable {
     public static let localCodex = ProviderProfile(
         name: "Local Codex",
         kind: .localCodex
+    )
+
+    public static let localCodeBuddy = ProviderProfile(
+        name: "Local CodeBuddy",
+        kind: .codeBuddy
     )
 }
 

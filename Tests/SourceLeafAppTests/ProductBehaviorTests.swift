@@ -131,6 +131,42 @@ import Testing
     #expect(restored.editorFontSize == 17)
 }
 
+@MainActor
+@Test func openingAProjectRestoresItsLastSuccessfulPDF() async throws {
+    let state = try productTestState(named: "cached-pdf")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}\n\\begin{document}Cached\\end{document}\n".utf8)
+        .write(to: project.appendingPathComponent("main.tex"))
+    let compiler = CompilerService()
+    let build = try await compiler.build(
+        projectRoot: project,
+        rootDocument: "main.tex",
+        configuration: BuildConfiguration(
+            engine: .custom,
+            customCommand: "/usr/bin/touch {{output}}/main.pdf",
+            autoBuild: false
+        )
+    )
+    defer { try? FileManager.default.removeItem(at: build.outputDirectory) }
+
+    let model = AppModel(
+        restoreLastProject: false,
+        supportDirectory: appSupport,
+        defaults: state.defaults,
+        compiler: compiler
+    )
+    model.openProject(project)
+    for _ in 0..<30 where model.pdfURL == nil {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(model.pdfURL == build.pdfURL)
+    #expect(model.buildSucceeded == true)
+    #expect(model.buildPhase == .finished)
+}
+
 private struct ProductTestState {
     var support: URL
     var defaults: UserDefaults

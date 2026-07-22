@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import SourceLeafCore
 
@@ -266,11 +267,13 @@ struct SourceTextView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
+        var requiresFullRefresh = false
         if textView.string != text {
             let visible = textView.enclosingScrollView?.contentView.bounds
             textView.string = text
             context.coordinator.applyHighlighting()
             if let visible { textView.enclosingScrollView?.contentView.scroll(to: visible.origin) }
+            requiresFullRefresh = true
         }
         if textView.selectedRange() != selection, NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
@@ -280,12 +283,18 @@ struct SourceTextView: NSViewRepresentable {
         if context.coordinator.appliedStyleSignature != nil,
            context.coordinator.appliedStyleSignature != context.coordinator.currentStyleSignature {
             context.coordinator.applyHighlighting()
+            requiresFullRefresh = true
         }
-        context.coordinator.layoutEditor()
-        context.coordinator.invalidateVisibleEditor()
+        // A drag selection publishes dozens of binding updates per second. The
+        // NSTextView has already updated its selection and layout at this point;
+        // forcing TextKit to lay out the whole document again makes the painted
+        // selection trail behind the pointer on large files.
+        if requiresFullRefresh {
+            context.coordinator.layoutEditor()
+            context.coordinator.invalidateVisibleEditor()
+        }
         context.coordinator.askButton?.title = L10n.text("selection.askAI")
         context.coordinator.updateAskButton()
-        context.coordinator.ruler?.needsDisplay = true
     }
 
     @MainActor
@@ -300,6 +309,7 @@ struct SourceTextView: NSViewRepresentable {
         private var lastAppliedCommandID: UUID?
         private var resettingHorizontalScroll = false
         private var completedWindowHighlight = false
+        private var selectionSyncTimer: Timer?
 
         var currentStyleSignature: String {
             let appearance = textView?.effectiveAppearance.name.rawValue ?? "none"
@@ -337,17 +347,33 @@ struct SourceTextView: NSViewRepresentable {
             parent.text = textView.string
             applyHighlighting()
             ruler?.needsDisplay = true
+            glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView else { return }
-            parent.selection = textView.selectedRange()
+            guard textView != nil else { return }
+            // Keep AppKit's native interaction immediate, but coalesce the
+            // higher-level SwiftUI binding while a pointer drag is in flight.
+            selectionSyncTimer?.invalidate()
+            let timer = Timer(timeInterval: 0.05, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
+            selectionSyncTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
             updateAskButton()
-            glyphOverlay?.needsDisplay = true
+            glyphOverlay?.selectionDidChange()
         }
 
-        @objc func askAI() { parent.onAskAI() }
+        @objc private func commitSelectionToBinding() {
+            guard let textView else { return }
+            let range = textView.selectedRange()
+            if parent.selection != range { parent.selection = range }
+        }
+
+        @objc func askAI() {
+            selectionSyncTimer?.invalidate()
+            commitSelectionToBinding()
+            parent.onAskAI()
+        }
 
         func applyPendingCommand(_ request: LaTeXEditRequest?) {
             guard let request, request.id != lastAppliedCommandID else { return }
@@ -516,12 +542,19 @@ final class SourceGlyphOverlayView: NSView {
     var palette: SourceEditorPalette
     private(set) var lastSelectionRectCount = 0
     private(set) var lastCaretRect: NSRect?
+    private let caretLayer = CALayer()
+    var caretBlinkAnimationActive: Bool { caretLayer.animation(forKey: "SourceLeafCaretBlink") != nil }
 
     init(textView: NSTextView, palette: SourceEditorPalette) {
         self.textView = textView
         self.palette = palette
         super.init(frame: .zero)
         autoresizingMask = []
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        caretLayer.isHidden = true
+        caretLayer.actions = ["bounds": NSNull(), "position": NSNull(), "backgroundColor": NSNull(), "hidden": NSNull()]
+        layer?.addSublayer(caretLayer)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -532,6 +565,24 @@ final class SourceGlyphOverlayView: NSView {
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .iBeam)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            caretLayer.removeAllAnimations()
+            caretLayer.isHidden = true
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    func selectionDidChange() {
+        restartCaretBlink()
+        needsDisplay = true
+    }
+
+    func restartCaretBlink() {
+        caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
+        if !caretLayer.isHidden { installCaretBlinkAnimation() }
     }
 
     func synchronizeFrame() {
@@ -553,6 +604,8 @@ final class SourceGlyphOverlayView: NSView {
         )
         lastSelectionRectCount = 0
         lastCaretRect = nil
+        caretLayer.isHidden = true
+        caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
         let selectedRange = textView.selectedRange()
         if selectedRange.length > 0 {
             let selectedGlyphs = layoutManager.glyphRange(
@@ -581,10 +634,23 @@ final class SourceGlyphOverlayView: NSView {
                textContainer: textContainer,
                origin: origin
            ) {
-            palette.caret.setFill()
-            caret.fill()
             lastCaretRect = caret
+            caretLayer.frame = caret
+            caretLayer.backgroundColor = palette.caret.cgColor
+            caretLayer.isHidden = false
+            installCaretBlinkAnimation()
         }
+    }
+
+    private func installCaretBlinkAnimation() {
+        guard caretLayer.animation(forKey: "SourceLeafCaretBlink") == nil else { return }
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = [1, 1, 0, 0]
+        animation.keyTimes = [0, 0.49, 0.5, 1]
+        animation.duration = 1.06
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+        caretLayer.add(animation, forKey: "SourceLeafCaretBlink")
     }
 
     private func caretRect(

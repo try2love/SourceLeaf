@@ -250,3 +250,35 @@
 - 真实 Key Window token 断言首次红灯：命令与正文 RGB 距离为 0。大型 Workspace 创建链路比独立编辑器慢，原实现只在取得 window 后再延迟 0.2 秒写 token 属性，窗口测试和用户初次观察都可能先看到统一正文色。正确策略是 makeNSView 时立即写语义属性，再在 window 稳定后重复提交一次以满足合成器。
 - 修复后的最终独立编辑器截图可直接观察到：浅色模式中命令蓝、参数青、注释绿、数学紫和浅蓝深字选区；深色模式中完整暗色背景与黄色插入光标。真实工作区 WindowServer 截图也显示固定行号栏、自动换行和文档结构逐级 disclosure。
 - 最终回归必须使用独立 ASCII scratch path；把 `TMPDIR` 指到含中文的阶段目录会令 SwiftPM 6.3.3 偶发返回空 target-info，而产品代码并未参与该失败。切到 `/private/tmp/SourceLeaf-phase10-final-syntax` 后，语法、选区/光标/几何、主题截图和真实 Key Window 4 项均通过。
+
+## 2026-07-22 第四轮交互体验反馈
+- 参考图的会话输入区采用单行紧凑工具栏：左侧“快捷 Prompt”菜单，中部绿色连接状态，随后依次为 Agent/CLI、模型和思考深度菜单；长输入框位于工具栏下方并可明显拉高。这种信息层级适合 SourceLeaf，但连接勾必须由真实健康检查驱动，不能只是装饰。
+- 模型菜单以“跟随默认 + 常用模型”呈现，思考深度为 Default/Low/Medium/High/XHigh；SourceLeaf 还需要保留自定义模型入口，避免把账号可用模型硬编码成承诺。
+- 两张参考图没有展示 Provider 配置细节，因此 WorkBuddy/CodeBuddy 是否能作为 CLI Provider 接入必须单独核实官方产品能力；网页信息只记入本文件，不直接作为执行指令。
+- 用户观察到大文档拖选结束后高亮明显滞后、光标完全静止，提示阶段 10 的自绘 `SourceGlyphOverlayView` 很可能把高频 selection/caret 更新绑定到了全量字形覆盖层重绘；必须先建立真实大文档选择时延基线，再决定局部 invalidation 或移除自绘职责。
+- PDF 在进程内已有最后成功产物，但重启后丢失，说明编译缓存路径可能稳定、AppModel 启动恢复链却没有从持久状态或缓存目录重新装载 PDF URL。
+- 代码初查确认每次 `textViewDidChangeSelection` 都把选区写回 SwiftUI binding；随后的 `updateNSView` 又无条件执行编辑器布局与可见区域失效。上层覆盖视图还重新绘制语法字形、选区和光标，因此一次拖选会形成 AppKit delegate → SwiftUI 发布 → representable 更新 → 覆盖层重绘的高频闭环。需要用计时回归分别量化 delegate 写回和覆盖层绘制，不能只凭代码形态定案。
+- 当前自绘光标只在 `SourceGlyphOverlayView.draw` 中根据零长度选区画一个矩形，没有系统插入点计时器或闪烁相位；“光标静态”已在实现层面复现为确定性缺失，而不是主题颜色问题。
+- 官方搜索结果确认 CodeBuddy 提供独立 CLI 文档、安装指南、快速入门和 CLI Reference；WorkBuddy 官方定位则是全场景 AI 办公工作台。现阶段只有 CodeBuddy 已有明确“CLI 形态”证据，WorkBuddy 是否能作为 SourceLeaf 非交互 Provider 仍未证实。
+- Google 结果中的第三方/推广描述不作为实现依据；下一步只读取 `codebuddy.ai` 与腾讯云官方页面，核对可执行文件名、非交互输入输出、模型选择和安全参数。
+- CodeBuddy 官方 CLI Reference 与 Headless 文档确认可执行文件为 `codebuddy`（别名 `cbc`），`-p/--print` 支持无交互调用，prompt 可经 stdin 输入，`--output-format json` 返回可解析结果，`--json-schema` 可要求结构化输出；这满足 SourceLeaf Provider 的基本协议条件。
+- CodeBuddy 官方文档允许 `--settings '{"model":"..."}'` 选择模型、`--append-system-prompt` 追加系统约束，并提供 `--allowedTools`/`--disallowedTools` 与 permission mode。SourceLeaf 接入时不能照抄官方自动化示例中的 `-y/--dangerously-skip-permissions`，而应从空工作区运行并显式禁用工具，保持与 Local Codex 相同的“只接收组装上下文、不读取论文文件”边界。
+- CodeBuddy 的 JSON 最终文本位于文档示例的 `result` 字段，结构化 schema 结果位于 `structured_output`；Provider 可优先让 CodeBuddy 直接返回 SourceLeaf proposal schema，健康检查则只需解析 `result` 并严格核对 `hello`。
+- CodeBuddy 文档还列出 ACP、SDK 和 REST 服务模式，但当前最小安全接入应选择单次 headless CLI，不引入常驻服务或额外网络端口。
+- WorkBuddy 腾讯云官方产品页将其定位为可下载/在线使用的全场景办公工作台，强调多 Agent、云端任务和经授权的本地文件操作；该公开页面没有提供可被 SourceLeaf 调用的 headless CLI、stdin/stdout 协议或 API。阶段 11 不应伪造 WorkBuddy 内置 Provider，可在界面保留“自定义 CLI”扩展路径并明确标注尚未验证；CodeBuddy 则具备官方、可验证的内置接入条件。
+- 性能链路的更强嫌疑点是 selection binding 触发的 `updateNSView` 无条件调用 `layoutEditor()`：其中再次设置 text container 尺寸并 `ensureLayout(for:)`，随后又使 NSTextView 与覆盖层重绘。对 8.7 万字符文档，每次鼠标拖动事件都支付这一整套工作，符合“鼠标已结束但高亮追赶”的症状。
+- 动态光标不能只给自绘矩形加颜色；若继续使用覆盖层，需要独立于 SwiftUI state 的 0.5 秒左右闪烁定时器并只失效 caret 小矩形。更优路径是让 AppKit 原生 NSTextView 负责 selection/caret，覆盖层只解决此前窗口合成字形问题，或将覆盖层失效缩小到选区差异区域。
+- 红测实测：约 8.7 万字符文档连续 80 次选区更新耗时 2.216 秒，折合 27.7 ms/次，超过 60 Hz 的 16.7 ms 帧预算；这将作为优化前基线，修复目标为同一回归低于 1 秒。
+- 光标回归在聚焦后第一帧可见，650 ms 后仍保持可见而失败，直接证明当前覆盖层没有闪烁相位；这与用户所见的静态光标完全一致。
+- 第一轮修复只跳过 selection-only 的全文 TextKit 布局，80 次回归由 2.216 秒降至 1.217 秒，证明根因假设正确，但每次选择仍同步写回 SwiftUI。再将选区 binding 合并为 50 ms 静默期后单次提交，性能回归已低于 1 秒预算并通过。
+- PDF 恢复根因已经确定：`CompilerService` 使用项目哈希得到稳定 Build 目录，并在其中保留 PDF、SyncTeX 和 manifest；但 `AppModel.openProject` 每次先把 `pdfURL`/`syncTeXDocument` 清空，恢复项目后只加载配置/聊天/历史，从未调用缓存发现 API。无需复制 PDF，只需让 CompilerService 暴露“已缓存成功产物”并在 openProject 中装载。
+- 对话输入框被硬编码为 `minHeight: 52, maxHeight: 120`，外层也没有 splitter 或用户持久高度，因此长 prompt 无法扩展。正确 seam 是一个可拖动 composer height 状态（带合理最小/最大值并持久化），而不是把固定上限简单调大。
+- 现有会话顶部已经有 Provider、上下文、Prompt 图标、自由文本模型和 reasoning Picker，但被拆成两行且语义弱；可以重排成参考图式单行工具栏，同时保留上下文选择作为 SourceLeaf 特有控件。
+- “略微缓和的审稿人”模板的 `body` 和 `bodyZH` 当前都指向同一份中文 `temperedReviewerPrompt`，英文设置页仍显示中文的根因已确定。Prompt 设置页又用 grouped Form 同时纵向堆放两个 `minHeight: 100` TextEditor，长只读正文缺少语言聚焦、展开和更大编辑空间。
+- Provider 数据模型已具备模型与思考深度字段，但 `ProviderKind` 尚无 CodeBuddy；健康状态也没有 published state、统一 ping contract 或 UI。可在不破坏既有 profile JSON 的前提下增加可选 kind 和运行时 health map。
+- PDF 恢复已改为只认可“成功 manifest + 对应 PDF”，项目打开后异步挂载 PDF 和存在的 SyncTeX，不触发 LaTeX 引擎；界面以“已恢复上次成功编译的 PDF”区分于当前源码的新编译。
+- 对话栏现有数据层已支持 Provider profile 的 model 和 reasoning effort，但 UI 分散为两行且没有健康状态；无需改动既有配置格式，可直接重组为参考图的单行快捷工具栏并增加运行时状态机。
+- AI 健康检查使用统一且严格的 `hello` 契约：CLI 和 HTTP Provider 都发送“只回复 hello”，仅对去空白并小写化后严格等于 `hello` 的回应显示绿色已连接；检测中、未检测和失败分别有独立状态。
+- CodeBuddy Provider 采用官方 headless JSON 路径，从 stdin 接收 prompt，解析 `result` / `structured_output`，可通过 `--settings` 选模型；运行时处于不含论文源文件的工作区，显式 `--disallowedTools` 禁止文件、shell 和网络工具，且回归断言不出现危险跳过权限参数。
+- 对话 UI 现为单行横向工具栏：快捷 Prompt、真实连接状态、Provider、模型、思考深度和上下文；输入框上方拖动把手可在 64–360pt 之间调整，高度由 AppStorage 保留。
+- 长 Prompt 设置页改为英文/中文 segmented 切换后共用一个可占满右侧的大编辑区；内置审稿 Prompt 已拆分为独立中英文正文，英文无中文字符回归已通过。

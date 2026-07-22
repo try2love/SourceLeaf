@@ -87,6 +87,7 @@
 "status.unsaved" = "有未保存的修改";
 "status.buildSucceeded" = "编译成功";
 "status.buildUpToDate" = "项目未变更，已复用上次 PDF";
+"status.cachedPDFRestored" = "已恢复上次成功编译的 PDF";
 "status.buildFailed" = "编译失败";
 "status.buildCancelled" = "已停止编译";
 "status.cacheCleared" = "编译缓存已清理";
@@ -122,6 +123,7 @@
 "provider.enabled" = "启用";
 "provider.model" = "模型";
 "provider.modelDefault" = "跟随提供方默认模型";
+"provider.modelDefaultShort" = "默认模型";
 "provider.modelHint" = "留空时跟随当前 CLI 或 API 的默认模型，也可直接输入模型 ID。";
 "provider.reasoning" = "思考深度";
 "provider.reasoningDefault" = "默认深度";
@@ -129,7 +131,14 @@
 "provider.apiKey" = "API 密钥";
 "provider.keychainHint" = "API 密钥只保存在 macOS 钥匙串中。";
 "provider.localCodexHint" = "使用这台 Mac 已安装并登录的 Codex CLI。SourceLeaf 不读取或复制 auth.json。";
+"provider.codeBuddyHint" = "使用这台 Mac 已安装并登录的 CodeBuddy CLI。SourceLeaf 在不含源码的工作区中以无头模式运行，并禁用文件和命令工具。";
 "provider.localCodex" = "本机 Codex";
+"provider.codeBuddy" = "本机 CodeBuddy";
+"provider.healthCheck" = "测试 AI 连接";
+"provider.healthUnknown" = "尚未测试连接";
+"provider.healthChecking" = "正在测试 AI 连接…";
+"provider.healthConnected" = "AI 连接可用";
+"provider.healthUnavailable" = "AI 连接不可用";
 "provider.openAI" = "OpenAI";
 "provider.openAICompatible" = "OpenAI 兼容接口";
 "provider.anthropic" = "Anthropic";
@@ -146,12 +155,15 @@
 "reasoning.max" = "最高";
 "reasoning.ultra" = "极高";
 "prompt.builtIn" = "内置";
+"ai.quickPrompt" = "快捷 Prompt";
 "prompt.select" = "选择一个提示词";
 "prompt.enabled" = "启用";
 "prompt.nameEnglish" = "英文名称";
 "prompt.nameChinese" = "中文名称";
 "prompt.bodyEnglish" = "英文提示词";
 "prompt.bodyChinese" = "中文提示词";
+"prompt.languageEnglish" = "英文";
+"prompt.languageChinese" = "中文";
 "prompt.variables" = "可用变量";
 "prompt.readOnlyHint" = "内置提示词带版本且只读；复制为自定义提示词后即可个性化修改。";
 "prompt.duplicateToEdit" = "复制后编辑";

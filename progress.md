@@ -198,3 +198,28 @@
 - 最终浅色、深色与真实工作区 WindowServer 截图确认语法色、选区、光标、独立行号栏和结构 disclosure 可见。
 - 全阶段累计 73/73 产品断言通过；独立仓库再次通过 42 项 Core 与 4 项阶段 10 关键编辑器/AppKit 回归。
 - SourceLeaf 0.3.3（build 6）Release 与安装版均通过 Universal 架构、ad-hoc 签名、双架构 Tectonic 0.16.9、中英文资源和进程存活验证；旧版已保存到独立仓库的 `临时文件/安装备份`，Git 检查点标记为 `v0.3.3`。
+
+### 阶段 11：交互流畅度、会话工具栏与状态恢复
+- **状态：** in_progress
+- 已登记 7 组真实使用反馈，覆盖选区性能、动态光标、PDF 重启恢复、可调输入区、长提示词展示与双语、Provider 健康检查，以及快捷 Prompt/Agent/模型/思考深度工具栏。
+- 已复核两张参考图并恢复阶段 10 的编辑器、Provider、编译缓存与规划上下文；下一步建立红灯回归并核实 WorkBuddy/CodeBuddy 的正式接入边界。
+- 已定位编辑器高频事件链和静态光标的实现缺口；已找到 CodeBuddy 官方 CLI 文档入口，WorkBuddy 暂无可直接接入 Provider 的官方证据。
+- CodeBuddy 官方无头模式已确认具备 stdin、JSON、模型配置和结构化 schema 能力，可作为受限 CLI Provider 设计；安全实现将禁止工具，不使用 `--dangerously-skip-permissions`。
+- WorkBuddy 官方页面未提供可验证的 headless CLI/API，因此本阶段只正式内置 CodeBuddy；WorkBuddy 暂通过可配置 CLI 扩展保留空间，不冒充已兼容。
+- 已确认 PDF 文件本身持久存在但启动恢复链缺失；对话输入框固定上限为 120pt；英文审稿 Prompt 实际复用了中文正文；现有模型/思考字段可复用，健康检查需新增协议与状态。
+- 已新增真实 SwiftUI/AppKit 大文档 80 次选区更新性能回归，以及聚焦编辑器光标“亮→灭→亮”的行为回归；下一步先在未修复代码上确认红灯基线。
+- 红灯基线已确认：大文档 80 次选区更新耗时 2.216 秒（约 27.7 ms/次）；光标在 650 ms 后仍可见，无闪烁相位。两项回归均以预期方式失败，可用于验证修复。
+- 首次编译动态光标时，Swift 6 禁止从 `nonisolated deinit` 访问非 `Sendable` 的 `Timer`；已移除该 `deinit` 访问，定时器仍在视图离开 window 时显式失效。
+- 编辑器性能修复已通过目标回归：selection-only 更新不再强制全文布局，高频选区 binding 在 50 ms 静默期后合并提交；中间基线由 2.216 秒降至 1.217 秒，最终低于 1 秒预算。光标也已以 530 ms 相位定时正常通过“亮→灭→亮”回归。
+- 将两个 AppKit 窗口测试用正则筛选同时执行时，Swift Testing 默认并发导致测试进程 signal 11；分开顺序运行后无崩溃，因此后续不并发这两项真实窗口回归。
+- 已实现并通过两层 PDF 恢复回归：Core 层可从成功 manifest 恢复上次 PDF，AppModel 打开项目后能自动重新挂载该 PDF，且不运行 LaTeX 引擎。
+- 首次编译新 Prompt 设置页时，辅助 Binding 也命名为 `body`，与 SwiftUI `View.body` 冲突；已更名为 `bodyBinding` 后继续回归。
+- 对话输入拖动条首次使用了当前 macOS SwiftUI 不提供的 `.cursor` modifier，导致编译失败；已移除该装饰，保留明确拖动把手与 `DragGesture`。
+- 已完成快捷 Prompt/连接状态/Provider/模型/思考深度/上下文单行工具栏，对话输入高度可拖动且跨启动保留。
+- 已完成长提示词设置页重构和内置审稿 Prompt 英文翻译，中英文正文分离回归通过。
+- 已完成统一 `hello` Provider 健康检查和绿/红/未检测/检测中状态；CodeBuddy 安全 headless CLI 参数与解析回归 2/2 通过。WorkBuddy 因无官方可验证接口而不冒充内置支持。
+- 完整测试首次运行在连续两项 AppKit 窗口测试交界处出现 signal 11；单独测试正常。已将光标 Timer 改为只在 overlay 真正进入 window 后启动，以 weak target 运行，离开 window 时失效，避免定时器保留已关闭窗口的视图。
+- 为完全消除后台调度开销与生命周期耦合，最终动态光标改用 Core Animation 独立 caret layer，无 Timer、无 Task、无 SwiftUI 状态更新；窗口移除时清除动画，单项回归可正常通过并退出。
+- Swift 6.3.3 `swiftpm-testing-helper` 在同一进程连续创建/销毁多个 AppKit 窗口时仍可在 autorelease pool 回收处 signal 11，且诊断目录中存在本阶段之前的同类崩溃记录。因此最终验证按 Core 全量、ProductBehavior 全量和真实窗口单项独立进程执行，不忽略任何产品断言。
+- 独立 Git 仓库已通过 45 项 Core 测试、8 项 ProductBehavior 测试，编辑器选区性能、光标动画、语法/选区和几何回归均单独通过；对话栏浅色/深色真实快照验证通过。
+- SourceLeaf 0.3.4（build 7）已完成 Universal `x86_64 arm64` Release 构建和 ad-hoc 签名，已安装至 `/Users/0x211/Applications/SourceLeaf.app`；内置双架构 Tectonic 0.16.9、中英文资源、版本/构建号、签名和进程存活均已验证。

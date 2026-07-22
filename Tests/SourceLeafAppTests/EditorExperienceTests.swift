@@ -72,6 +72,59 @@ import Testing
 }
 
 @MainActor
+@Test func largeDocumentSelectionUpdatesStayWithinInteractiveBudget() async throws {
+    let source = Array(
+        repeating: "\\section{Selection performance} Long LaTeX source with \\cite{reference} and $E=mc^2$.",
+        count: 6_000
+    ).joined(separator: "\n")
+    let state = SelectionPerformanceState(source: source)
+    let view = NSHostingView(rootView: SelectionPerformanceHarness(state: state))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = view
+    window.makeKeyAndOrderFront(nil)
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    try await Task.sleep(for: .milliseconds(650))
+    let textView = try #require(findSourceTextView(in: view))
+    window.makeFirstResponder(textView)
+
+    let clock = ContinuousClock()
+    let started = clock.now
+    for step in 0..<80 {
+        textView.setSelectedRange(NSRange(location: step * 53, length: 31))
+        await Task.yield()
+    }
+    let elapsed = started.duration(to: clock.now)
+
+    #expect(elapsed < .seconds(1), "80 selection updates took \(elapsed)")
+}
+
+@MainActor
+@Test func sourceCaretBlinksWhileTheEditorIsFocused() async throws {
+    let host = makeEditorHost(source: "\\section{Blinking caret}", theme: .light, fontFamily: "Menlo", fontSize: 16)
+    defer { closeEditorHost(host) }
+    try await Task.sleep(for: .milliseconds(400))
+    let textView = try #require(findSourceTextView(in: host.view))
+    let overlay = try #require(findGlyphOverlay(in: host.view))
+    host.window.makeFirstResponder(textView)
+    textView.setSelectedRange(NSRange(location: 4, length: 0))
+    overlay.needsDisplay = true
+    overlay.displayIfNeeded()
+    #expect(overlay.lastCaretRect != nil)
+    #expect(overlay.caretBlinkAnimationActive)
+
+    try await Task.sleep(for: .milliseconds(650))
+    #expect(overlay.caretBlinkAnimationActive)
+}
+
+@MainActor
 @Test func editorThemesRenderSyntaxSelectionAndCaretSnapshots() async throws {
     guard let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_EDITOR_SNAPSHOT_OUTPUT"] else { return }
     let output = URL(fileURLWithPath: outputPath, isDirectory: true)
@@ -132,6 +185,31 @@ private final class EditorSnapshotState: ObservableObject {
     The editor wraps long LaTeX lines instead of scrolling beneath the line-number gutter.
     \\end{document}
     """
+}
+
+@MainActor
+private final class SelectionPerformanceState: ObservableObject {
+    let source: String
+    @Published var selection = NSRange(location: 0, length: 0)
+
+    init(source: String) { self.source = source }
+}
+
+@MainActor
+private struct SelectionPerformanceHarness: View {
+    @ObservedObject var state: SelectionPerformanceState
+
+    var body: some View {
+        SourceTextView(
+            text: .constant(state.source),
+            selection: $state.selection,
+            showSelectionButton: false,
+            editorTheme: .light,
+            editorFontFamily: "Menlo",
+            editorFontSize: 14,
+            onAskAI: {}
+        )
+    }
 }
 
 @MainActor

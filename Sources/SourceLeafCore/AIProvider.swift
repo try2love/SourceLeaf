@@ -22,6 +22,19 @@ public struct AIRequest: Sendable {
 public protocol AIProvider: Sendable {
     var displayName: String { get }
     func generateProposal(for request: AIRequest) async throws -> AIProposal
+    func healthCheck() async throws -> String
+}
+
+public enum AIProviderHealthCheck {
+    public static let prompt = "Reply with exactly hello and nothing else."
+
+    public static func validated(_ response: String) throws -> String {
+        let normalized = response.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized == "hello" else {
+            throw AIProviderError.invalidResponse("Health check expected hello but received: \(response.prefix(120))")
+        }
+        return normalized
+    }
 }
 
 public enum AIProviderError: Error, LocalizedError {
@@ -155,11 +168,9 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
         let prompt = AIEditPromptBuilder.build(request)
-        let support = try ApplicationDirectories.supportDirectory()
-        let projectKey = String(SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16))
-        let sandboxDirectory = support
-            .appendingPathComponent("ProviderWorkspaces", isDirectory: true)
-            .appendingPathComponent(projectKey, isDirectory: true)
+        let sandboxDirectory = try Self.sandboxDirectory(
+            key: String(SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16))
+        )
         try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
         let output = try await runner.run(
             executableURL: executableURL,
@@ -170,6 +181,26 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
         let message = Self.lastAgentMessage(in: output.standardOutput) ?? output.standardOutput
         return try AIProposalCodec.decode(message, providerName: displayName)
+    }
+
+    public func healthCheck() async throws -> String {
+        let sandboxDirectory = try Self.sandboxDirectory(key: "Health")
+        try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
+        let output = try await runner.run(
+            executableURL: executableURL,
+            arguments: Self.invocationArguments(for: profile),
+            currentDirectoryURL: sandboxDirectory,
+            input: Data(AIProviderHealthCheck.prompt.utf8)
+        )
+        guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
+        let message = Self.lastAgentMessage(in: output.standardOutput) ?? output.standardOutput
+        return try AIProviderHealthCheck.validated(message)
+    }
+
+    private static func sandboxDirectory(key: String) throws -> URL {
+        try ApplicationDirectories.supportDirectory()
+            .appendingPathComponent("ProviderWorkspaces", isDirectory: true)
+            .appendingPathComponent(key, isDirectory: true)
     }
 
     public static func invocationArguments(for profile: ProviderProfile) -> [String] {
@@ -205,5 +236,85 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
             }
         }
         return latest
+    }
+}
+
+public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
+    public let displayName: String
+    private let executableURL: URL
+    private let runner: ProcessRunner
+    private let profile: ProviderProfile
+
+    public init(
+        profile: ProviderProfile = .localCodeBuddy,
+        executableURL: URL? = nil,
+        runner: ProcessRunner = ProcessRunner()
+    ) throws {
+        guard let executableURL = executableURL
+            ?? ExecutableLocator.find("codebuddy")
+            ?? ExecutableLocator.find("cbc") else {
+            throw AIProviderError.executableNotFound("codebuddy")
+        }
+        self.executableURL = executableURL
+        self.runner = runner
+        self.profile = profile
+        displayName = profile.name
+    }
+
+    public func generateProposal(for request: AIRequest) async throws -> AIProposal {
+        let text = try await run(prompt: AIEditPromptBuilder.build(request), workspaceKey: String(
+            SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16)
+        ))
+        return try AIProposalCodec.decode(text, providerName: displayName)
+    }
+
+    public func healthCheck() async throws -> String {
+        try AIProviderHealthCheck.validated(
+            try await run(prompt: AIProviderHealthCheck.prompt, workspaceKey: "Health-CodeBuddy")
+        )
+    }
+
+    private func run(prompt: String, workspaceKey: String) async throws -> String {
+        let directory = try ApplicationDirectories.supportDirectory()
+            .appendingPathComponent("ProviderWorkspaces", isDirectory: true)
+            .appendingPathComponent(workspaceKey, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let output = try await runner.run(
+            executableURL: executableURL,
+            arguments: Self.invocationArguments(for: profile),
+            currentDirectoryURL: directory,
+            input: Data(prompt.utf8)
+        )
+        guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
+        return try Self.resultText(in: output.standardOutput)
+    }
+
+    public static func invocationArguments(for profile: ProviderProfile) -> [String] {
+        var arguments = [
+            "-p", "--output-format", "json",
+            "--disallowedTools", "Read,Edit,Write,Bash,Glob,Grep,WebSearch,WebFetch"
+        ]
+        let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !model.isEmpty,
+           let data = try? JSONSerialization.data(withJSONObject: ["model": model]),
+           let settings = String(data: data, encoding: .utf8) {
+            arguments += ["--settings", settings]
+        }
+        return arguments
+    }
+
+    public static func resultText(in output: String) throws -> String {
+        guard let data = output.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIProviderError.invalidResponse("CodeBuddy did not return a JSON object.")
+        }
+        if let result = object["result"] as? String { return result }
+        if let structured = object["structured_output"],
+           JSONSerialization.isValidJSONObject(structured),
+           let encoded = try? JSONSerialization.data(withJSONObject: structured),
+           let text = String(data: encoded, encoding: .utf8) {
+            return text
+        }
+        throw AIProviderError.invalidResponse("CodeBuddy returned neither result nor structured_output.")
     }
 }

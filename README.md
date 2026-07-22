@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.3" src="https://img.shields.io/badge/version-0.3.3-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.4" src="https://img.shields.io/badge/version-0.3.4-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -56,21 +56,23 @@ The rest of the application follows the same local-first boundary. Project metad
 
 - **Managed Tectonic 0.16.9** bundled by the installer for both Apple Silicon and Intel Macs.
 - **External toolchain support** for `latexmk` and broader TeX Live compatibility.
-- **Fast unchanged-project reuse**, live compilation phases, structured build-log summaries, and manual cache cleanup.
+- **Fast unchanged-project reuse**, automatic restoration of the last successful PDF after relaunch, live compilation phases, structured build-log summaries, and manual cache cleanup.
 - **Forward and reverse SyncTeX** between source lines and PDF positions without modifying the generated PDF.
 
 ### Reviewable AI assistance
 
 - **Local Codex CLI first**: reuse the Mac's existing Codex login and configuration without copying `auth.json`.
-- **Configurable providers**: local CLI profiles and OpenAI-compatible HTTP APIs with model and reasoning controls.
+- **Configurable providers**: local Codex, restricted headless CodeBuddy, and HTTP API profiles with model and supported reasoning controls.
+- **Verifiable connectivity**: an explicit `hello` health check drives the unknown/checking/connected/failed status indicator.
 - **Selectable context scope**: selection only, nearby text, section, full document, or project.
 - **Diff before write**: inspect warnings and original/proposed text before accepting or rejecting a change.
-- **Prompt library**: built-in and user-managed prompts, including create, duplicate, edit, enable/disable, and delete operations.
+- **Prompt library**: a compact Quick Prompt menu plus built-in and user-managed prompts; long bilingual templates use a full-height language-focused editor.
 - **History through review**: restoring an earlier change returns through the same diff workflow instead of overwriting source silently.
 
 ### Flexible native interface
 
 - Source, PDF, conversation, project navigation, and logs can be shown, hidden, rearranged, docked, or detached.
+- The conversation composer can be resized vertically and remembers its height.
 - Detached panels return to the main workspace when their windows close.
 - Interface language can switch immediately between English, Simplified Chinese, and Follow System.
 - The most recent project and source file reopen automatically.
@@ -83,6 +85,7 @@ The rest of the application follows the same local-first boundary. Project metad
 - Xcode 16 or newer, including the command-line tools
 - Internet access on the first installation to download the pinned Tectonic binaries
 - Optional: [Codex CLI](https://github.com/openai/codex) for the local Codex provider
+- Optional: [CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/overview) for the restricted local CodeBuddy provider
 - Optional: MacTeX, TinyTeX, or another `latexmk` toolchain for packages outside Tectonic's compatibility envelope
 
 ### Build and install
@@ -140,7 +143,7 @@ Atomic write or rejection
 
 SourceLeaf records the target's original text and hash. If the source changes while a proposal is being generated, acceptance is refused and the user must create a fresh target.
 
-Local Codex runs from a source-free workspace in Application Support with ephemeral, read-only execution. HTTP providers receive only the assembled target and selected context and have no filesystem or tool access through SourceLeaf.
+Local Codex runs from a source-free workspace in Application Support with ephemeral, read-only execution. CodeBuddy also runs headlessly from a source-free workspace with file, command, search, and web tools disabled. HTTP providers receive only the assembled target and selected context and have no filesystem or tool access through SourceLeaf.
 
 ## Data and Privacy
 
@@ -204,7 +207,7 @@ Useful build overrides include `SOURCELEAF_TEMP_ROOT`, `SOURCELEAF_APP_OUTPUT`, 
 - SourceLeaf is macOS-only and depends on SwiftUI, AppKit/TextKit, PDFKit, and Quick Look.
 - The current distribution path is a source-based installer with ad-hoc signing; notarized downloads are not published yet.
 - Tectonic covers the default installation path, but some projects still require a full TeX Live/`latexmk` toolchain.
-- Custom CLI provider safety review is still in progress.
+- Arbitrary custom CLI profiles remain disabled until a safe command contract is implemented. WorkBuddy is not advertised as supported because its public product documentation does not currently expose a verifiable headless CLI or API contract.
 - Cloud sync, shared editing, and multi-user collaboration are outside the current scope.
 
 ## Contributing

@@ -17,6 +17,8 @@ SourceLeaf separates deterministic, testable editing rules from the native macOS
 
 Local Codex does not run inside the paper project. It runs from an empty per-project directory in Application Support, uses the existing Codex CLI authentication and configuration, receives its prompt through standard input, and is restricted to read-only/ephemeral execution.
 
+Local CodeBuddy follows the same source-free workspace boundary through its documented headless JSON mode. SourceLeaf disables file, shell, search, and web tools and parses only the CLI's `result` or `structured_output` field. Provider connectivity is never inferred from configuration alone: a user-triggered health check sends an exact-`hello` request and exposes unknown, checking, connected, or unavailable runtime state.
+
 ## Storage
 
 - Project source: original project folder.
@@ -26,6 +28,8 @@ Local Codex does not run inside the paper project. It runs from an empty per-pro
 - API credentials: macOS Keychain.
 
 No SourceLeaf metadata is added to the paper project unless a future shared-project configuration is explicitly enabled.
+
+The build directory is stable for a project path. A successful build writes a manifest beside its PDF; reopening a project may restore that last successful PDF and SyncTeX index without invoking a LaTeX engine. This is presented as cached output because source files may have changed since the manifest was written.
 
 ## SyncTeX navigation
 

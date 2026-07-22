@@ -43,3 +43,32 @@ import Testing
     #expect(result.status == .succeeded)
     #expect(try String(contentsOf: sourceURL, encoding: .utf8) == original)
 }
+
+@Test func lastSuccessfulPDFCanBeRestoredWithoutRecompiling() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeafCachedPDFTests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("\\documentclass{article}\n".utf8).write(to: root.appendingPathComponent("main.tex"))
+
+    let compiler = CompilerService()
+    let result = try await compiler.build(
+        projectRoot: root,
+        rootDocument: "main.tex",
+        configuration: BuildConfiguration(
+            engine: .custom,
+            customCommand: "/usr/bin/touch {{output}}/main.pdf",
+            autoBuild: false
+        )
+    )
+    defer { try? FileManager.default.removeItem(at: result.outputDirectory) }
+
+    let restored = try await CompilerService().cachedSuccessfulBuild(
+        projectRoot: root,
+        rootDocument: "main.tex"
+    )
+    #expect(restored?.status == .succeeded)
+    #expect(restored?.reusedOutput == true)
+    #expect(restored?.pdfURL == result.pdfURL)
+}

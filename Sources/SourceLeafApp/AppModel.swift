@@ -10,6 +10,13 @@ struct PDFNavigationTarget: Equatable, Identifiable {
     var yFromTop: Double
 }
 
+enum ProviderHealthStatus: Equatable {
+    case unknown
+    case checking
+    case connected
+    case unavailable(String)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var projectRoot: URL?
@@ -43,6 +50,7 @@ final class AppModel: ObservableObject {
     @Published var customContextPaths: Set<String> = []
     @Published var providerProfiles: [ProviderProfile] = [.localCodex]
     @Published var selectedProviderID: UUID?
+    @Published private(set) var providerHealth: [UUID: ProviderHealthStatus] = [:]
     @Published var generating = false
     @Published var validatingReplacementID: UUID?
     @Published var lastError: String?
@@ -68,13 +76,17 @@ final class AppModel: ObservableObject {
     }
 
     var selectedProviderKind: ProviderKind? { selectedProviderProfile?.kind }
+    var selectedProviderHealth: ProviderHealthStatus {
+        guard let selectedProviderID else { return .unknown }
+        return providerHealth[selectedProviderID] ?? .unknown
+    }
 
     var canSaveCurrentFile: Bool {
         guard let selectedFile else { return false }
         return [.tex, .bibliography, .style].contains(selectedFile.kind)
     }
 
-    private let compiler = CompilerService()
+    private let compiler: CompilerService
     private let keychain = KeychainStore()
     private var saveTask: Task<Void, Never>?
     private var compileDebounceTask: Task<Void, Never>?
@@ -98,8 +110,10 @@ final class AppModel: ObservableObject {
     init(
         restoreLastProject: Bool = true,
         supportDirectory: URL? = nil,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        compiler: CompilerService = CompilerService()
     ) {
+        self.compiler = compiler
         supportDirectoryOverride = supportDirectory
         self.defaults = defaults
         projectOutlineExpanded = defaults.object(forKey: Self.projectOutlineExpandedKey) == nil
@@ -120,6 +134,9 @@ final class AppModel: ObservableObject {
             providerProfiles = try profilesStore?.load(default: [.localCodex]) ?? [.localCodex]
             if !providerProfiles.contains(where: { $0.kind == .localCodex }) {
                 providerProfiles.insert(.localCodex, at: 0)
+            }
+            if !providerProfiles.contains(where: { $0.kind == .codeBuddy }) {
+                providerProfiles.append(.localCodeBuddy)
             }
             let savedProviderID = defaults.string(forKey: Self.selectedProviderIDKey).flatMap(UUID.init(uuidString:))
             selectedProviderID = providerProfiles.first(where: { $0.id == savedProviderID && $0.enabled })?.id
@@ -148,6 +165,22 @@ final class AppModel: ObservableObject {
         selectedProviderID = id
         if let id { defaults.set(id.uuidString, forKey: Self.selectedProviderIDKey) }
         else { defaults.removeObject(forKey: Self.selectedProviderIDKey) }
+    }
+
+    func checkSelectedProviderAvailability() {
+        guard let id = selectedProviderID else { return }
+        providerHealth[id] = .checking
+        Task {
+            do {
+                let provider = try makeSelectedProvider()
+                _ = try await provider.healthCheck()
+                guard selectedProviderID == id else { return }
+                providerHealth[id] = .connected
+            } catch {
+                guard selectedProviderID == id else { return }
+                providerHealth[id] = .unavailable(error.localizedDescription)
+            }
+        }
     }
 
     func toggleProjectOutline() {
@@ -231,8 +264,29 @@ final class AppModel: ObservableObject {
             persistConfiguration()
             defaults.set(root.standardizedFileURL.path, forKey: Self.lastProjectPathKey)
             statusText = root.lastPathComponent
+            restoreCachedBuild(projectRoot: root.standardizedFileURL, rootDocument: configuration.rootDocument)
         } catch {
             report(error)
+        }
+    }
+
+    private func restoreCachedBuild(projectRoot: URL, rootDocument: String?) {
+        guard let rootDocument else { return }
+        Task { [weak self] in
+            guard let self,
+                  let result = try? await compiler.cachedSuccessfulBuild(
+                    projectRoot: projectRoot,
+                    rootDocument: rootDocument
+                  ),
+                  self.projectRoot == projectRoot else { return }
+            pdfURL = result.pdfURL
+            buildLog = result.log
+            buildSucceeded = true
+            buildPhase = .finished
+            if let syncTeXURL = result.syncTeXURL {
+                syncTeXDocument = try? await SyncTeXDocument.load(from: syncTeXURL)
+            }
+            statusText = L10n.text("status.cachedPDFRestored")
         }
     }
 
@@ -938,6 +992,8 @@ final class AppModel: ObservableObject {
         switch profile.kind {
         case .localCodex:
             return try CodexCLIProvider(profile: profile)
+        case .codeBuddy:
+            return try CodeBuddyCLIProvider(profile: profile)
         case .openAI, .openAICompatible, .anthropic, .gemini, .ollama, .lmStudio:
             return HTTPAIProvider(profile: profile, apiKey: try keychain.get(account: profile.id.uuidString))
         case .customCLI:

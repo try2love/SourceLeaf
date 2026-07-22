@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.3" src="https://img.shields.io/badge/version-0.3.3-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.4" src="https://img.shields.io/badge/version-0.3.4-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -56,21 +56,23 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 
 - 安装程序自动内置 Apple Silicon 与 Intel 双架构 **Tectonic 0.16.9**。
 - 支持外部 `latexmk` 和更完整的 TeX Live 工具链。
-- 支持无修改快速复用、实时编译阶段、结构化日志摘要和手动清理缓存。
+- 支持无修改快速复用、重启后自动恢复上次成功 PDF、实时编译阶段、结构化日志摘要和手动清理缓存。
 - 支持源码与 PDF 之间的 SyncTeX 双向定位，不修改磁盘上的生成 PDF。
 
 ### 可审阅的 AI 辅助
 
 - **本机 Codex CLI 优先**：复用当前 Mac 的 Codex 登录和配置，不复制 `auth.json`。
-- **可配置 Provider**：支持本机 CLI 和 OpenAI 兼容 HTTP API，可选择模型与思考深度。
+- **可配置 Provider**：支持本机 Codex、受限无头 CodeBuddy 和 HTTP API，可选择模型与 Provider 支持的思考深度。
+- **可验证连接**：显式发送 `hello` 健康检查，驱动未检测/检测中/已连接/失败状态。
 - **可选择上下文范围**：仅选区、附近内容、当前章节、全文或整个项目。
 - **写入前审阅 Diff**：先检查警告、试编译结果与原文/建议，再选择接受或拒绝。
-- **提示词库**：支持内置提示词和个人提示词的新增、复制、编辑、启停与删除。
+- **提示词库**：包含紧凑的快捷 Prompt 菜单，支持内置和个人提示词的新增、复制、编辑、启停与删除；长中英文模板使用单语言大编辑区。
 - **安全历史恢复**：历史内容同样经过 Diff 审阅，不会静默覆盖源码。
 
 ### 灵活的原生界面
 
 - 源码、PDF、对话、项目导航和日志面板均可显示、隐藏、重新排列、停靠或独立浮动。
+- 对话输入区可纵向拖动调整，并记住用户设置的高度。
 - 关闭独立面板窗口后，对应面板会回到主工作区。
 - 界面语言可在 English、简体中文和跟随系统之间即时切换。
 - 自动恢复上次打开的项目和源码文件。
@@ -83,6 +85,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 - Xcode 16 或更高版本，包括命令行工具
 - 首次安装时需要联网下载固定版本的 Tectonic 二进制文件
 - 可选：[Codex CLI](https://github.com/openai/codex)，用于本机 Codex Provider
+- 可选：[CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/overview)，用于受限的本机 CodeBuddy Provider
 - 可选：MacTeX、TinyTeX 或其他 `latexmk` 工具链，用于超出 Tectonic 兼容范围的宏包
 
 ### 构建并安装
@@ -140,7 +143,7 @@ Provider 修改建议
 
 SourceLeaf 会记录目标原文及其哈希。如果生成建议期间源码已经变化，应用会拒绝接受旧建议，用户需要重新创建目标。
 
-本机 Codex 在 Application Support 下不包含论文源码的工作区中运行，并使用临时、只读执行模式。HTTP Provider 只能接收组装后的目标和所选上下文，不会通过 SourceLeaf 获得文件系统或工具权限。
+本机 Codex 在 Application Support 下不包含论文源码的工作区中运行，并使用临时、只读执行模式。CodeBuddy 也以无头模式运行于不含源码的工作区，并禁用文件、命令、搜索和网络工具。HTTP Provider 只能接收组装后的目标和所选上下文，不会通过 SourceLeaf 获得文件系统或工具权限。
 
 ## 数据与隐私
 
@@ -204,7 +207,7 @@ scripts/build-app-bundle.sh
 - SourceLeaf 仅支持 macOS，并依赖 SwiftUI、AppKit/TextKit、PDFKit 和 Quick Look。
 - 当前通过源码安装脚本和 ad-hoc 签名分发，尚未发布经过公证的下载包。
 - 默认安装路径由 Tectonic 支持，但部分项目仍需要完整 TeX Live/`latexmk` 工具链。
-- 自定义 CLI Provider 的安全审查仍在进行中。
+- 任意自定义 CLI Profile 在安全命令契约完成前仍保持禁用。WorkBuddy 官方公开产品文档目前没有提供可验证的无头 CLI 或 API 契约，因此本项目不宣称已支持。
 - 云同步、多人共享编辑和协作功能不在当前范围内。
 
 ## 参与贡献

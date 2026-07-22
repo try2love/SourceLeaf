@@ -110,7 +110,7 @@ private struct ProviderSettingsView: View {
             VStack(spacing: 0) {
                 List(model.providerProfiles, selection: $selectedID) { profile in
                     HStack {
-                        Image(systemName: profile.kind == .localCodex ? "terminal" : "network")
+                        Image(systemName: [.localCodex, .codeBuddy].contains(profile.kind) ? "terminal" : "network")
                         Text(profile.name)
                         Spacer()
                         if profile.enabled { Circle().fill(.green).frame(width: 6, height: 6) }
@@ -125,7 +125,8 @@ private struct ProviderSettingsView: View {
                     } label: { Image(systemName: "plus") }
                     Button {
                         guard let id = selectedID,
-                              model.providerProfiles.first(where: { $0.id == id })?.kind != .localCodex else { return }
+                              let kind = model.providerProfiles.first(where: { $0.id == id })?.kind,
+                              ![.localCodex, .codeBuddy].contains(kind) else { return }
                         model.providerProfiles.removeAll { $0.id == id }
                         selectedID = model.providerProfiles.first?.id
                     } label: { Image(systemName: "minus") }
@@ -161,7 +162,7 @@ private struct ProviderEditor: View {
             Picker(L10n.text("provider.kind"), selection: $model.providerProfiles[index].kind) {
                 ForEach(ProviderKind.allCases) { kind in Text(L10n.provider(kind)).tag(kind) }
             }
-            .disabled(profile.kind == .localCodex)
+            .disabled([.localCodex, .codeBuddy].contains(profile.kind))
             Toggle(L10n.text("provider.enabled"), isOn: $model.providerProfiles[index].enabled)
             TextField(L10n.text("provider.model"), text: $model.providerProfiles[index].model)
             if [.localCodex, .openAI, .openAICompatible].contains(profile.kind) {
@@ -172,7 +173,7 @@ private struct ProviderEditor: View {
                     }
                 }
             }
-            if profile.kind != .localCodex {
+            if ![.localCodex, .codeBuddy].contains(profile.kind) {
                 TextField(L10n.text("provider.baseURL"), text: Binding(
                     get: { model.providerProfiles[index].baseURL ?? "" },
                     set: { model.providerProfiles[index].baseURL = $0.isEmpty ? nil : $0 }
@@ -181,7 +182,10 @@ private struct ProviderEditor: View {
                     .onSubmit { model.setSecret(secret, for: profile) }
                 Text(L10n.text("provider.keychainHint")).font(.caption).foregroundStyle(.secondary)
             } else {
-                Label(L10n.text("provider.localCodexHint"), systemImage: "lock.shield")
+                Label(
+                    L10n.text(profile.kind == .codeBuddy ? "provider.codeBuddyHint" : "provider.localCodexHint"),
+                    systemImage: "lock.shield"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -257,44 +261,79 @@ private struct PromptSettingsView: View {
 private struct PromptEditor: View {
     @EnvironmentObject private var model: AppModel
     let index: Int
+    @State private var language: PromptBodyLanguage = .english
 
     private var prompt: PromptTemplate { model.promptTemplates[index] }
+    private var bodyBinding: Binding<String> {
+        language == .english
+            ? $model.promptTemplates[index].body
+            : $model.promptTemplates[index].bodyZH
+    }
 
     var body: some View {
-        Form {
-            Toggle(L10n.text("prompt.enabled"), isOn: $model.promptTemplates[index].enabled)
-            TextField(L10n.text("prompt.nameEnglish"), text: $model.promptTemplates[index].name)
-                .disabled(prompt.builtIn)
-            TextField(L10n.text("prompt.nameChinese"), text: $model.promptTemplates[index].nameZH)
-                .disabled(prompt.builtIn)
-            LabeledContent(L10n.text("prompt.bodyEnglish")) {
-                TextEditor(text: $model.promptTemplates[index].body)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 100)
-                    .disabled(prompt.builtIn)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Toggle(L10n.text("prompt.enabled"), isOn: $model.promptTemplates[index].enabled)
+                Spacer()
+                Picker("", selection: $language) {
+                    Text(L10n.text("prompt.languageEnglish")).tag(PromptBodyLanguage.english)
+                    Text(L10n.text("prompt.languageChinese")).tag(PromptBodyLanguage.simplifiedChinese)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 190)
             }
-            LabeledContent(L10n.text("prompt.bodyChinese")) {
-                TextEditor(text: $model.promptTemplates[index].bodyZH)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 100)
-                    .disabled(prompt.builtIn)
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                GridRow {
+                    Text(L10n.text("prompt.nameEnglish")).foregroundStyle(.secondary)
+                    TextField("", text: $model.promptTemplates[index].name)
+                        .disabled(prompt.builtIn)
+                }
+                GridRow {
+                    Text(L10n.text("prompt.nameChinese")).foregroundStyle(.secondary)
+                    TextField("", text: $model.promptTemplates[index].nameZH)
+                        .disabled(prompt.builtIn)
+                }
             }
-            LabeledContent(L10n.text("prompt.variables")) {
-                Text(prompt.variables.map { "{{\($0)}}" }.joined(separator: ", "))
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
+            Text(language == .english ? L10n.text("prompt.bodyEnglish") : L10n.text("prompt.bodyChinese"))
+                .font(.headline)
+            TextEditor(text: bodyBinding)
+                .font(.body.monospaced())
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(7)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                .disabled(prompt.builtIn)
+            if !prompt.variables.isEmpty {
+                LabeledContent(L10n.text("prompt.variables")) {
+                    Text(prompt.variables.map { "{{\($0)}}" }.joined(separator: ", "))
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
             }
             if prompt.builtIn {
-                Label(L10n.text("prompt.readOnlyHint"), systemImage: "lock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button(L10n.text("prompt.duplicateToEdit")) {
-                    _ = model.duplicatePrompt(prompt)
+                HStack {
+                    Label(L10n.text("prompt.readOnlyHint"), systemImage: "lock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L10n.text("prompt.duplicateToEdit")) {
+                        _ = model.duplicatePrompt(prompt)
+                    }
                 }
             }
         }
-        .formStyle(.grouped)
+        .padding(16)
+        .onAppear {
+            language = model.appLanguage.isChinese ? .simplifiedChinese : .english
+        }
     }
+}
+
+private enum PromptBodyLanguage: String, CaseIterable, Identifiable {
+    case english
+    case simplifiedChinese
+    var id: String { rawValue }
 }
 
 private struct StorageSettingsView: View {

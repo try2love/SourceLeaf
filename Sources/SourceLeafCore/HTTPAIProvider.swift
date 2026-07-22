@@ -14,7 +14,15 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
-        let prompt = AIEditPromptBuilder.build(request)
+        let text = try await perform(prompt: AIEditPromptBuilder.build(request))
+        return try AIProposalCodec.decode(text, providerName: displayName)
+    }
+
+    public func healthCheck() async throws -> String {
+        try AIProviderHealthCheck.validated(try await perform(prompt: AIProviderHealthCheck.prompt))
+    }
+
+    private func perform(prompt: String) async throws -> String {
         let urlRequest = try makeRequest(prompt: prompt)
         let (data, response) = try await session.data(for: urlRequest)
         guard let http = response as? HTTPURLResponse else {
@@ -23,8 +31,7 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw AIProviderError.requestFailed(http.statusCode, String(decoding: data, as: UTF8.self))
         }
-        let text = try extractText(from: data)
-        return try AIProposalCodec.decode(text, providerName: displayName)
+        return try extractText(from: data)
     }
 
     func makeRequest(prompt: String) throws -> URLRequest {

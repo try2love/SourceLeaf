@@ -41,6 +41,24 @@ import Testing
     #expect(arguments.contains("--ephemeral"))
 }
 
+@Test func codeBuddyInvocationIsHeadlessModelAwareAndToolRestricted() throws {
+    let profile = ProviderProfile(name: "CodeBuddy", kind: .codeBuddy, model: "claude-test")
+    let arguments = CodeBuddyCLIProvider.invocationArguments(for: profile)
+    #expect(arguments.contains("-p"))
+    #expect(arguments.contains("json"))
+    #expect(arguments.contains("--disallowedTools"))
+    #expect(arguments.contains("--settings"))
+    #expect(!arguments.contains("--dangerously-skip-permissions"))
+    #expect(try CodeBuddyCLIProvider.resultText(in: #"{"result":"hello"}"#) == "hello")
+}
+
+@Test func providerHealthRequiresAnExactHelloResponse() throws {
+    #expect(try AIProviderHealthCheck.validated("  hello\n") == "hello")
+    #expect(throws: AIProviderError.self) {
+        try AIProviderHealthCheck.validated("hello there")
+    }
+}
+
 @Test func legacyProviderProfileDefaultsToCodexManagedReasoning() throws {
     let id = UUID()
     let data = Data("""
@@ -86,6 +104,8 @@ import Testing
     #expect(prompt.nameZH == "略微缓和的审稿人")
     #expect(prompt.bodyZH.contains("严苛、精准且富有洞察"))
     #expect(prompt.bodyZH.contains("必须解决的核心问题"))
+    #expect(prompt.body.contains("Critical Issues Requiring Mandatory Revision"))
+    #expect(!prompt.body.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) })
 }
 
 @Test func promptClearlySeparatesTargetsFromContext() throws {

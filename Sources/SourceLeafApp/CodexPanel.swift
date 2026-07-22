@@ -5,6 +5,8 @@ import SourceLeafCore
 struct CodexPanel: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("SourceLeaf.composerHeight") private var composerHeight = 120.0
+    @State private var composerDragStart: Double?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,24 +41,88 @@ struct CodexPanel: View {
     }
 
     private var controls: some View {
-        VStack(spacing: 6) {
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Picker(L10n.text("ai.provider"), selection: Binding(
-                    get: { model.selectedProviderID },
-                    set: { model.selectProvider($0) }
-                )) {
+                Menu {
+                    ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
+                        Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
+                            model.usePrompt(prompt)
+                        }
+                    }
+                } label: {
+                    Label(L10n.text("ai.quickPrompt"), systemImage: "text.bubble")
+                }
+
+                providerHealthButton
+
+                Menu {
                     ForEach(model.providerProfiles.filter(\.enabled)) { profile in
-                        Text(profile.name).tag(Optional(profile.id))
+                        Button {
+                            model.selectProvider(profile.id)
+                        } label: {
+                            if profile.id == model.selectedProviderID {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(selectedProviderName, systemImage: "terminal")
+                }
+
+                Menu {
+                    Button(L10n.text("provider.modelDefault")) { model.selectedProviderModel = "" }
+                    ForEach(modelPresets, id: \.self) { candidate in
+                        Button {
+                            model.selectedProviderModel = candidate
+                        } label: {
+                            if model.selectedProviderModel == candidate {
+                                Label(candidate, systemImage: "checkmark")
+                            } else {
+                                Text(candidate)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel, systemImage: "slider.horizontal.3")
+                }
+
+                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
+                    Menu {
+                        Button(L10n.text("provider.reasoningDefault")) { model.selectedReasoningEffort = nil }
+                        ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
+                            Button {
+                                model.selectedReasoningEffort = effort
+                            } label: {
+                                if model.selectedReasoningEffort == effort {
+                                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
+                                } else {
+                                    Text(L10n.text("reasoning.\(effort.rawValue)"))
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(reasoningLabel, systemImage: "brain.head.profile")
                     }
                 }
-                .labelsHidden()
-                .frame(maxWidth: 170)
-                Picker(L10n.text("ai.context"), selection: $model.contextScope) {
+
+                Menu {
                     ForEach(ContextScope.allCases) { scope in
-                        Text(L10n.context(scope)).tag(scope)
+                        Button {
+                            model.contextScope = scope
+                        } label: {
+                            if scope == model.contextScope {
+                                Label(L10n.context(scope), systemImage: "checkmark")
+                            } else {
+                                Text(L10n.context(scope))
+                            }
+                        }
                     }
+                } label: {
+                    Label(L10n.context(model.contextScope), systemImage: "doc.text.magnifyingglass")
                 }
-                .labelsHidden()
+
                 if model.contextScope == .custom {
                     Menu {
                         ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
@@ -73,48 +139,8 @@ struct CodexPanel: View {
                     }
                     .help(L10n.text("ai.customContextFiles"))
                 }
-                Menu {
-                    ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
-                        Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
-                            model.usePrompt(prompt)
-                        }
-                    }
-                } label: {
-                    Label(L10n.text("ai.prompts"), systemImage: "text.badge.star")
-                }
-                .labelStyle(.iconOnly)
-                Spacer()
             }
-            HStack(spacing: 8) {
-                TextField(
-                    L10n.text("provider.modelDefault"),
-                    text: Binding(
-                        get: { model.selectedProviderModel },
-                        set: { model.selectedProviderModel = $0 }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.caption.monospaced())
-                .help(L10n.text("provider.modelHint"))
-                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
-                    Picker(
-                        L10n.text("provider.reasoning"),
-                        selection: Binding(
-                            get: { model.selectedReasoningEffort },
-                            set: { model.selectedReasoningEffort = $0 }
-                        )
-                    ) {
-                        Text(L10n.text("provider.reasoningDefault"))
-                            .tag(Optional<ModelReasoningEffort>.none)
-                        ForEach(ModelReasoningEffort.allCases) { effort in
-                            Text(L10n.text("reasoning.\(effort.rawValue)"))
-                                .tag(Optional(effort))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 135)
-                }
-            }
+            .buttonStyle(.borderless)
         }
         .padding(7)
         .background(.bar)
@@ -122,6 +148,19 @@ struct CodexPanel: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 7) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 44, height: 4)
+                .frame(maxWidth: .infinity, minHeight: 7)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            if composerDragStart == nil { composerDragStart = composerHeight }
+                            composerHeight = min(360, max(64, (composerDragStart ?? composerHeight) - value.translation.height))
+                        }
+                        .onEnded { _ in composerDragStart = nil }
+                )
             if !model.editTargets.isEmpty {
                 ScrollView(.horizontal) {
                     HStack {
@@ -154,7 +193,7 @@ struct CodexPanel: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .frame(minHeight: 52, maxHeight: 120)
+                .frame(height: composerHeight)
                 .background(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.035))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
@@ -170,6 +209,51 @@ struct CodexPanel: View {
                 .foregroundStyle(.secondary)
         }
         .padding(9)
+    }
+
+    @ViewBuilder
+    private var providerHealthButton: some View {
+        switch model.selectedProviderHealth {
+        case .checking:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 24, height: 24)
+                .help(L10n.text("provider.healthChecking"))
+        case .connected:
+            Button { model.checkSelectedProviderAvailability() } label: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            .help(L10n.text("provider.healthConnected"))
+        case let .unavailable(message):
+            Button { model.checkSelectedProviderAvailability() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            }
+            .help(L10n.text("provider.healthUnavailable") + "\n" + message)
+        case .unknown:
+            Button { model.checkSelectedProviderAvailability() } label: {
+                Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+            }
+            .help(L10n.text("provider.healthCheck"))
+        }
+    }
+
+    private var selectedProviderName: String {
+        model.providerProfiles.first { $0.id == model.selectedProviderID }?.name ?? L10n.text("ai.provider")
+    }
+
+    private var reasoningLabel: String {
+        model.selectedReasoningEffort
+            .map { L10n.text("reasoning.\($0.rawValue)") }
+            ?? L10n.text("provider.reasoningDefault")
+    }
+
+    private var modelPresets: [String] {
+        switch model.selectedProviderKind {
+        case .localCodex:
+            ["gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-5-codex", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4", "gpt-5.2"]
+        default:
+            model.selectedProviderModel.isEmpty ? [] : [model.selectedProviderModel]
+        }
     }
 }
 
