@@ -19,6 +19,20 @@ enum SourceTextSynchronization {
 
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage("SourceLeaf.findBarShowsReplace") private var findBarShowsReplace = false
+    @State private var findBarVisible = false
+    @State private var findQuery = ""
+    @State private var replaceQuery = ""
+    @State private var activeFindIndex = 0
+
+    private var findMatches: [NSRange] {
+        SourceFindController.matches(in: model.sourceText, query: findQuery)
+    }
+
+    private var activeFindRange: NSRange? {
+        guard findMatches.indices.contains(activeFindIndex) else { return nil }
+        return findMatches[activeFindIndex]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,10 +87,27 @@ struct SourcePanel: View {
             if model.selectedFile?.kind == .tex {
                 LaTeXSourceToolbar()
             }
+            if findBarVisible {
+                SourceFindBar(
+                    query: $findQuery,
+                    replacement: $replaceQuery,
+                    showsReplace: $findBarShowsReplace,
+                    matchCount: findMatches.count,
+                    activeIndex: activeFindIndex,
+                    onPrevious: { moveFindSelection(delta: -1) },
+                    onNext: { moveFindSelection(delta: 1) },
+                    onReplaceCurrent: replaceCurrentFindMatch,
+                    onReplaceAll: replaceAllFindMatches,
+                    onDone: { focusActiveFindMatch() },
+                    onClose: closeFindBar
+                )
+            }
 
             SourceTextView(
                 text: Binding(get: { model.sourceText }, set: { model.sourceChanged($0) }),
                 selection: $model.selectedRange,
+                findRanges: findBarVisible ? findMatches : [],
+                activeFindRange: findBarVisible ? activeFindRange : nil,
                 commandRequest: model.pendingLaTeXEdit,
                 showSelectionButton: model.configuration.showSelectionButton,
                 editorTheme: model.editorTheme,
@@ -86,6 +117,142 @@ struct SourcePanel: View {
                 onCommandApplied: model.acknowledgeLaTeXEdit
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .sourceLeafShowFind)) { _ in
+            openFindBarFromSelection()
+        }
+        .onChange(of: findQuery) { _, _ in normalizeActiveFindIndexAndFocus() }
+        .onChange(of: model.sourceText) { _, _ in normalizeActiveFindIndexAndFocus(scroll: false) }
+    }
+
+    private func openFindBarFromSelection() {
+        if !findBarVisible,
+           model.selectedRange.length > 0,
+           NSMaxRange(model.selectedRange) <= (model.sourceText as NSString).length {
+            findQuery = (model.sourceText as NSString).substring(with: model.selectedRange)
+        }
+        findBarVisible = true
+        normalizeActiveFindIndexAndFocus()
+    }
+
+    private func closeFindBar() {
+        findBarVisible = false
+        findQuery = ""
+        activeFindIndex = 0
+    }
+
+    private func normalizeActiveFindIndexAndFocus(scroll: Bool = true) {
+        guard !findMatches.isEmpty else {
+            activeFindIndex = 0
+            return
+        }
+        if !findMatches.indices.contains(activeFindIndex) { activeFindIndex = 0 }
+        if scroll { focusActiveFindMatch() }
+    }
+
+    private func focusActiveFindMatch() {
+        guard let activeFindRange else { return }
+        model.selectedRange = activeFindRange
+    }
+
+    private func moveFindSelection(delta: Int) {
+        guard !findMatches.isEmpty else { return }
+        activeFindIndex = (activeFindIndex + delta + findMatches.count) % findMatches.count
+        focusActiveFindMatch()
+    }
+
+    private func replaceCurrentFindMatch() {
+        guard let activeFindRange,
+              NSMaxRange(activeFindRange) <= (model.sourceText as NSString).length else { return }
+        let next = NSMutableString(string: model.sourceText)
+        next.replaceCharacters(in: activeFindRange, with: replaceQuery)
+        model.sourceChanged(next as String)
+        model.selectedRange = NSRange(location: activeFindRange.location, length: (replaceQuery as NSString).length)
+        normalizeActiveFindIndexAndFocus(scroll: false)
+    }
+
+    private func replaceAllFindMatches() {
+        guard !findQuery.isEmpty else { return }
+        model.sourceChanged(model.sourceText.replacingOccurrences(of: findQuery, with: replaceQuery))
+        activeFindIndex = 0
+    }
+}
+
+enum SourceFindController {
+    static func matches(in source: String, query: String) -> [NSRange] {
+        guard !query.isEmpty else { return [] }
+        let nsSource = source as NSString
+        var ranges: [NSRange] = []
+        var searchRange = NSRange(location: 0, length: nsSource.length)
+        while searchRange.length > 0 {
+            let match = nsSource.range(of: query, options: [.caseInsensitive], range: searchRange)
+            guard match.location != NSNotFound, match.length > 0 else { break }
+            ranges.append(match)
+            let nextLocation = match.location + match.length
+            searchRange = NSRange(location: nextLocation, length: nsSource.length - nextLocation)
+        }
+        return ranges
+    }
+}
+
+private struct SourceFindBar: View {
+    @Binding var query: String
+    @Binding var replacement: String
+    @Binding var showsReplace: Bool
+    let matchCount: Int
+    let activeIndex: Int
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onReplaceCurrent: () -> Void
+    let onReplaceAll: () -> Void
+    let onDone: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(L10n.text("source.find"), text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(onDone)
+                Text(matchCount == 0 ? "0/0" : "\(activeIndex + 1)/\(matchCount)")
+                    .sourceLeafFont(.caption, design: .monospaced)
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 46, alignment: .trailing)
+                Button(action: onPrevious) { Image(systemName: "chevron.up") }
+                    .disabled(matchCount == 0)
+                    .help(L10n.text("source.findPrevious"))
+                Button(action: onNext) { Image(systemName: "chevron.down") }
+                    .disabled(matchCount == 0)
+                    .help(L10n.text("source.findNext"))
+                Toggle(isOn: $showsReplace) {
+                    Text(L10n.text("source.replace"))
+                }
+                .toggleStyle(.checkbox)
+                Button(L10n.text("action.done"), action: onDone)
+                    .help(L10n.text("source.findDoneHelp"))
+                Button(action: onClose) { Image(systemName: "xmark") }
+                    .help(L10n.text("action.close"))
+            }
+            .buttonStyle(.borderless)
+            if showsReplace {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .foregroundStyle(.secondary)
+                    TextField(L10n.text("source.replaceWith"), text: $replacement)
+                        .textFieldStyle(.roundedBorder)
+                    Button(L10n.text("source.replaceCurrent"), action: onReplaceCurrent)
+                        .disabled(matchCount == 0)
+                    Button(L10n.text("source.replaceAll"), action: onReplaceAll)
+                        .disabled(matchCount == 0)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -237,6 +404,8 @@ private struct LaTeXSourceToolbar: View {
 struct SourceTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
+    var findRanges: [NSRange] = []
+    var activeFindRange: NSRange?
     var commandRequest: LaTeXEditRequest? = nil
     var showSelectionButton: Bool
     var editorTheme: EditorTheme = .system
@@ -341,6 +510,7 @@ struct SourceTextView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
+        context.coordinator.updateFindHighlights(findRanges, activeRange: activeFindRange)
         if textView.hasMarkedText() {
             context.coordinator.applyPendingCommand(commandRequest)
             return
@@ -441,20 +611,6 @@ struct SourceTextView: NSViewRepresentable {
                 name: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView
             )
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(showFindAndReplace),
-                name: .sourceLeafShowFind,
-                object: nil
-            )
-        }
-
-        @objc private func showFindAndReplace() {
-            guard let textView, textView.window?.isKeyWindow == true else { return }
-            textView.window?.makeFirstResponder(textView)
-            let item = NSMenuItem()
-            item.tag = NSTextFinder.Action.showReplaceInterface.rawValue
-            textView.performFindPanelAction(item)
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
@@ -475,7 +631,6 @@ struct SourceTextView: NSViewRepresentable {
             guard !highlighting, let textView else { return }
             let nativeSelection = textView.selectedRange()
             lastLocallyEmittedSelection = nativeSelection
-            if parent.selection != nativeSelection { parent.selection = nativeSelection }
             guard !textView.hasMarkedText() else {
                 ruler?.needsDisplay = true
                 glyphOverlay?.restartCaretBlink()
@@ -488,6 +643,7 @@ struct SourceTextView: NSViewRepresentable {
             let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
             highlightTimer = timer
             RunLoop.main.add(timer, forMode: .common)
+            scheduleSelectionCommit()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
@@ -506,11 +662,15 @@ struct SourceTextView: NSViewRepresentable {
             }
             // Keep AppKit's native interaction immediate, but coalesce the
             // higher-level SwiftUI binding while a pointer drag is in flight.
+            scheduleSelectionCommit()
+            glyphOverlay?.selectionDidChange()
+        }
+
+        private func scheduleSelectionCommit() {
             selectionSyncTimer?.invalidate()
             let timer = Timer(timeInterval: 0.05, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
             selectionSyncTimer = timer
             RunLoop.main.add(timer, forMode: .common)
-            glyphOverlay?.selectionDidChange()
         }
 
         @objc private func commitSelectionToBinding() {
@@ -666,6 +826,12 @@ struct SourceTextView: NSViewRepresentable {
             highlighting = false
         }
 
+        func updateFindHighlights(_ ranges: [NSRange], activeRange: NSRange?) {
+            glyphOverlay?.findRanges = ranges
+            glyphOverlay?.activeFindRange = activeRange
+            glyphOverlay?.needsDisplay = true
+        }
+
         func invalidateVisibleEditor() {
             guard let textView else { return }
             textView.isHidden = false
@@ -713,7 +879,14 @@ struct SourceTextView: NSViewRepresentable {
 final class SourceGlyphOverlayView: NSView {
     weak var textView: NSTextView?
     var palette: SourceEditorPalette
+    var findRanges: [NSRange] = [] {
+        didSet { needsDisplay = true }
+    }
+    var activeFindRange: NSRange? {
+        didSet { needsDisplay = true }
+    }
     private(set) var lastSelectionRectCount = 0
+    private(set) var lastFindHighlightRectCount = 0
     private(set) var lastCaretRect: NSRect?
     private(set) var lastPaintedSelection = NSRange(location: NSNotFound, length: 0)
     private let caretLayer = CALayer()
@@ -777,14 +950,18 @@ final class SourceGlyphOverlayView: NSView {
             y: textView.textContainerOrigin.y - visible.minY
         )
         lastSelectionRectCount = 0
+        lastFindHighlightRectCount = 0
         lastCaretRect = nil
         caretLayer.isHidden = true
         caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
         let selectedRange = textView.selectedRange()
         lastPaintedSelection = selectedRange
-        // Selection and find-result painting belong to NSTextView. Keeping the
-        // overlay out of the pointer-tracking path makes drag selection native
-        // and prevents it from covering the system find indicators.
+        drawFindHighlights(
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            visible: visible,
+            origin: origin
+        )
         if selectedRange.length == 0,
            textView.window?.firstResponder === textView,
            let caret = caretRect(
@@ -799,6 +976,43 @@ final class SourceGlyphOverlayView: NSView {
             caretLayer.backgroundColor = palette.caret.cgColor
             caretLayer.isHidden = false
             installCaretBlinkAnimation()
+        }
+    }
+
+    private func drawFindHighlights(
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer,
+        visible: NSRect,
+        origin: NSPoint
+    ) {
+        guard !findRanges.isEmpty, let textView else { return }
+        let stringLength = (textView.string as NSString).length
+        let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: textContainer)
+        let visibleCharacterRange = layoutManager.characterRange(forGlyphRange: visibleGlyphRange, actualGlyphRange: nil)
+        for range in findRanges {
+            let clamped = NSIntersectionRange(range, NSRange(location: 0, length: stringLength))
+            guard clamped.length > 0,
+                  NSIntersectionRange(clamped, visibleCharacterRange).length > 0 else { continue }
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: clamped, actualCharacterRange: nil)
+            let active = activeFindRange == range
+            let fill = (active ? NSColor.systemYellow : NSColor.systemYellow.withAlphaComponent(0.32))
+                .withAlphaComponent(active ? 0.52 : 0.24)
+            let stroke = active ? NSColor.systemOrange : NSColor.systemYellow.withAlphaComponent(0.75)
+            layoutManager.enumerateEnclosingRects(
+                forGlyphRange: glyphRange,
+                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                in: textContainer
+            ) { rect, _ in
+                var highlight = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -1.5, dy: -1)
+                highlight.size.height = max(2, highlight.height)
+                let path = NSBezierPath(roundedRect: highlight, xRadius: 3, yRadius: 3)
+                fill.setFill()
+                path.fill()
+                stroke.setStroke()
+                path.lineWidth = active ? 1.2 : 0.8
+                path.stroke()
+                self.lastFindHighlightRectCount += 1
+            }
         }
     }
 

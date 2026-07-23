@@ -444,20 +444,13 @@ struct CodexPanel: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 ZStack(alignment: .topLeading) {
-                    TextEditor(text: $model.instruction)
-                        .sourceLeafFont(.body)
-                        .scrollContentBackground(.hidden)
-                        .padding(3)
-                        .onKeyPress { press in
-                            guard press.key == .return else { return .ignored }
-                            let shift = press.modifiers.contains(.shift)
-                            let shouldSend = model.configuration.chatSendBehavior == .enter ? !shift : shift
-                            guard shouldSend,
-                                  !model.generating,
-                                  !model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .ignored }
-                            model.sendToAI()
-                            return .handled
-                        }
+                    ChatComposerTextView(
+                        text: $model.instruction,
+                        sendBehavior: model.configuration.chatSendBehavior,
+                        isGenerating: model.generating,
+                        onSend: { model.sendToAI() }
+                    )
+                    .padding(3)
                     if model.instruction.isEmpty {
                         Text(L10n.text("ai.composerPlaceholder"))
                             .foregroundStyle(.tertiary)
@@ -599,6 +592,112 @@ struct CodexPanel: View {
     }
 }
 
+struct ChatComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    let sendBehavior: ChatSendBehavior
+    let isGenerating: Bool
+    let onSend: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        guard let textView = scrollView.documentView as? ComposerNSTextView else {
+            let replacement = ComposerNSTextView()
+            scrollView.documentView = replacement
+            configure(replacement, context: context)
+            return scrollView
+        }
+        configure(textView, context: context)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
+        textView.sendBehavior = sendBehavior
+        textView.isGenerating = isGenerating
+        textView.onSend = {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !isGenerating, !trimmed.isEmpty else { return false }
+            onSend()
+            return true
+        }
+        if textView.string != text, !textView.hasMarkedText() {
+            textView.string = text
+        }
+    }
+
+    private func configure(_ textView: ComposerNSTextView, context: Context) {
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.sendBehavior = sendBehavior
+        textView.isGenerating = isGenerating
+        textView.onSend = {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !isGenerating, !trimmed.isEmpty else { return false }
+            onSend()
+            return true
+        }
+        textView.string = text
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ChatComposerTextView
+
+        init(parent: ChatComposerTextView) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+final class ComposerNSTextView: NSTextView {
+    var sendBehavior: ChatSendBehavior = .enter
+    var isGenerating = false
+    var onSend: (() -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if Self.shouldTreatReturnAsSend(
+            characters: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags,
+            sendBehavior: sendBehavior,
+            hasMarkedText: hasMarkedText()
+        ), onSend?() == true {
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    static func shouldTreatReturnAsSend(
+        characters: String?,
+        modifierFlags: NSEvent.ModifierFlags,
+        sendBehavior: ChatSendBehavior,
+        hasMarkedText: Bool
+    ) -> Bool {
+        guard characters == "\r" || characters == "\n" else { return false }
+        guard !hasMarkedText else { return false }
+        let shift = modifierFlags.contains(.shift)
+        return sendBehavior == .enter ? !shift : shift
+    }
+}
+
 private struct ChatBubble: View {
     let message: ChatMessage
     let onEdit: () -> Void
@@ -609,18 +708,11 @@ private struct ChatBubble: View {
         HStack {
             if message.role == .user { Spacer(minLength: 24) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .textSelection(.enabled)
-                    .foregroundStyle(message.role == .user ? Color.white : Color.primary)
-                    .padding(9)
-                    .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background(
-                        message.role == .user
-                            ? Color.accentColor
-                            : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                ViewThatFits(in: .horizontal) {
+                    bubbleContent(wrapLongLines: false)
+                        .fixedSize(horizontal: true, vertical: false)
+                    bubbleContent(wrapLongLines: true)
+                }
                 HStack(spacing: 7) {
                     Text(message.createdAt, format: .dateTime.month().day().hour().minute())
                         .sourceLeafFont(.caption2)
@@ -643,9 +735,46 @@ private struct ChatBubble: View {
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }
 
+    @ViewBuilder
+    private func bubbleContent(wrapLongLines: Bool) -> some View {
+        let base = RenderedChatText(text: message.text)
+            .textSelection(.enabled)
+            .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+            .padding(9)
+        if wrapLongLines {
+            base
+                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(bubbleBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        } else {
+            base
+                .background(bubbleBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private var bubbleBackground: Color {
+        message.role == .user
+            ? Color.accentColor
+            : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
+    }
+
     private func copyMessage() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(message.text, forType: .string)
+    }
+}
+
+private struct RenderedChatText: View {
+    let text: String
+
+    var body: some View {
+        if let rendered = try? AttributedString(markdown: text) {
+            Text(rendered)
+        } else {
+            Text(text)
+        }
     }
 }
 

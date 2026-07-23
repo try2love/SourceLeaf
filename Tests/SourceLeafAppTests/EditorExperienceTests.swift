@@ -17,6 +17,41 @@ import Testing
 }
 
 @MainActor
+@Test func composerReturnDoesNotSendWhileInputMethodHasMarkedText() {
+    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .enter,
+        hasMarkedText: true
+    ))
+    #expect(ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .enter,
+        hasMarkedText: false
+    ))
+    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .shiftEnter,
+        hasMarkedText: false
+    ))
+    #expect(ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [.shift],
+        sendBehavior: .shiftEnter,
+        hasMarkedText: false
+    ))
+}
+
+@Test func sourceFindMatchesAllOccurrencesForPersistentHighlighting() {
+    let matches = SourceFindController.matches(in: "alpha beta Alpha alphabet", query: "alpha")
+
+    #expect(matches.count == 3)
+    #expect(matches.map(\.location) == [0, 11, 17])
+}
+
+@MainActor
 @Test func rapidNativeTypingPreservesCharacterOrderAndCaretPosition() async throws {
     let state = TypingState()
     let view = NSHostingView(rootView: TypingHarness(state: state))

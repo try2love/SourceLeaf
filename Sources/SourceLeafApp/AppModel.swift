@@ -109,6 +109,9 @@ final class AppModel: ObservableObject {
     private var activeCompileTask: Task<Void, Never>?
     private var activeAITask: Task<Void, Never>?
     private var aiCancellationRequested = false
+    private var pendingStreamingAssistantText = ""
+    private var streamingFlushTask: Task<Void, Never>?
+    private var lastStreamingFlush = Date.distantPast
     private var restoreGuardTask: Task<Void, Never>?
     private var suppressTextChange = false
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
@@ -721,6 +724,10 @@ final class AppModel: ObservableObject {
         aiCancellationRequested = false
         generationEvents = [L10n.text("ai.preparingContext")]
         streamingAssistantText = ""
+        pendingStreamingAssistantText = ""
+        streamingFlushTask?.cancel()
+        streamingFlushTask = nil
+        lastStreamingFlush = .distantPast
         pendingProposal = nil
         proposalValidation = [:]
         instruction = ""
@@ -746,6 +753,7 @@ final class AppModel: ObservableObject {
                     }
                 }
                 try Task.checkCancellation()
+                flushStreamingAssistantText()
                 generationStatus = L10n.text("ai.validatingResponse")
                 appendGenerationEvent(generationStatus)
                 guard Set(proposal.replacements.map(\.targetID)).isSubset(of: Set(targets.map(\.id))) else {
@@ -771,6 +779,7 @@ final class AppModel: ObservableObject {
                     return
                 }
                 report(error)
+                flushStreamingAssistantText()
                 appendAIActivityMessage()
                 messages.append(ChatMessage(role: .assistant, text: L10n.userMessage(for: error)))
                 generationEvents = []
@@ -1375,8 +1384,32 @@ final class AppModel: ObservableObject {
             appendGenerationEvent(generationStatus)
         case let .textDelta(text):
             guard showText else { return }
-            streamingAssistantText += text
+            bufferStreamingAssistantText(text)
         }
+    }
+
+    private func bufferStreamingAssistantText(_ text: String) {
+        pendingStreamingAssistantText += text
+        let now = Date()
+        if pendingStreamingAssistantText.count >= 160 || now.timeIntervalSince(lastStreamingFlush) >= 0.08 {
+            flushStreamingAssistantText()
+            return
+        }
+        guard streamingFlushTask == nil else { return }
+        streamingFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard let self else { return }
+            self.flushStreamingAssistantText()
+        }
+    }
+
+    private func flushStreamingAssistantText() {
+        guard !pendingStreamingAssistantText.isEmpty else { return }
+        streamingAssistantText += pendingStreamingAssistantText
+        pendingStreamingAssistantText = ""
+        lastStreamingFlush = Date()
+        streamingFlushTask?.cancel()
+        streamingFlushTask = nil
     }
 
     private func appendGenerationEvent(_ event: String) {
@@ -1388,11 +1421,15 @@ final class AppModel: ObservableObject {
         generationStatus = L10n.text("ai.cancelled")
         appendGenerationEvent(generationStatus)
         appendAIActivityMessage()
+        flushStreamingAssistantText()
         let partial = streamingAssistantText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !partial.isEmpty {
             messages.append(ChatMessage(role: .assistant, text: partial))
         }
         streamingAssistantText = ""
+        pendingStreamingAssistantText = ""
+        streamingFlushTask?.cancel()
+        streamingFlushTask = nil
         generationEvents = []
         generating = false
         generationStatus = ""

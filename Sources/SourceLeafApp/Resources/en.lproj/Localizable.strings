@@ -38,6 +38,8 @@
 "action.reject" = "Reject";
 "action.adjust" = "Continue Adjusting";
 "action.save" = "Save";
+"action.close" = "Close";
+"action.done" = "Done";
 "source.noFile" = "No source file selected";
 "selection.askAI" = "Ask AI";
 "pdf.none" = "No PDF Yet";
@@ -250,6 +252,14 @@
 "pdf.fit" = "Fit";
 "status.pdfExported" = "PDF saved";
 "source.findReplace" = "Find and Replace";
+"source.find" = "Find";
+"source.findPrevious" = "Previous match";
+"source.findNext" = "Next match";
+"source.findDoneHelp" = "Keep the find bar open and keep all matches highlighted.";
+"source.replace" = "Replace";
+"source.replaceWith" = "Replace with";
+"source.replaceCurrent" = "Replace";
+"source.replaceAll" = "Replace All";
 "source.insert.table" = "Table";
 "source.insert.figure" = "Image / Figure";
 "source.menu.format" = "LaTeX Format";

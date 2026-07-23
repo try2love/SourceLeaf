@@ -38,6 +38,8 @@
 "action.reject" = "拒绝";
 "action.adjust" = "继续调整";
 "action.save" = "保存";
+"action.close" = "关闭";
+"action.done" = "完成";
 "source.noFile" = "尚未选择源码文件";
 "selection.askAI" = "询问 AI";
 "pdf.none" = "暂无 PDF";
@@ -250,6 +252,14 @@
 "pdf.fit" = "适合";
 "status.pdfExported" = "PDF 已保存";
 "source.findReplace" = "查找与替换";
+"source.find" = "查找";
+"source.findPrevious" = "上一个匹配";
+"source.findNext" = "下一个匹配";
+"source.findDoneHelp" = "保持查找栏打开，并继续高亮所有匹配内容。";
+"source.replace" = "替换";
+"source.replaceWith" = "替换为";
+"source.replaceCurrent" = "替换";
+"source.replaceAll" = "全部替换";
 "source.insert.table" = "插入表格";
 "source.insert.figure" = "插入图片 / 图环境";
 "source.menu.format" = "LaTeX 格式";
