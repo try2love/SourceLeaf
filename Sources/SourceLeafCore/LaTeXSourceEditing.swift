@@ -2,6 +2,7 @@ import Foundation
 
 public enum LaTeXEditCommand: String, CaseIterable, Sendable {
     case bold, italic, underline, emphasis
+    case toggleComment
     case tiny, scriptsize, footnotesize, small, normalsize, large, largeUpper, largeAllCaps, huge, hugeUpper
     case section, subsection, subsubsection, paragraph
     case inlineMath, displayMath, equation, fraction, superscript, subscriptText
@@ -49,6 +50,7 @@ public enum LaTeXSourceFormatter {
         case .italic: return wrapped(nsSource, selection, selected, prefix: "\\textit{", suffix: "}", placeholder: "text")
         case .underline: return wrapped(nsSource, selection, selected, prefix: "\\underline{", suffix: "}", placeholder: "text")
         case .emphasis: return wrapped(nsSource, selection, selected, prefix: "\\emph{", suffix: "}", placeholder: "text")
+        case .toggleComment: return toggledLineComment(nsSource, selection)
         case .tiny: return sized(nsSource, selection, selected, command: "tiny")
         case .scriptsize: return sized(nsSource, selection, selected, command: "scriptsize")
         case .footnotesize: return sized(nsSource, selection, selected, command: "footnotesize")
@@ -161,5 +163,148 @@ public enum LaTeXSourceFormatter {
             replacement: template,
             resultingSelection: NSRange(location: selection.location + targetRange.location, length: targetRange.length)
         )
+    }
+
+    private struct TextDelta {
+        var location: Int
+        var removedLength: Int
+        var insertedLength: Int
+    }
+
+    private static func toggledLineComment(_ source: NSString, _ selection: NSRange) -> LaTeXSourceEdit {
+        if source.length == 0 {
+            return LaTeXSourceEdit(
+                replacementRange: NSRange(location: 0, length: 0),
+                replacement: "% ",
+                resultingSelection: NSRange(location: 2, length: 0)
+            )
+        }
+
+        let replacementRange = selectedLineRange(in: source, selection: selection)
+        let lineRanges = lineRanges(in: source, covering: replacementRange)
+        let nonBlankLineRanges = lineRanges.filter { lineRange in
+            let contents = lineContents(in: source, lineRange: lineRange)
+            return !source.substring(with: contents).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let shouldUncomment = !nonBlankLineRanges.isEmpty && nonBlankLineRanges.allSatisfy {
+            commentMarkerRange(in: source, lineRange: $0) != nil
+        }
+
+        var replacement = ""
+        var deltas: [TextDelta] = []
+        for lineRange in lineRanges {
+            if shouldUncomment, let marker = commentMarkerRange(in: source, lineRange: lineRange) {
+                let line = source.substring(with: lineRange) as NSString
+                let localMarker = marker.location - lineRange.location
+                let before = line.substring(with: NSRange(location: 0, length: localMarker))
+                let afterLocation = localMarker + marker.length
+                let after = line.substring(with: NSRange(location: afterLocation, length: line.length - afterLocation))
+                replacement += before + after
+                deltas.append(TextDelta(location: marker.location, removedLength: marker.length, insertedLength: 0))
+            } else if !shouldUncomment, shouldCommentLine(in: source, lineRange: lineRange) {
+                let line = source.substring(with: lineRange) as NSString
+                let insertLocation = commentInsertionLocation(in: source, lineRange: lineRange)
+                let localInsert = insertLocation - lineRange.location
+                let before = line.substring(with: NSRange(location: 0, length: localInsert))
+                let after = line.substring(with: NSRange(location: localInsert, length: line.length - localInsert))
+                replacement += before + "% " + after
+                deltas.append(TextDelta(location: insertLocation, removedLength: 0, insertedLength: 2))
+            } else {
+                replacement += source.substring(with: lineRange)
+            }
+        }
+
+        let resultingSelection: NSRange
+        if selection.length == 0 {
+            resultingSelection = NSRange(
+                location: transformedLocation(selection.location, applying: deltas),
+                length: 0
+            )
+        } else {
+            resultingSelection = NSRange(
+                location: replacementRange.location,
+                length: (replacement as NSString).length
+            )
+        }
+        return LaTeXSourceEdit(
+            replacementRange: replacementRange,
+            replacement: replacement,
+            resultingSelection: resultingSelection
+        )
+    }
+
+    private static func selectedLineRange(in source: NSString, selection: NSRange) -> NSRange {
+        let startLocation = min(selection.location, source.length)
+        let endLocation: Int
+        if selection.length == 0 {
+            endLocation = startLocation
+        } else {
+            let rawEnd = min(NSMaxRange(selection), source.length)
+            endLocation = rawEnd > selection.location && rawEnd > 0 && source.character(at: rawEnd - 1) == 10
+                ? rawEnd - 1
+                : rawEnd
+        }
+        let startLine = source.lineRange(for: NSRange(location: min(startLocation, max(0, source.length - 1)), length: 0))
+        let endLine = source.lineRange(for: NSRange(location: min(endLocation, max(0, source.length - 1)), length: 0))
+        return NSUnionRange(startLine, endLine)
+    }
+
+    private static func lineRanges(in source: NSString, covering range: NSRange) -> [NSRange] {
+        guard range.length > 0 else { return [source.lineRange(for: range)] }
+        var ranges: [NSRange] = []
+        var location = range.location
+        let end = NSMaxRange(range)
+        while location < end {
+            let lineRange = source.lineRange(for: NSRange(location: min(location, max(0, source.length - 1)), length: 0))
+            ranges.append(NSIntersectionRange(lineRange, range).length == lineRange.length ? lineRange : lineRange)
+            let next = NSMaxRange(lineRange)
+            guard next > location else { break }
+            location = next
+        }
+        return ranges
+    }
+
+    private static func lineContents(in source: NSString, lineRange: NSRange) -> NSRange {
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        source.getLineStart(&lineStart, end: &lineEnd, contentsEnd: &contentsEnd, for: lineRange)
+        return NSRange(location: lineStart, length: contentsEnd - lineStart)
+    }
+
+    private static func shouldCommentLine(in source: NSString, lineRange: NSRange) -> Bool {
+        let contents = lineContents(in: source, lineRange: lineRange)
+        return !source.substring(with: contents).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func commentInsertionLocation(in source: NSString, lineRange: NSRange) -> Int {
+        let contents = lineContents(in: source, lineRange: lineRange)
+        var location = contents.location
+        while location < NSMaxRange(contents) {
+            let character = source.character(at: location)
+            if character != 32 && character != 9 { break }
+            location += 1
+        }
+        return location
+    }
+
+    private static func commentMarkerRange(in source: NSString, lineRange: NSRange) -> NSRange? {
+        let insertion = commentInsertionLocation(in: source, lineRange: lineRange)
+        let contents = lineContents(in: source, lineRange: lineRange)
+        guard insertion < NSMaxRange(contents), source.character(at: insertion) == 37 else { return nil }
+        let hasFollowingSpace = insertion + 1 < NSMaxRange(contents) && source.character(at: insertion + 1) == 32
+        return NSRange(location: insertion, length: hasFollowingSpace ? 2 : 1)
+    }
+
+    private static func transformedLocation(_ location: Int, applying deltas: [TextDelta]) -> Int {
+        var result = location
+        for delta in deltas.sorted(by: { $0.location < $1.location }) {
+            if delta.removedLength == 0 {
+                if delta.location <= location { result += delta.insertedLength }
+            } else if delta.location < location {
+                result -= min(delta.removedLength, location - delta.location)
+            }
+        }
+        return max(0, result)
     }
 }

@@ -222,6 +222,7 @@
 "source.format.italic" = "斜体";
 "source.format.underline" = "下划线";
 "source.format.emphasis" = "强调";
+"source.format.toggleComment" = "注释 / 取消注释";
 "source.heading.section" = "一级标题（section）";
 "source.heading.subsection" = "二级标题（subsection）";
 "source.heading.subsubsection" = "三级标题（subsubsection）";

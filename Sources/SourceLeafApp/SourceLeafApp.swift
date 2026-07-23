@@ -99,6 +99,8 @@ private struct SourceLeafCommands: Commands {
                 .keyboardShortcut("i", modifiers: .command)
             Button(L10n.text("source.format.underline")) { model.performLaTeXEdit(.underline) }
                 .keyboardShortcut("u", modifiers: .command)
+            Button(L10n.text("source.format.toggleComment")) { model.performLaTeXEdit(.toggleComment) }
+                .keyboardShortcut("/", modifiers: .command)
             Divider()
             Button(L10n.text("source.findReplace")) {
                 NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil)

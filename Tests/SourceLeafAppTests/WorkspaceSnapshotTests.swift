@@ -560,6 +560,42 @@ import Testing
 }
 
 @MainActor
+@Test func latexToggleCommentCommandUsesNativeTextEditingAndUndo() async throws {
+    let state = SourceEditorHarnessState()
+    state.text = "alpha\n  beta\n"
+    state.selection = NSRange(location: 0, length: (state.text as NSString).length)
+    state.commandRequest = LaTeXEditRequest(command: .toggleComment)
+    let hostingView = NSHostingView(rootView: SourceEditorHarnessView(state: state))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    hostingView.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+    let textView = try #require(findSourceTextView(in: hostingView))
+    window.makeFirstResponder(textView)
+    try await Task.sleep(for: .milliseconds(600))
+
+    #expect(state.text == "% alpha\n  % beta\n")
+    #expect(state.selection == NSRange(location: 0, length: (state.text as NSString).length))
+    #expect(textView.undoManager?.canUndo == true)
+
+    textView.undoManager?.undo()
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(state.text == "alpha\n  beta\n")
+    #expect(textView.selectedRange() == NSRange(location: 0, length: (state.text as NSString).length))
+}
+
+@MainActor
 @Test func projectTreeAndOutlineUseAResizableVerticalSplit() throws {
     guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
     let support = FileManager.default.temporaryDirectory

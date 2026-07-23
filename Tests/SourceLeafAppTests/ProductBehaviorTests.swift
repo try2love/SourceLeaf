@@ -123,6 +123,30 @@ import Testing
     #expect(saved == edited)
 }
 
+@Test func latexFormattingTogglesLineCommentsAcrossSelectedLines() throws {
+    let source = "alpha\n  beta\n\n% already\n"
+    let selectedLength = ("alpha\n  beta\n" as NSString).length
+    let commented = LaTeXSourceFormatter.edit(
+        command: .toggleComment,
+        source: source,
+        selection: NSRange(location: 0, length: selectedLength)
+    )
+
+    #expect(commented.replacementRange == NSRange(location: 0, length: selectedLength))
+    #expect(commented.replacement == "% alpha\n  % beta\n")
+    #expect(commented.resultingSelection == NSRange(location: 0, length: ("% alpha\n  % beta\n" as NSString).length))
+
+    let next = (source as NSString).replacingCharacters(in: commented.replacementRange, with: commented.replacement)
+    let uncommented = LaTeXSourceFormatter.edit(
+        command: .toggleComment,
+        source: next,
+        selection: commented.resultingSelection
+    )
+
+    #expect(uncommented.replacement == "alpha\n  beta\n")
+    #expect(uncommented.resultingSelection == NSRange(location: 0, length: selectedLength))
+}
+
 @MainActor
 @Test func latexCompletionIndexRefreshesAfterProjectOpenAndSourceEditsWithoutBodyScanning() async throws {
     let state = try productTestState(named: "completion-index")

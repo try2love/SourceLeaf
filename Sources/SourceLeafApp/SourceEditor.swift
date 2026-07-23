@@ -492,6 +492,7 @@ private struct LaTeXSourceToolbar: View {
             formatButton(.bold, key: "source.format.bold", symbol: "bold")
             formatButton(.italic, key: "source.format.italic", symbol: "italic")
             formatButton(.underline, key: "source.format.underline", symbol: "underline")
+            formatButton(.toggleComment, key: "source.format.toggleComment", symbol: "percent")
             Divider().frame(height: 17)
             headingMenu
             fontSizeMenu
@@ -506,6 +507,7 @@ private struct LaTeXSourceToolbar: View {
             formatButton(.bold, key: "source.format.bold", symbol: "bold")
             formatButton(.italic, key: "source.format.italic", symbol: "italic")
             formatButton(.underline, key: "source.format.underline", symbol: "underline")
+            formatButton(.toggleComment, key: "source.format.toggleComment", symbol: "percent")
             Menu {
                 Section(L10n.text("source.toolbar.heading")) { headingItems }
                 Section(L10n.text("source.toolbar.fontSize")) { fontSizeItems }
@@ -589,6 +591,8 @@ private struct LaTeXSourceToolbar: View {
 
     @ViewBuilder private var insertItems: some View {
         menuButton(.emphasis, key: "source.format.emphasis")
+        menuButton(.toggleComment, key: "source.format.toggleComment")
+        Divider()
         menuButton(.itemize, key: "source.insert.itemize")
         menuButton(.enumerate, key: "source.insert.enumerate")
         menuButton(.table, key: "source.insert.table")

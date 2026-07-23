@@ -222,6 +222,7 @@
 "source.format.italic" = "Italic";
 "source.format.underline" = "Underline";
 "source.format.emphasis" = "Emphasis";
+"source.format.toggleComment" = "Toggle Comment";
 "source.heading.section" = "Section";
 "source.heading.subsection" = "Subsection";
 "source.heading.subsubsection" = "Subsubsection";
