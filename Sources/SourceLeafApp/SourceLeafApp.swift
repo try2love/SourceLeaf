@@ -101,6 +101,10 @@ private struct SourceLeafCommands: Commands {
                 .keyboardShortcut("u", modifiers: .command)
             Button(L10n.text("source.format.toggleComment")) { model.performLaTeXEdit(.toggleComment) }
                 .keyboardShortcut("/", modifiers: .command)
+            Button(L10n.text("source.format.indent")) { model.performLaTeXEdit(.indentLines) }
+                .keyboardShortcut("]", modifiers: .command)
+            Button(L10n.text("source.format.outdent")) { model.performLaTeXEdit(.outdentLines) }
+                .keyboardShortcut("[", modifiers: .command)
             Divider()
             Button(L10n.text("source.findReplace")) {
                 NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil)

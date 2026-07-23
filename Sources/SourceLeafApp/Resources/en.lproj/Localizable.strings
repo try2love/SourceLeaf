@@ -218,11 +218,14 @@
 "source.toolbar.math" = "Math";
 "source.toolbar.insert" = "Insert";
 "source.toolbar.more" = "More Formatting";
+"source.toolbar.editing" = "Editing";
 "source.format.bold" = "Bold";
 "source.format.italic" = "Italic";
 "source.format.underline" = "Underline";
 "source.format.emphasis" = "Emphasis";
 "source.format.toggleComment" = "Toggle Comment";
+"source.format.indent" = "Indent Lines";
+"source.format.outdent" = "Outdent Lines";
 "source.heading.section" = "Section";
 "source.heading.subsection" = "Subsection";
 "source.heading.subsubsection" = "Subsubsection";

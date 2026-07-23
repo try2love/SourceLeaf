@@ -218,11 +218,14 @@
 "source.toolbar.math" = "公式";
 "source.toolbar.insert" = "插入";
 "source.toolbar.more" = "更多格式";
+"source.toolbar.editing" = "编辑";
 "source.format.bold" = "加粗";
 "source.format.italic" = "斜体";
 "source.format.underline" = "下划线";
 "source.format.emphasis" = "强调";
 "source.format.toggleComment" = "注释 / 取消注释";
+"source.format.indent" = "缩进";
+"source.format.outdent" = "减少缩进";
 "source.heading.section" = "一级标题（section）";
 "source.heading.subsection" = "二级标题（subsection）";
 "source.heading.subsubsection" = "三级标题（subsubsection）";

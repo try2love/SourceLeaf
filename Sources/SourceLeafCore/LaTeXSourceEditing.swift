@@ -3,6 +3,7 @@ import Foundation
 public enum LaTeXEditCommand: String, CaseIterable, Sendable {
     case bold, italic, underline, emphasis
     case toggleComment
+    case indentLines, outdentLines
     case tiny, scriptsize, footnotesize, small, normalsize, large, largeUpper, largeAllCaps, huge, hugeUpper
     case section, subsection, subsubsection, paragraph
     case inlineMath, displayMath, equation, fraction, superscript, subscriptText
@@ -51,6 +52,8 @@ public enum LaTeXSourceFormatter {
         case .underline: return wrapped(nsSource, selection, selected, prefix: "\\underline{", suffix: "}", placeholder: "text")
         case .emphasis: return wrapped(nsSource, selection, selected, prefix: "\\emph{", suffix: "}", placeholder: "text")
         case .toggleComment: return toggledLineComment(nsSource, selection)
+        case .indentLines: return shiftedLines(nsSource, selection, direction: .indent)
+        case .outdentLines: return shiftedLines(nsSource, selection, direction: .outdent)
         case .tiny: return sized(nsSource, selection, selected, command: "tiny")
         case .scriptsize: return sized(nsSource, selection, selected, command: "scriptsize")
         case .footnotesize: return sized(nsSource, selection, selected, command: "footnotesize")
@@ -171,6 +174,75 @@ public enum LaTeXSourceFormatter {
         var insertedLength: Int
     }
 
+    private enum LineShiftDirection {
+        case indent
+        case outdent
+    }
+
+    private static func shiftedLines(
+        _ source: NSString,
+        _ selection: NSRange,
+        direction: LineShiftDirection
+    ) -> LaTeXSourceEdit {
+        if source.length == 0 || selection.length == 0 {
+            switch direction {
+            case .indent:
+                return LaTeXSourceEdit(
+                    replacementRange: selection,
+                    replacement: "  ",
+                    resultingSelection: NSRange(location: selection.location + 2, length: 0)
+                )
+            case .outdent:
+                let lineRange = source.length == 0
+                    ? NSRange(location: 0, length: 0)
+                    : selectedLineRange(in: source, selection: selection)
+                guard let removal = leadingIndentRemoval(in: source, lineRange: lineRange) else {
+                    return LaTeXSourceEdit(replacementRange: selection, replacement: "", resultingSelection: selection)
+                }
+                let line = source.substring(with: lineRange) as NSString
+                let localRemoval = removal.location - lineRange.location
+                let replacement = line.substring(to: localRemoval)
+                    + line.substring(from: localRemoval + removal.length)
+                let caret = max(lineRange.location, selection.location - removal.length)
+                return LaTeXSourceEdit(
+                    replacementRange: lineRange,
+                    replacement: replacement,
+                    resultingSelection: NSRange(location: caret, length: 0)
+                )
+            }
+        }
+
+        let replacementRange = selectedLineRange(in: source, selection: selection)
+        let lineRanges = lineRanges(in: source, covering: replacementRange)
+        var replacement = ""
+
+        for lineRange in lineRanges {
+            let line = source.substring(with: lineRange) as NSString
+            switch direction {
+            case .indent:
+                if shouldIndentLine(in: source, lineRange: lineRange) {
+                    replacement += "  " + (line as String)
+                } else {
+                    replacement += line as String
+                }
+            case .outdent:
+                if let removal = leadingIndentRemoval(in: source, lineRange: lineRange) {
+                    let localRemoval = removal.location - lineRange.location
+                    replacement += line.substring(to: localRemoval)
+                        + line.substring(from: localRemoval + removal.length)
+                } else {
+                    replacement += line as String
+                }
+            }
+        }
+
+        return LaTeXSourceEdit(
+            replacementRange: replacementRange,
+            replacement: replacement,
+            resultingSelection: NSRange(location: replacementRange.location, length: (replacement as NSString).length)
+        )
+    }
+
     private static func toggledLineComment(_ source: NSString, _ selection: NSRange) -> LaTeXSourceEdit {
         if source.length == 0 {
             return LaTeXSourceEdit(
@@ -275,6 +347,25 @@ public enum LaTeXSourceFormatter {
     private static func shouldCommentLine(in source: NSString, lineRange: NSRange) -> Bool {
         let contents = lineContents(in: source, lineRange: lineRange)
         return !source.substring(with: contents).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func shouldIndentLine(in source: NSString, lineRange: NSRange) -> Bool {
+        let contents = lineContents(in: source, lineRange: lineRange)
+        return !source.substring(with: contents).isEmpty
+    }
+
+    private static func leadingIndentRemoval(in source: NSString, lineRange: NSRange) -> NSRange? {
+        let contents = lineContents(in: source, lineRange: lineRange)
+        guard contents.length > 0 else { return nil }
+        let first = source.character(at: contents.location)
+        if first == 9 {
+            return NSRange(location: contents.location, length: 1)
+        }
+        guard first == 32 else { return nil }
+        if contents.length >= 2, source.character(at: contents.location + 1) == 32 {
+            return NSRange(location: contents.location, length: 2)
+        }
+        return NSRange(location: contents.location, length: 1)
     }
 
     private static func commentInsertionLocation(in source: NSString, lineRange: NSRange) -> Int {

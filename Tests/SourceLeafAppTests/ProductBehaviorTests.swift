@@ -147,6 +147,30 @@ import Testing
     #expect(uncommented.resultingSelection == NSRange(location: 0, length: selectedLength))
 }
 
+@Test func latexFormattingIndentsAndOutdentsSelectedLines() throws {
+    let source = "alpha\n  beta\n"
+    let fullSelection = NSRange(location: 0, length: (source as NSString).length)
+    let indented = LaTeXSourceFormatter.edit(
+        command: .indentLines,
+        source: source,
+        selection: fullSelection
+    )
+
+    #expect(indented.replacementRange == fullSelection)
+    #expect(indented.replacement == "  alpha\n    beta\n")
+    #expect(indented.resultingSelection == NSRange(location: 0, length: ("  alpha\n    beta\n" as NSString).length))
+
+    let next = (source as NSString).replacingCharacters(in: indented.replacementRange, with: indented.replacement)
+    let outdented = LaTeXSourceFormatter.edit(
+        command: .outdentLines,
+        source: next,
+        selection: indented.resultingSelection
+    )
+
+    #expect(outdented.replacement == source)
+    #expect(outdented.resultingSelection == fullSelection)
+}
+
 @MainActor
 @Test func latexCompletionIndexRefreshesAfterProjectOpenAndSourceEditsWithoutBodyScanning() async throws {
     let state = try productTestState(named: "completion-index")

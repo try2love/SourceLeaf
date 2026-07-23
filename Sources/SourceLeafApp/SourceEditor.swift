@@ -493,6 +493,8 @@ private struct LaTeXSourceToolbar: View {
             formatButton(.italic, key: "source.format.italic", symbol: "italic")
             formatButton(.underline, key: "source.format.underline", symbol: "underline")
             formatButton(.toggleComment, key: "source.format.toggleComment", symbol: "percent")
+            formatButton(.indentLines, key: "source.format.indent", symbol: "increase.indent")
+            formatButton(.outdentLines, key: "source.format.outdent", symbol: "decrease.indent")
             Divider().frame(height: 17)
             headingMenu
             fontSizeMenu
@@ -509,6 +511,7 @@ private struct LaTeXSourceToolbar: View {
             formatButton(.underline, key: "source.format.underline", symbol: "underline")
             formatButton(.toggleComment, key: "source.format.toggleComment", symbol: "percent")
             Menu {
+                Section(L10n.text("source.toolbar.editing")) { editingItems }
                 Section(L10n.text("source.toolbar.heading")) { headingItems }
                 Section(L10n.text("source.toolbar.fontSize")) { fontSizeItems }
                 Section(L10n.text("source.toolbar.math")) { mathItems }
@@ -553,6 +556,12 @@ private struct LaTeXSourceToolbar: View {
         }
     }
 
+    @ViewBuilder private var editingItems: some View {
+        menuButton(.toggleComment, key: "source.format.toggleComment")
+        menuButton(.indentLines, key: "source.format.indent")
+        menuButton(.outdentLines, key: "source.format.outdent")
+    }
+
     @ViewBuilder private var headingItems: some View {
         menuButton(.section, key: "source.heading.section")
         menuButton(.subsection, key: "source.heading.subsection")
@@ -591,8 +600,6 @@ private struct LaTeXSourceToolbar: View {
 
     @ViewBuilder private var insertItems: some View {
         menuButton(.emphasis, key: "source.format.emphasis")
-        menuButton(.toggleComment, key: "source.format.toggleComment")
-        Divider()
         menuButton(.itemize, key: "source.insert.itemize")
         menuButton(.enumerate, key: "source.insert.enumerate")
         menuButton(.table, key: "source.insert.table")
@@ -835,6 +842,7 @@ struct SourceTextView: NSViewRepresentable {
         private var lastLocalEditDate = Date.distantPast
         private var protectedSelectionEcho: NSRange?
         private var applyingSmartPairEdit = false
+        private var applyingLineShiftEdit = false
         var lastLocallyEmittedText: String?
         var lastLocallyEmittedSelection: NSRange?
 
@@ -974,10 +982,18 @@ struct SourceTextView: NSViewRepresentable {
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if handleCompletionCommand(commandSelector, in: textView) { return true }
-            if commandSelector == #selector(NSResponder.insertTab(_:)) {
-                return jumpToNextLaTeXPlaceholderIfNeeded(in: textView)
+            switch commandSelector {
+            case #selector(NSResponder.insertBacktab(_:)):
+                return applyLineShiftCommand(.outdentLines, in: textView)
+            case #selector(NSResponder.insertTab(_:)):
+                if textView.selectedRange().length > 0 {
+                    return applyLineShiftCommand(.indentLines, in: textView)
+                }
+                if jumpToNextLaTeXPlaceholderIfNeeded(in: textView) { return true }
+                return applyLineShiftCommand(.indentLines, in: textView)
+            default:
+                return false
             }
-            return false
         }
 
         func textView(
@@ -986,6 +1002,7 @@ struct SourceTextView: NSViewRepresentable {
             replacementString: String?
         ) -> Bool {
             guard !applyingSmartPairEdit,
+                  !applyingLineShiftEdit,
                   !highlighting,
                   !textView.hasMarkedText(),
                   let replacementString,
@@ -1053,6 +1070,35 @@ struct SourceTextView: NSViewRepresentable {
                 textView.scrollRangeToVisible(resultingSelection)
             }
             applyingSmartPairEdit = false
+        }
+
+        private func applyLineShiftCommand(_ command: LaTeXEditCommand, in textView: NSTextView) -> Bool {
+            guard command == .indentLines || command == .outdentLines else { return false }
+            guard !textView.hasMarkedText() else { return false }
+            let edit = LaTeXSourceFormatter.edit(
+                command: command,
+                source: textView.string,
+                selection: textView.selectedRange()
+            )
+            guard edit.replacementRange.location != NSNotFound,
+                  NSMaxRange(edit.replacementRange) <= (textView.string as NSString).length else { return false }
+            let originalSelection = textView.selectedRange()
+            let undoManager = textView.undoManager
+            undoManager?.beginUndoGrouping()
+            undoManager?.registerUndo(withTarget: self) { target in
+                MainActor.assumeIsolated {
+                    target.restoreSelection(originalSelection, opposite: edit.resultingSelection)
+                }
+            }
+            applyingLineShiftEdit = true
+            textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
+            applyingLineShiftEdit = false
+            textView.setSelectedRange(edit.resultingSelection)
+            textView.scrollRangeToVisible(edit.resultingSelection)
+            undoManager?.endUndoGrouping()
+            parent.selection = edit.resultingSelection
+            glyphOverlay?.selectionDidChange()
+            return true
         }
 
         private static func smartPairClosingDelimiter(for opening: String) -> String? {
