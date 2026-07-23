@@ -73,6 +73,134 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBackslashShowsSourceLeafLatexCompletionOverlayWithoutMutatingSource() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(textView.string, "\\")
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\cite{}"))
+    }
+
+    @MainActor
+    func testTabAcceptsNarrowedLatexCompletionAndPlacesCaretInsideBraces() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [("\\", 42), ("s", 1), ("e", 14), ("c", 8)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["\\section{}"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+        XCTAssertFalse(overlay.isShowing)
+    }
+
+    @MainActor
+    func testCitationCompletionUsesProjectBibliographyIndex() async throws {
+        let state = SourceTypingState()
+        let context = LaTeXCompletionContext(index: ProjectIndex(
+            rootDocument: nil,
+            sectionSummaries: [:],
+            labels: [:],
+            citations: ["smith2024rag", "zhang2025mutedrag"],
+            includedFiles: []
+        ))
+        let host = makeSourceEditorHost(state: state, completionContext: context)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [
+            ("\\", 42), ("c", 8), ("i", 34), ("t", 17), ("e", 14),
+            ("{", 33), ("s", 1), ("m", 46)
+        ] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["smith2024rag"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\cite{smith2024rag}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 18, length: 0))
+    }
+
+    @MainActor
+    func testBeginEnvironmentCompletionInsertsMatchingEndEnvironment() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [
+            ("\\", 42), ("b", 11), ("e", 14), ("g", 5), ("i", 34), ("n", 45),
+            ("{", 33), ("f", 3), ("i", 34), ("g", 5)
+        ] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.first?.insertion, "figure")
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(textView.string, "\\begin{figure}\n\n\\end{figure}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
+        XCTAssertFalse(overlay.isShowing)
+    }
+
+    @MainActor
+    func testEscapeDismissesLatexCompletionOverlay() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\u{1b}", keyCode: 53, window: host.window)))
+        try await Task.sleep(for: .milliseconds(40))
+
+        XCTAssertFalse(overlay.isShowing)
+        XCTAssertEqual(textView.string, "\\")
+    }
+
+    @MainActor
     func testSourceTypingKeepsCaretMovingForwardAfterBackslashCompletionTrigger() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
@@ -304,10 +432,14 @@ private final class SourceTypingState: ObservableObject {
 }
 
 @MainActor
-private func makeSourceEditorHost(state: SourceTypingState) -> (window: NSWindow, view: NSHostingView<SourceTextView>) {
+private func makeSourceEditorHost(
+    state: SourceTypingState,
+    completionContext: LaTeXCompletionContext = LaTeXCompletionContext()
+) -> (window: NSWindow, view: NSHostingView<SourceTextView>) {
     let view = NSHostingView(rootView: SourceTextView(
         text: Binding(get: { state.text }, set: { state.text = $0 }),
         selection: Binding(get: { state.selection }, set: { state.selection = $0 }),
+        completionContext: completionContext,
         showSelectionButton: false,
         editorTheme: .light,
         editorFontFamily: "Menlo",
@@ -341,6 +473,18 @@ private func findSourceTextView(in view: NSView) -> NSTextView? {
     }
     for child in view.subviews {
         if let match = findSourceTextView(in: child) { return match }
+    }
+    return nil
+}
+
+
+@MainActor
+private func findCompletionOverlay(in view: NSView) -> LaTeXCompletionOverlayView? {
+    if let overlay = view as? LaTeXCompletionOverlayView {
+        return overlay
+    }
+    for child in view.subviews {
+        if let match = findCompletionOverlay(in: child) { return match }
     }
     return nil
 }

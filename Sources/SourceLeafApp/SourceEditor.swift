@@ -87,11 +87,39 @@ enum LaTeXCompletionEngine {
         var seen: Set<String> = []
         return merged
             .filter { normalizedPrefix == "\\" || $0.insertion.lowercased().hasPrefix(normalizedPrefix) }
+            .filter { $0.insertion.lowercased() != normalizedPrefix }
             .filter { seen.insert($0.insertion).inserted }
             .sorted { lhs, rhs in
+                let lhsPriority = completionPriority(for: lhs.insertion, prefix: normalizedPrefix)
+                let rhsPriority = completionPriority(for: rhs.insertion, prefix: normalizedPrefix)
+                if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
                 if lhs.category != rhs.category { return lhs.category < rhs.category }
-                return lhs.insertion < rhs.insertion
+                return lhs.insertion.localizedStandardCompare(rhs.insertion) == .orderedAscending
             }
+    }
+
+    private static func completionPriority(for insertion: String, prefix: String) -> Int {
+        let commonOrder = [
+            #"\section{}"#,
+            #"\subsection{}"#,
+            #"\subsubsection{}"#,
+            #"\textbf{}"#,
+            #"\cite{}"#,
+            #"\ref{}"#,
+            #"\label{}"#,
+            #"\includegraphics[]{}"#,
+            #"\begin{}"#,
+            #"\item"#,
+            #"\usepackage{}"#,
+            #"\documentclass{}"#
+        ]
+        if let index = commonOrder.firstIndex(of: insertion) { return index }
+        if prefix != "\\", insertion.lowercased().hasPrefix(prefix) { return 100 }
+        switch insertion {
+        case _ where insertion.hasPrefix(#"\begin"#): return 200
+        case _ where insertion.hasPrefix(#"\end"#): return 210
+        default: return 1_000
+        }
     }
 
     static func argumentSuggestions(
@@ -109,6 +137,8 @@ enum LaTeXCompletionEngine {
             values = context.graphicsFiles.map { ($0, "file", "Project file") }
         case "input", "include":
             values = context.projectFiles.map { ($0, "file", "Project file") }
+        case "begin", "end":
+            values = commonEnvironmentNames.map { ($0, "env", "LaTeX environment") }
         default:
             return []
         }
@@ -162,6 +192,11 @@ enum LaTeXCompletionEngine {
         let prefix = nsBefore.substring(with: match.range(at: 2))
         return (command, prefix, NSRange(location: cursorLocation - (prefix as NSString).length, length: (prefix as NSString).length))
     }
+
+    private static let commonEnvironmentNames = [
+        "document", "figure", "table", "equation", "align", "itemize", "enumerate",
+        "abstract", "theorem", "proof", "algorithm", "tabular", "center", "minipage"
+    ]
 
     private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
         let pattern = #"\\[A-Za-z@]+\*?(?:\{\}){0,2}"#
@@ -652,11 +687,15 @@ struct SourceTextView: NSViewRepresentable {
         scrollView.rulersVisible = false
 
         let glyphOverlay = SourceGlyphOverlayView(textView: textView, palette: palette)
+        let completionOverlay = LaTeXCompletionOverlayView()
+        completionOverlay.isHidden = true
         container.glyphOverlay = glyphOverlay
+        container.completionOverlay = completionOverlay
 
         container.addSubview(ruler)
         container.addSubview(scrollView)
         container.addSubview(glyphOverlay, positioned: .above, relativeTo: scrollView)
+        container.addSubview(completionOverlay, positioned: .above, relativeTo: glyphOverlay)
         NSLayoutConstraint.activate([
             ruler.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             ruler.topAnchor.constraint(equalTo: container.topAnchor),
@@ -671,6 +710,10 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.ruler = ruler
         context.coordinator.glyphOverlay = glyphOverlay
+        context.coordinator.completionOverlay = completionOverlay
+        completionOverlay.onPick = { [weak coordinator = context.coordinator] index in
+            coordinator?.acceptCompletionFromOverlay(at: index)
+        }
         context.coordinator.observeScrollView(scrollView)
         glyphOverlay.synchronizeFrame()
         context.coordinator.layoutEditor()
@@ -685,6 +728,7 @@ struct SourceTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         context.coordinator.updateFindHighlights(findRanges, activeRange: activeFindRange)
         if textView.hasMarkedText() {
+            context.coordinator.hideCompletionOverlay()
             context.coordinator.applyPendingCommand(commandRequest)
             return
         }
@@ -755,6 +799,9 @@ struct SourceTextView: NSViewRepresentable {
         var textView: NSTextView?
         weak var ruler: LineNumberRulerView?
         weak var glyphOverlay: SourceGlyphOverlayView?
+        weak var completionOverlay: LaTeXCompletionOverlayView?
+        private var activeCompletionState: LaTeXCompletionState?
+        private var applyingCompletionEdit = false
         private var highlighting = false
         private(set) var appliedStyleSignature: String?
         private var lastAppliedCommandID: UUID?
@@ -782,8 +829,11 @@ struct SourceTextView: NSViewRepresentable {
             highlightTimer = nil
             NotificationCenter.default.removeObserver(self)
             textView?.delegate = nil
+            completionOverlay?.removeFromSuperview()
+            completionOverlay = nil
             glyphOverlay?.removeFromSuperview()
             glyphOverlay = nil
+            activeCompletionState = nil
             ruler = nil
             textView = nil
         }
@@ -810,6 +860,7 @@ struct SourceTextView: NSViewRepresentable {
             ruler?.scrollPositionDidChange()
             glyphOverlay?.synchronizeFrame()
             glyphOverlay?.needsDisplay = true
+            if completionOverlay?.isShowing == true { updateCompletionOverlayIfNeeded() }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -834,7 +885,7 @@ struct SourceTextView: NSViewRepresentable {
             highlightTimer = timer
             RunLoop.main.add(timer, forMode: .common)
             scheduleSelectionCommit()
-            triggerCompletionIfNeeded()
+            updateCompletionOverlayIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
@@ -869,9 +920,11 @@ struct SourceTextView: NSViewRepresentable {
             normalizeCompletionPlaceholderSelectionIfNeeded()
             lastLocallyEmittedSelection = textView.selectedRange()
             guard !textView.hasMarkedText() else {
+                hideCompletionOverlay()
                 glyphOverlay?.selectionDidChange()
                 return
             }
+            updateCompletionOverlayIfNeeded()
             // Keep AppKit's native interaction immediate, but coalesce the
             // higher-level SwiftUI binding while a pointer drag is in flight.
             scheduleSelectionCommit()
@@ -884,6 +937,10 @@ struct SourceTextView: NSViewRepresentable {
             toCharacterRange newSelectedCharRange: NSRange
         ) -> NSRange {
             normalizedCompletionPlaceholderSelection(newSelectedCharRange, in: textView) ?? newSelectedCharRange
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            handleCompletionCommand(commandSelector, in: textView)
         }
 
         func textView(
@@ -1020,19 +1077,157 @@ struct SourceTextView: NSViewRepresentable {
             return range.location < nativeSelection.location
         }
 
-        private func triggerCompletionIfNeeded() {
-            guard let textView,
+        func hideCompletionOverlay() {
+            activeCompletionState = nil
+            completionOverlay?.hide()
+        }
+
+        private func updateCompletionOverlayIfNeeded() {
+            guard !applyingCompletionEdit,
+                  let textView,
                   textView.window?.firstResponder === textView,
-                  LaTeXCompletionEngine.shouldTriggerCompletion(
-                    afterChangeIn: textView.string as NSString,
-                    selection: textView.selectedRange()
-                  ) else { return }
-            DispatchQueue.main.async { [weak textView] in
-                guard let textView,
-                      !textView.hasMarkedText(),
-                      textView.window?.firstResponder === textView else { return }
-                textView.complete(nil)
+                  !textView.hasMarkedText(),
+                  textView.selectedRange().length == 0 else {
+                hideCompletionOverlay()
+                return
             }
+            guard let state = completionState(in: textView), !state.candidates.isEmpty else {
+                hideCompletionOverlay()
+                return
+            }
+            activeCompletionState = state
+            guard let anchor = completionAnchorRect(for: textView.selectedRange().location, in: textView) else {
+                completionOverlay?.show(candidates: state.candidates, selectedIndex: state.selectedIndex, anchor: .zero, palette: currentPalette())
+                return
+            }
+            completionOverlay?.show(candidates: state.candidates, selectedIndex: state.selectedIndex, anchor: anchor, palette: currentPalette())
+        }
+
+        private func completionState(in textView: NSTextView) -> LaTeXCompletionState? {
+            let source = textView.string as NSString
+            let cursor = textView.selectedRange().location
+            if let argument = LaTeXCompletionEngine.argumentContext(in: source, cursorLocation: cursor) {
+                let candidates = LaTeXCompletionEngine.argumentSuggestions(
+                    command: argument.command,
+                    prefix: argument.prefix,
+                    context: parent.completionContext
+                )
+                return LaTeXCompletionState(replacementRange: argument.range, candidates: candidates, argumentCommand: argument.command)
+            }
+            guard let command = LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: cursor),
+                  command.prefix.hasPrefix("\\") else { return nil }
+            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: textView.string)
+            return LaTeXCompletionState(replacementRange: command.range, candidates: candidates)
+        }
+
+        private func handleCompletionCommand(_ commandSelector: Selector, in textView: NSTextView) -> Bool {
+            guard let state = activeCompletionState, completionOverlay?.isShowing == true else { return false }
+            switch commandSelector {
+            case #selector(NSResponder.moveDown(_:)):
+                completionOverlay?.moveSelection(delta: 1)
+                activeCompletionState?.selectedIndex = completionOverlay?.selectedIndex ?? state.selectedIndex
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                completionOverlay?.moveSelection(delta: -1)
+                activeCompletionState?.selectedIndex = completionOverlay?.selectedIndex ?? state.selectedIndex
+                return true
+            case #selector(NSResponder.insertTab(_:)),
+                 #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                acceptCompletion(in: textView)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                hideCompletionOverlay()
+                return true
+            default:
+                return false
+            }
+        }
+
+        func acceptCompletionFromOverlay(at index: Int) {
+            guard var state = activeCompletionState, let textView else { return }
+            state.selectedIndex = min(max(0, index), max(0, state.candidates.count - 1))
+            activeCompletionState = state
+            acceptCompletion(in: textView)
+        }
+
+        private func acceptCompletion(in textView: NSTextView) {
+            guard var state = activeCompletionState, !state.candidates.isEmpty else { return }
+            state.selectedIndex = min(max(0, completionOverlay?.selectedIndex ?? state.selectedIndex), state.candidates.count - 1)
+            let candidate = state.candidates[state.selectedIndex]
+            guard NSMaxRange(state.replacementRange) <= (textView.string as NSString).length else { return }
+            let insertion = candidate.insertion
+            var caret = NSRange(location: state.replacementRange.location + Self.caretOffset(afterInserting: insertion), length: 0)
+            applyingCompletionEdit = true
+            textView.insertText(insertion, replacementRange: state.replacementRange)
+            if state.argumentCommand == "begin" {
+                caret = insertMatchingEndEnvironmentIfNeeded(
+                    environmentName: insertion,
+                    prefixEndLocation: state.replacementRange.location + (insertion as NSString).length,
+                    in: textView
+                ) ?? caret
+            }
+            textView.setSelectedRange(caret)
+            textView.scrollRangeToVisible(caret)
+            applyingCompletionEdit = false
+            hideCompletionOverlay()
+            scheduleSelectionCommit()
+        }
+
+        private static func caretOffset(afterInserting insertion: String) -> Int {
+            let ns = insertion as NSString
+            let preferredPatterns = ["{}", "[]"]
+            for pattern in preferredPatterns {
+                let range = ns.range(of: pattern)
+                if range.location != NSNotFound { return range.location + 1 }
+            }
+            return ns.length
+        }
+
+        private func insertMatchingEndEnvironmentIfNeeded(
+            environmentName: String,
+            prefixEndLocation: Int,
+            in textView: NSTextView
+        ) -> NSRange? {
+            let source = textView.string as NSString
+            guard !environmentName.isEmpty,
+                  prefixEndLocation < source.length,
+                  source.substring(with: NSRange(location: prefixEndLocation, length: 1)) == "}" else { return nil }
+            let closing = "\n\n\\end{\(environmentName)}"
+            let insertLocation = prefixEndLocation + 1
+            textView.insertText(closing, replacementRange: NSRange(location: insertLocation, length: 0))
+            return NSRange(location: insertLocation + 1, length: 0)
+        }
+
+        private func completionAnchorRect(for characterIndex: Int, in textView: NSTextView) -> NSRect? {
+            guard let scrollView = textView.enclosingScrollView,
+                  let container = completionOverlay?.superview,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer else { return nil }
+            layoutManager.ensureLayout(for: textContainer)
+            let visible = scrollView.contentView.bounds
+            let origin = NSPoint(
+                x: textView.textContainerOrigin.x - visible.minX,
+                y: textView.textContainerOrigin.y - visible.minY
+            )
+            let rect: NSRect
+            let length = (textView.string as NSString).length
+            if characterIndex < length {
+                let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
+                rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+            } else {
+                rect = layoutManager.extraLineFragmentRect
+            }
+            let inClip = rect.offsetBy(dx: origin.x, dy: origin.y)
+            guard let superview = textView.enclosingScrollView?.superview else { return nil }
+            return superview.convert(inClip, to: container)
+        }
+
+        private func currentPalette() -> SourceEditorPalette {
+            guard let textView else {
+                return SourceEditorPalette(theme: parent.editorTheme, appearance: NSApp.effectiveAppearance)
+            }
+            return SourceEditorPalette(theme: parent.editorTheme, appearance: textView.effectiveAppearance)
         }
 
         func textView(
@@ -1203,6 +1398,7 @@ struct SourceTextView: NSViewRepresentable {
             ]
             appliedStyleSignature = currentStyleSignature
             glyphOverlay?.palette = palette
+            if completionOverlay?.isShowing == true { completionOverlay?.palette = palette }
             textView.layoutManager?.invalidateDisplay(forCharacterRange: targetRange)
             if textView.textContainer != nil {
                 textView.layoutManager?.ensureLayout(forCharacterRange: targetRange)
@@ -1274,6 +1470,119 @@ struct SourceTextView: NSViewRepresentable {
             guard end > start else { return full }
             return NSRange(location: start, length: end - start)
         }
+    }
+}
+
+
+struct LaTeXCompletionState: Equatable {
+    var replacementRange: NSRange
+    var candidates: [LaTeXCompletionCandidate]
+    var selectedIndex: Int = 0
+    var argumentCommand: String? = nil
+}
+
+final class LaTeXCompletionOverlayView: NSView {
+    private(set) var candidates: [LaTeXCompletionCandidate] = []
+    private(set) var selectedIndex = 0
+    var palette = SourceEditorPalette(theme: .light, appearance: NSApp.effectiveAppearance) {
+        didSet { needsDisplay = true }
+    }
+    var isShowing: Bool { !isHidden && !candidates.isEmpty }
+    var onPick: ((Int) -> Void)?
+
+    private let rowHeight: CGFloat = 27
+    private let maxRows = 8
+    private let overlayWidth: CGFloat = 390
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { isShowing ? self : nil }
+
+    func show(candidates: [LaTeXCompletionCandidate], selectedIndex: Int, anchor: NSRect, palette: SourceEditorPalette) {
+        self.candidates = Array(candidates.prefix(maxRows))
+        self.selectedIndex = min(max(0, selectedIndex), max(0, self.candidates.count - 1))
+        self.palette = palette
+        let rows = max(1, self.candidates.count)
+        let height = CGFloat(rows) * rowHeight + 10
+        let containerBounds = superview?.bounds ?? NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let maxX = max(8, containerBounds.maxX - overlayWidth - 8)
+        let x = min(max(8, anchor.minX), maxX)
+        let belowY = anchor.maxY + 5
+        let aboveY = anchor.minY - height - 5
+        let y = belowY + height <= containerBounds.maxY ? belowY : max(8, aboveY)
+        frame = NSRect(x: x, y: y, width: overlayWidth, height: height)
+        isHidden = self.candidates.isEmpty
+        needsDisplay = true
+    }
+
+    func hide() {
+        candidates = []
+        selectedIndex = 0
+        isHidden = true
+        needsDisplay = true
+    }
+
+    func moveSelection(delta: Int) {
+        guard !candidates.isEmpty else { return }
+        selectedIndex = (selectedIndex + delta + candidates.count) % candidates.count
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isShowing else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let row = Int(max(0, min(CGFloat(candidates.count - 1), floor((point.y - 5) / rowHeight))))
+        selectedIndex = row
+        needsDisplay = true
+        onPick?(row)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isShowing else { return }
+        let background = NSColor.windowBackgroundColor.withAlphaComponent(0.98)
+        let border = NSColor.separatorColor.withAlphaComponent(0.75)
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9)
+        background.setFill()
+        path.fill()
+        border.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        for (index, candidate) in candidates.enumerated() {
+            let row = NSRect(x: 5, y: 5 + CGFloat(index) * rowHeight, width: bounds.width - 10, height: rowHeight)
+            if index == selectedIndex {
+                NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+                NSBezierPath(roundedRect: row.insetBy(dx: 2, dy: 2), xRadius: 5, yRadius: 5).fill()
+            }
+            draw(candidate: candidate, in: row, selected: index == selectedIndex)
+        }
+    }
+
+    private func draw(candidate: LaTeXCompletionCandidate, in row: NSRect, selected: Bool) {
+        let insertionAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium),
+            .foregroundColor: selected ? NSColor.controlAccentColor : palette.command
+        ]
+        let detailAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+        let categoryAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: NSColor.tertiaryLabelColor
+        ]
+        let insertion = NSAttributedString(string: candidate.insertion, attributes: insertionAttributes)
+        let detail = NSAttributedString(string: candidate.detail, attributes: detailAttributes)
+        let category = NSAttributedString(string: candidate.category.uppercased(), attributes: categoryAttributes)
+        insertion.draw(in: NSRect(x: row.minX + 8, y: row.minY + 5, width: 190, height: 17))
+        detail.draw(in: NSRect(x: row.minX + 205, y: row.minY + 5, width: 120, height: 17))
+        category.draw(in: NSRect(x: row.maxX - 48, y: row.minY + 6, width: 42, height: 15))
     }
 }
 
@@ -1459,6 +1768,7 @@ final class SourceEditorContainerView: NSView {
     private let editorScrollView: NSScrollView
     private let editorTextView: NSTextView
     weak var glyphOverlay: SourceGlyphOverlayView?
+    weak var completionOverlay: LaTeXCompletionOverlayView?
     var backgroundColor: NSColor {
         didSet {
             layer?.backgroundColor = backgroundColor.cgColor
@@ -1493,6 +1803,7 @@ final class SourceEditorContainerView: NSView {
         }
         glyphOverlay?.synchronizeFrame()
         glyphOverlay?.needsDisplay = true
+        if completionOverlay?.isShowing == true { completionOverlay?.needsDisplay = true }
         editorTextView.setNeedsDisplay(editorTextView.visibleRect)
     }
 }
