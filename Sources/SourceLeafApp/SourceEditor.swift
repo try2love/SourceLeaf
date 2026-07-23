@@ -17,6 +17,111 @@ enum SourceTextSynchronization {
     }
 }
 
+struct LaTeXCompletionCandidate: Equatable, Sendable {
+    var insertion: String
+    var category: String
+    var detail: String
+}
+
+enum LaTeXCompletionEngine {
+    static let builtInCandidates: [LaTeXCompletionCandidate] = [
+        .init(insertion: #"\usepackage{}"#, category: "pkg", detail: "Load a package"),
+        .init(insertion: #"\usepackage[]{}"#, category: "pkg", detail: "Load a package with options"),
+        .init(insertion: #"\documentclass{}"#, category: "cls", detail: "Set the document class"),
+        .init(insertion: #"\begin{}"#, category: "env", detail: "Begin an environment"),
+        .init(insertion: #"\end{}"#, category: "env", detail: "End an environment"),
+        .init(insertion: #"\begin{document}"#, category: "env", detail: "Begin document body"),
+        .init(insertion: #"\begin{figure}"#, category: "env", detail: "Begin a figure environment"),
+        .init(insertion: #"\begin{table}"#, category: "env", detail: "Begin a table environment"),
+        .init(insertion: #"\begin{equation}"#, category: "env", detail: "Begin an equation environment"),
+        .init(insertion: #"\begin{itemize}"#, category: "env", detail: "Begin an itemized list"),
+        .init(insertion: #"\begin{enumerate}"#, category: "env", detail: "Begin an enumerated list"),
+        .init(insertion: #"\item"#, category: "cmd", detail: "Add a list item"),
+        .init(insertion: #"\item[]"#, category: "cmd", detail: "Add a labeled list item"),
+        .init(insertion: #"\section{}"#, category: "sec", detail: "Section heading"),
+        .init(insertion: #"\subsection{}"#, category: "sec", detail: "Subsection heading"),
+        .init(insertion: #"\subsubsection{}"#, category: "sec", detail: "Subsubsection heading"),
+        .init(insertion: #"\paragraph{}"#, category: "sec", detail: "Paragraph heading"),
+        .init(insertion: #"\textbf{}"#, category: "fmt", detail: "Bold text"),
+        .init(insertion: #"\textit{}"#, category: "fmt", detail: "Italic text"),
+        .init(insertion: #"\emph{}"#, category: "fmt", detail: "Emphasized text"),
+        .init(insertion: #"\underline{}"#, category: "fmt", detail: "Underline text"),
+        .init(insertion: #"\cite{}"#, category: "ref", detail: "Citation"),
+        .init(insertion: #"\ref{}"#, category: "ref", detail: "Reference a label"),
+        .init(insertion: #"\label{}"#, category: "ref", detail: "Create a label"),
+        .init(insertion: #"\url{}"#, category: "cmd", detail: "URL"),
+        .init(insertion: #"\includegraphics[]{}"#, category: "fig", detail: "Insert a graphic"),
+        .init(insertion: #"\caption{}"#, category: "fig", detail: "Caption"),
+        .init(insertion: #"\centering"#, category: "cmd", detail: "Center content"),
+        .init(insertion: #"\frac{}{}"#, category: "math", detail: "Fraction"),
+        .init(insertion: #"\sqrt{}"#, category: "math", detail: "Square root"),
+        .init(insertion: #"\alpha"#, category: "math", detail: "Greek alpha"),
+        .init(insertion: #"\beta"#, category: "math", detail: "Greek beta"),
+        .init(insertion: #"\gamma"#, category: "math", detail: "Greek gamma"),
+        .init(insertion: #"\lambda"#, category: "math", detail: "Greek lambda"),
+        .init(insertion: #"\mu"#, category: "math", detail: "Greek mu"),
+        .init(insertion: #"\times"#, category: "math", detail: "Multiplication symbol"),
+        .init(insertion: #"\leq"#, category: "math", detail: "Less-than or equal"),
+        .init(insertion: #"\geq"#, category: "math", detail: "Greater-than or equal")
+    ]
+
+    static func suggestions(prefix: String, source: String) -> [LaTeXCompletionCandidate] {
+        guard prefix.hasPrefix("\\") else { return [] }
+        let normalizedPrefix = prefix.lowercased()
+        let usedCommands = usedCommandCandidates(in: source)
+        let merged = builtInCandidates + usedCommands
+        var seen: Set<String> = []
+        return merged
+            .filter { normalizedPrefix == "\\" || $0.insertion.lowercased().hasPrefix(normalizedPrefix) }
+            .filter { seen.insert($0.insertion).inserted }
+            .sorted { lhs, rhs in
+                if lhs.category != rhs.category { return lhs.category < rhs.category }
+                return lhs.insertion < rhs.insertion
+            }
+    }
+
+    static func shouldTriggerCompletion(afterChangeIn source: NSString, selection: NSRange) -> Bool {
+        guard selection.length == 0,
+              let command = commandPrefix(in: source, cursorLocation: selection.location) else { return false }
+        return command.prefix == "\\" || command.prefix.count >= 2
+    }
+
+    static func commandPrefix(in source: NSString, cursorLocation: Int) -> (prefix: String, range: NSRange)? {
+        guard cursorLocation <= source.length else { return nil }
+        var start = cursorLocation
+        while start > 0 {
+            let previous = source.character(at: start - 1)
+            if previous == 92 {
+                start -= 1
+                break
+            }
+            guard CharacterSet.alphanumerics.contains(UnicodeScalar(previous)!) || previous == 64 || previous == 42 else {
+                return nil
+            }
+            start -= 1
+        }
+        guard start < cursorLocation || (start == cursorLocation && start > 0),
+              source.character(at: start) == 92 else { return nil }
+        let range = NSRange(location: start, length: cursorLocation - start)
+        return (source.substring(with: range), range)
+    }
+
+    private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
+        let pattern = #"\\[A-Za-z@]+\*?(?:\{\}){0,2}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsSource = source as NSString
+        return regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length))
+            .prefix(120)
+            .map { match in
+                LaTeXCompletionCandidate(
+                    insertion: nsSource.substring(with: match.range),
+                    category: "used",
+                    detail: "Already used in this document"
+                )
+            }
+    }
+}
+
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("SourceLeaf.findBarShowsReplace") private var findBarShowsReplace = false
@@ -542,6 +647,8 @@ struct SourceTextView: NSViewRepresentable {
             context.coordinator.lastLocallyEmittedSelection = nil
         } else if staleLocalSelectionEcho {
             context.coordinator.lastLocallyEmittedSelection = nil
+        } else if context.coordinator.shouldIgnoreProtectedSelectionEcho(selection) {
+            context.coordinator.lastLocallyEmittedSelection = nil
         } else if NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
@@ -580,6 +687,8 @@ struct SourceTextView: NSViewRepresentable {
         private var completedWindowHighlight = false
         private var selectionSyncTimer: Timer?
         private var highlightTimer: Timer?
+        private var lastLocalEditDate = Date.distantPast
+        private var protectedSelectionEcho: NSRange?
         var lastLocallyEmittedText: String?
         var lastLocallyEmittedSelection: NSRange?
 
@@ -630,7 +739,11 @@ struct SourceTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !highlighting, let textView else { return }
             let nativeSelection = textView.selectedRange()
+            lastLocalEditDate = Date()
             lastLocallyEmittedSelection = nativeSelection
+            if parent.selection != nativeSelection {
+                protectedSelectionEcho = parent.selection
+            }
             guard !textView.hasMarkedText() else {
                 ruler?.needsDisplay = true
                 glyphOverlay?.restartCaretBlink()
@@ -644,6 +757,7 @@ struct SourceTextView: NSViewRepresentable {
             highlightTimer = timer
             RunLoop.main.add(timer, forMode: .common)
             scheduleSelectionCommit()
+            triggerCompletionIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
@@ -678,6 +792,48 @@ struct SourceTextView: NSViewRepresentable {
             let range = textView.selectedRange()
             lastLocallyEmittedSelection = range
             if parent.selection != range { parent.selection = range }
+            protectedSelectionEcho = nil
+        }
+
+        func shouldIgnoreProtectedSelectionEcho(_ range: NSRange) -> Bool {
+            guard protectedSelectionEcho == range else { return false }
+            return Date().timeIntervalSince(lastLocalEditDate) < 0.35
+        }
+
+        private func triggerCompletionIfNeeded() {
+            guard let textView,
+                  textView.window?.firstResponder === textView,
+                  LaTeXCompletionEngine.shouldTriggerCompletion(
+                    afterChangeIn: textView.string as NSString,
+                    selection: textView.selectedRange()
+                  ) else { return }
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView,
+                      !textView.hasMarkedText(),
+                      textView.window?.firstResponder === textView else { return }
+                textView.complete(nil)
+            }
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            completions words: [String],
+            forPartialWordRange charRange: NSRange,
+            indexOfSelectedItem index: UnsafeMutablePointer<Int>?
+        ) -> [String] {
+            guard let command = LaTeXCompletionEngine.commandPrefix(
+                in: textView.string as NSString,
+                cursorLocation: textView.selectedRange().location
+            ) else { return [] }
+            index?.pointee = 0
+            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: textView.string)
+            let slashIsAlreadyInDocument = charRange.location > 0
+                && (textView.string as NSString).character(at: charRange.location - 1) == 92
+            return candidates.map { candidate in
+                slashIsAlreadyInDocument && candidate.insertion.hasPrefix("\\")
+                    ? String(candidate.insertion.dropFirst())
+                    : candidate.insertion
+            }
         }
 
         @objc func askAI() {

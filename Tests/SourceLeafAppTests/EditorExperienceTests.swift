@@ -51,6 +51,27 @@ import Testing
     #expect(matches.map(\.location) == [0, 11, 17])
 }
 
+@Test func latexCompletionOffersCoreCommandsAfterBackslash() {
+    let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\", source: "\\documentclass{article}")
+    let insertions = suggestions.map(\.insertion)
+
+    #expect(insertions.contains("\\usepackage{}"))
+    #expect(insertions.contains("\\begin{}"))
+    #expect(insertions.contains("\\item"))
+    #expect(insertions.contains("\\includegraphics[]{}"))
+}
+
+@Test func latexCompletionNarrowsByCommandPrefixAndTracksReplacementRange() throws {
+    let source = "\\us" as NSString
+    let command = try #require(LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: source.length))
+    let suggestions = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: source as String)
+
+    #expect(command.prefix == "\\us")
+    #expect(command.range == NSRange(location: 0, length: 3))
+    #expect(suggestions.map(\.insertion).contains("\\usepackage{}"))
+    #expect(!suggestions.map(\.insertion).contains("\\begin{}"))
+}
+
 @MainActor
 @Test func rapidNativeTypingPreservesCharacterOrderAndCaretPosition() async throws {
     let state = TypingState()
@@ -84,6 +105,60 @@ import Testing
     #expect(textView.string == "test")
     #expect(state.text == "test")
     #expect(textView.selectedRange() == NSRange(location: 4, length: 0))
+}
+
+@MainActor
+@Test func rapidMidLineTypingAndDeletionKeepTheNativeCaretMovingForward() async throws {
+    let state = TypingState(text: "alpha omega", selection: NSRange(location: 6, length: 0))
+    let view = NSHostingView(rootView: TypingHarness(state: state))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    window.makeKeyAndOrderFront(nil)
+    defer { window.contentView = nil; window.close() }
+    try await Task.sleep(for: .milliseconds(350))
+    let textView = try #require(findSourceTextView(in: view))
+    window.makeFirstResponder(textView)
+    textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+    for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: character,
+            charactersIgnoringModifiers: character,
+            isARepeat: false,
+            keyCode: UInt16(keyCode)
+        ))
+        textView.keyDown(with: event)
+        try await Task.sleep(for: .milliseconds(15))
+    }
+
+    #expect(textView.string == "alpha testomega")
+    #expect(textView.selectedRange() == NSRange(location: 10, length: 0))
+
+    let delete = try #require(NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: "\u{7f}",
+        charactersIgnoringModifiers: "\u{7f}",
+        isARepeat: false,
+        keyCode: 51
+    ))
+    textView.keyDown(with: delete)
+    try await Task.sleep(for: .milliseconds(80))
+
+    #expect(textView.string == "alpha tesomega")
+    #expect(textView.selectedRange() == NSRange(location: 9, length: 0))
+    #expect(state.text == "alpha tesomega")
 }
 
 @MainActor
@@ -299,8 +374,13 @@ private final class SelectionPerformanceState: ObservableObject {
 
 @MainActor
 private final class TypingState: ObservableObject {
-    @Published var text = ""
-    @Published var selection = NSRange(location: 0, length: 0)
+    @Published var text: String
+    @Published var selection: NSRange
+
+    init(text: String = "", selection: NSRange = NSRange(location: 0, length: 0)) {
+        self.text = text
+        self.selection = selection
+    }
 }
 
 @MainActor
