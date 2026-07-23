@@ -214,7 +214,9 @@ import Testing
     #expect(model.completionIndex.includedFiles.contains("figures/overview.png"))
 
     model.sourceChanged("\\documentclass{article}\n\\label{sec:edited}\n")
-    try await Task.sleep(for: .milliseconds(700))
+    for _ in 0..<40 where !model.completionIndex.labels.keys.contains("sec:edited") {
+        try await Task.sleep(for: .milliseconds(50))
+    }
 
     #expect(model.completionIndex.labels.keys.contains("sec:edited"))
     #expect(!model.completionIndex.labels.keys.contains("sec:original"))

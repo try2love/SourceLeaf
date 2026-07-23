@@ -68,11 +68,21 @@ final class AppRegressionXCTests: XCTestCase {
         let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\", source: "\\documentclass{article}")
             .map(\.insertion)
 
+        XCTAssertGreaterThanOrEqual(suggestions.count, 60)
         XCTAssertTrue(suggestions.contains("\\usepackage{}"))
         XCTAssertTrue(suggestions.contains("\\begin{}"))
         XCTAssertTrue(suggestions.contains("\\section{}"))
+        XCTAssertTrue(suggestions.contains("\\title{}"))
+        XCTAssertTrue(suggestions.contains("\\author{}"))
+        XCTAssertTrue(suggestions.contains("\\maketitle"))
+        XCTAssertTrue(suggestions.contains("\\begin{align}"))
+        XCTAssertTrue(suggestions.contains("\\begin{tabular}{}"))
         XCTAssertTrue(suggestions.contains("\\includegraphics[]{}"))
         XCTAssertTrue(suggestions.contains("\\cite{}"))
+        XCTAssertTrue(suggestions.contains("\\bibliography{}"))
+        XCTAssertTrue(suggestions.contains("\\footnote{}"))
+        XCTAssertTrue(suggestions.contains("\\mathbb{}"))
+        XCTAssertTrue(suggestions.contains("\\rightarrow"))
     }
 
     func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {
@@ -284,7 +294,10 @@ final class AppRegressionXCTests: XCTestCase {
         let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
         XCTAssertTrue(overlay.isShowing)
         let insertions = overlay.candidates.map(\.insertion)
-        let figureIndex = try XCTUnwrap(insertions.firstIndex(of: "\\begin{figure}"))
+        let figureIndex = try XCTUnwrap(
+            insertions.firstIndex(of: "\\begin{figure}"),
+            "Missing figure environment candidate. Candidates: \(insertions.joined(separator: " | "))"
+        )
 
         overlay.onPick?(figureIndex)
         try await Task.sleep(for: .milliseconds(100))
@@ -437,6 +450,131 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertEqual(textView.string, "alpha testomega")
         XCTAssertEqual(state.text, "alpha testomega")
+    }
+
+    @MainActor
+    func testSourcePanelEditingKeepsCaretMovingInsideARealProjectModel() async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-xctest-real-editor-caret-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let project = support.appendingPathComponent("项目", isDirectory: true)
+        let appSupport = support.appendingPathComponent("应用状态", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let body = Array(
+            repeating: "\\section{Caret Stress} Some source with \\cite{paper} and \\label{sec:stress}.",
+            count: 1_200
+        ).joined(separator: "\n")
+        try Data("\\documentclass{article}\n\\begin{document}\n\(body)\n\\end{document}\n".utf8)
+            .write(to: project.appendingPathComponent("main.tex"), options: .atomic)
+        try Data("@article{paper,title={Stress}}\n".utf8)
+            .write(to: project.appendingPathComponent("refs.bib"), options: .atomic)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SourceLeaf.xctest-real-editor-caret.\(UUID().uuidString)"))
+        let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: defaults)
+        model.openProject(project)
+        model.configuration.build.autoBuild = false
+        model.configuration.autoSave = false
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        let view = NSHostingView(rootView: SourcePanel().environmentObject(model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(450))
+
+        let textView = try XCTUnwrap(findSourceTextView(in: view))
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: view))
+        window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        var expected = ""
+        for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: window)))
+            expected.append(character)
+            try await Task.sleep(for: .milliseconds(10))
+            XCTAssertEqual(textView.selectedRange(), NSRange(location: (expected as NSString).length, length: 0))
+            XCTAssertEqual(model.selectedRange, NSRange(location: (expected as NSString).length, length: 0))
+        }
+        XCTAssertTrue(textView.string.hasPrefix("test"))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: window)))
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 5, length: 0))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+
+        for (character, keyCode) in [("s", 1), ("e", 14), ("c", 8)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: window)))
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual((textView.string as NSString).substring(with: NSRange(location: 0, length: 8)), "test\\sec")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 8, length: 0))
+        XCTAssertEqual(model.selectedRange, NSRange(location: 8, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\u{7f}", keyCode: 51, window: window)))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual((textView.string as NSString).substring(with: NSRange(location: 0, length: 7)), "test\\se")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 7, length: 0))
+        XCTAssertEqual(model.selectedRange, NSRange(location: 7, length: 0))
+    }
+
+    @MainActor
+    func testSourcePanelIgnoresDelayedStaleSelectionEchoesDuringTyping() async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-xctest-stale-panel-selection-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let project = support.appendingPathComponent("项目", isDirectory: true)
+        let appSupport = support.appendingPathComponent("应用状态", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try Data("\\documentclass{article}\n\\begin{document}\nalpha omega\n\\end{document}\n".utf8)
+            .write(to: project.appendingPathComponent("main.tex"), options: .atomic)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SourceLeaf.xctest-stale-panel-selection.\(UUID().uuidString)"))
+        let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: defaults)
+        model.openProject(project)
+        model.configuration.build.autoBuild = false
+        model.configuration.autoSave = false
+
+        let view = NSHostingView(rootView: SourcePanel().environmentObject(model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 440),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(450))
+
+        let textView = try XCTUnwrap(findSourceTextView(in: view))
+        let insertion = (textView.string as NSString).range(of: "omega").location
+        window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: insertion, length: 0))
+        model.selectedRange = NSRange(location: insertion, length: 0)
+
+        var expectedLocation = insertion
+        for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+            let stale = NSRange(location: expectedLocation, length: 0)
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: window)))
+            expectedLocation += 1
+            model.selectedRange = stale
+            try await Task.sleep(for: .milliseconds(24))
+            XCTAssertEqual(textView.selectedRange(), NSRange(location: expectedLocation, length: 0))
+            XCTAssertEqual(model.selectedRange, NSRange(location: expectedLocation, length: 0))
+        }
+
+        XCTAssertTrue(textView.string.contains("alpha testomega"))
+        XCTAssertFalse(textView.string.contains("alpha tsetomega"))
     }
 
     @MainActor

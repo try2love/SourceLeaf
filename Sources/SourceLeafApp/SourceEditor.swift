@@ -42,14 +42,28 @@ enum LaTeXCompletionEngine {
         .init(insertion: #"\usepackage{}"#, category: "pkg", detail: "Load a package"),
         .init(insertion: #"\usepackage[]{}"#, category: "pkg", detail: "Load a package with options"),
         .init(insertion: #"\documentclass{}"#, category: "cls", detail: "Set the document class"),
+        .init(insertion: #"\title{}"#, category: "meta", detail: "Paper title"),
+        .init(insertion: #"\author{}"#, category: "meta", detail: "Author list"),
+        .init(insertion: #"\date{}"#, category: "meta", detail: "Date"),
+        .init(insertion: #"\maketitle"#, category: "meta", detail: "Typeset title block"),
+        .init(insertion: #"\thanks{}"#, category: "meta", detail: "Author note"),
         .init(insertion: #"\begin{}"#, category: "env", detail: "Begin an environment"),
         .init(insertion: #"\end{}"#, category: "env", detail: "End an environment"),
         .init(insertion: #"\begin{document}"#, category: "env", detail: "Begin document body"),
+        .init(insertion: #"\begin{abstract}"#, category: "env", detail: "Begin abstract"),
         .init(insertion: #"\begin{figure}"#, category: "env", detail: "Begin a figure environment"),
+        .init(insertion: #"\begin{figure*}"#, category: "env", detail: "Begin a two-column figure"),
         .init(insertion: #"\begin{table}"#, category: "env", detail: "Begin a table environment"),
+        .init(insertion: #"\begin{table*}"#, category: "env", detail: "Begin a two-column table"),
         .init(insertion: #"\begin{equation}"#, category: "env", detail: "Begin an equation environment"),
+        .init(insertion: #"\begin{equation*}"#, category: "env", detail: "Begin an unnumbered equation"),
+        .init(insertion: #"\begin{align}"#, category: "env", detail: "Begin aligned equations"),
+        .init(insertion: #"\begin{align*}"#, category: "env", detail: "Begin unnumbered aligned equations"),
+        .init(insertion: #"\begin{tabular}{}"#, category: "env", detail: "Begin tabular data"),
+        .init(insertion: #"\begin{minipage}{}"#, category: "env", detail: "Begin a minipage"),
         .init(insertion: #"\begin{itemize}"#, category: "env", detail: "Begin an itemized list"),
         .init(insertion: #"\begin{enumerate}"#, category: "env", detail: "Begin an enumerated list"),
+        .init(insertion: #"\begin{description}"#, category: "env", detail: "Begin a description list"),
         .init(insertion: #"\item"#, category: "cmd", detail: "Add a list item"),
         .init(insertion: #"\item[]"#, category: "cmd", detail: "Add a labeled list item"),
         .init(insertion: #"\section{}"#, category: "sec", detail: "Section heading"),
@@ -60,21 +74,59 @@ enum LaTeXCompletionEngine {
         .init(insertion: #"\textit{}"#, category: "fmt", detail: "Italic text"),
         .init(insertion: #"\emph{}"#, category: "fmt", detail: "Emphasized text"),
         .init(insertion: #"\underline{}"#, category: "fmt", detail: "Underline text"),
+        .init(insertion: #"\texttt{}"#, category: "fmt", detail: "Monospace text"),
+        .init(insertion: #"\textsc{}"#, category: "fmt", detail: "Small caps text"),
+        .init(insertion: #"\footnote{}"#, category: "fmt", detail: "Footnote"),
+        .init(insertion: #"\small"#, category: "fmt", detail: "Small font size"),
+        .init(insertion: #"\normalsize"#, category: "fmt", detail: "Normal font size"),
+        .init(insertion: #"\large"#, category: "fmt", detail: "Large font size"),
         .init(insertion: #"\cite{}"#, category: "ref", detail: "Citation"),
+        .init(insertion: #"\citep{}"#, category: "ref", detail: "Parenthetical citation"),
+        .init(insertion: #"\citet{}"#, category: "ref", detail: "Textual citation"),
         .init(insertion: #"\ref{}"#, category: "ref", detail: "Reference a label"),
+        .init(insertion: #"\autoref{}"#, category: "ref", detail: "Automatic reference"),
+        .init(insertion: #"\eqref{}"#, category: "ref", detail: "Equation reference"),
         .init(insertion: #"\label{}"#, category: "ref", detail: "Create a label"),
         .init(insertion: #"\url{}"#, category: "cmd", detail: "URL"),
+        .init(insertion: #"\href{}{}"#, category: "cmd", detail: "Hyperlink"),
+        .init(insertion: #"\bibliographystyle{}"#, category: "bib", detail: "Bibliography style"),
+        .init(insertion: #"\bibliography{}"#, category: "bib", detail: "BibTeX bibliography"),
+        .init(insertion: #"\addbibresource{}"#, category: "bib", detail: "biblatex resource"),
+        .init(insertion: #"\printbibliography"#, category: "bib", detail: "Print bibliography"),
         .init(insertion: #"\includegraphics[]{}"#, category: "fig", detail: "Insert a graphic"),
         .init(insertion: #"\caption{}"#, category: "fig", detail: "Caption"),
+        .init(insertion: #"\subcaption{}"#, category: "fig", detail: "Subcaption"),
         .init(insertion: #"\centering"#, category: "cmd", detail: "Center content"),
         .init(insertion: #"\frac{}{}"#, category: "math", detail: "Fraction"),
         .init(insertion: #"\sqrt{}"#, category: "math", detail: "Square root"),
+        .init(insertion: #"\sum"#, category: "math", detail: "Summation"),
+        .init(insertion: #"\prod"#, category: "math", detail: "Product"),
+        .init(insertion: #"\int"#, category: "math", detail: "Integral"),
+        .init(insertion: #"\lim"#, category: "math", detail: "Limit"),
+        .init(insertion: #"\infty"#, category: "math", detail: "Infinity"),
+        .init(insertion: #"\rightarrow"#, category: "math", detail: "Right arrow"),
+        .init(insertion: #"\left"#, category: "math", detail: "Left delimiter"),
+        .init(insertion: #"\right"#, category: "math", detail: "Right delimiter"),
+        .init(insertion: #"\mathbf{}"#, category: "math", detail: "Math bold"),
+        .init(insertion: #"\mathrm{}"#, category: "math", detail: "Math roman"),
+        .init(insertion: #"\mathcal{}"#, category: "math", detail: "Math calligraphic"),
+        .init(insertion: #"\mathbb{}"#, category: "math", detail: "Blackboard bold"),
         .init(insertion: #"\alpha"#, category: "math", detail: "Greek alpha"),
         .init(insertion: #"\beta"#, category: "math", detail: "Greek beta"),
         .init(insertion: #"\gamma"#, category: "math", detail: "Greek gamma"),
+        .init(insertion: #"\delta"#, category: "math", detail: "Greek delta"),
+        .init(insertion: #"\epsilon"#, category: "math", detail: "Greek epsilon"),
+        .init(insertion: #"\theta"#, category: "math", detail: "Greek theta"),
         .init(insertion: #"\lambda"#, category: "math", detail: "Greek lambda"),
         .init(insertion: #"\mu"#, category: "math", detail: "Greek mu"),
+        .init(insertion: #"\pi"#, category: "math", detail: "Greek pi"),
+        .init(insertion: #"\sigma"#, category: "math", detail: "Greek sigma"),
+        .init(insertion: #"\phi"#, category: "math", detail: "Greek phi"),
+        .init(insertion: #"\omega"#, category: "math", detail: "Greek omega"),
         .init(insertion: #"\times"#, category: "math", detail: "Multiplication symbol"),
+        .init(insertion: #"\cdot"#, category: "math", detail: "Centered dot"),
+        .init(insertion: #"\approx"#, category: "math", detail: "Approximately equal"),
+        .init(insertion: #"\neq"#, category: "math", detail: "Not equal"),
         .init(insertion: #"\leq"#, category: "math", detail: "Less-than or equal"),
         .init(insertion: #"\geq"#, category: "math", detail: "Greater-than or equal")
     ]
@@ -109,6 +161,13 @@ enum LaTeXCompletionEngine {
             #"\label{}"#,
             #"\includegraphics[]{}"#,
             #"\begin{}"#,
+            #"\begin{document}"#,
+            #"\begin{figure}"#,
+            #"\begin{table}"#,
+            #"\begin{equation}"#,
+            #"\begin{align}"#,
+            #"\begin{itemize}"#,
+            #"\begin{enumerate}"#,
             #"\item"#,
             #"\usepackage{}"#,
             #"\documentclass{}"#
@@ -791,6 +850,7 @@ struct SourceTextView: NSViewRepresentable {
             context.coordinator.lastLocallyEmittedSelection = nil
         } else if context.coordinator.shouldIgnoreProtectedSelectionEcho(selection) {
             context.coordinator.lastLocallyEmittedSelection = nil
+            context.coordinator.commitNativeSelectionToBinding()
         } else if context.coordinator.shouldIgnoreSelectionEchoDuringLocalEdit(
             selection,
             nativeSelection: textView.selectedRange(),
@@ -798,6 +858,7 @@ struct SourceTextView: NSViewRepresentable {
             nativeText: textView.string
         ) {
             context.coordinator.lastLocallyEmittedSelection = nil
+            context.coordinator.commitNativeSelectionToBinding()
         } else if NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
@@ -913,6 +974,7 @@ struct SourceTextView: NSViewRepresentable {
             parent.text = textView.string
             scheduleDeferredHighlighting()
             commitSelectionToBinding()
+            scheduleSelectionCommit(after: 0.016)
             updateCompletionOverlayIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
@@ -1208,9 +1270,9 @@ struct SourceTextView: NSViewRepresentable {
             return nil
         }
 
-        private func scheduleSelectionCommit() {
+        private func scheduleSelectionCommit(after delay: TimeInterval = 0.05) {
             selectionSyncTimer?.invalidate()
-            let timer = Timer(timeInterval: 0.05, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
+            let timer = Timer(timeInterval: delay, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
             selectionSyncTimer = timer
             RunLoop.main.add(timer, forMode: .common)
         }
@@ -1221,6 +1283,12 @@ struct SourceTextView: NSViewRepresentable {
             lastLocallyEmittedSelection = range
             if parent.selection != range { parent.selection = range }
             protectedSelectionEcho = nil
+        }
+
+        func commitNativeSelectionToBinding() {
+            selectionSyncTimer?.invalidate()
+            selectionSyncTimer = nil
+            commitSelectionToBinding()
         }
 
         func shouldIgnoreProtectedSelectionEcho(_ range: NSRange) -> Bool {
@@ -1678,7 +1746,7 @@ final class LaTeXCompletionOverlayView: NSView {
     var onPick: ((Int) -> Void)?
 
     private let rowHeight: CGFloat = 27
-    private let maxRows = 8
+    private let maxRows = 12
     private let overlayWidth: CGFloat = 390
 
     override init(frame frameRect: NSRect) {
