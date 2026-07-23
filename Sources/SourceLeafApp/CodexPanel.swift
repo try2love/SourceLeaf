@@ -287,7 +287,7 @@ struct CodexPanel: View {
                 model.selectProvider(profile.id)
             } label: {
                 if profile.id == model.selectedProviderID {
-                    Label(profile.name, systemImage: "checkmark")
+                    selectedMenuItemLabel(profile.name)
                 } else {
                     Text(profile.name)
                 }
@@ -301,7 +301,7 @@ struct CodexPanel: View {
             model.selectedProviderModel = ""
         } label: {
             if model.selectedProviderModel.isEmpty {
-                Label(L10n.text("provider.modelDefault"), systemImage: "checkmark")
+                selectedMenuItemLabel(L10n.text("provider.modelDefault"))
             } else {
                 Text(L10n.text("provider.modelDefault"))
             }
@@ -311,7 +311,7 @@ struct CodexPanel: View {
                 model.selectedProviderModel = candidate
             } label: {
                 if model.selectedProviderModel == candidate {
-                    Label(candidate, systemImage: "checkmark")
+                    selectedMenuItemLabel(candidate)
                 } else {
                     Text(candidate)
                 }
@@ -327,7 +327,7 @@ struct CodexPanel: View {
             model.selectedReasoningEffort = nil
         } label: {
             if model.selectedReasoningEffort == nil {
-                Label(L10n.text("provider.reasoningDefault"), systemImage: "checkmark")
+                selectedMenuItemLabel(L10n.text("provider.reasoningDefault"))
             } else {
                 Text(L10n.text("provider.reasoningDefault"))
             }
@@ -337,7 +337,7 @@ struct CodexPanel: View {
                 model.selectedReasoningEffort = effort
             } label: {
                 if model.selectedReasoningEffort == effort {
-                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
+                    selectedMenuItemLabel(L10n.text("reasoning.\(effort.rawValue)"))
                 } else {
                     Text(L10n.text("reasoning.\(effort.rawValue)"))
                 }
@@ -352,7 +352,7 @@ struct CodexPanel: View {
                 model.setContextScope(scope)
             } label: {
                 if scope == model.contextScope {
-                    Label(L10n.context(scope), systemImage: "checkmark")
+                    selectedMenuItemLabel(L10n.context(scope))
                 } else {
                     Text(L10n.context(scope))
                 }
@@ -397,6 +397,12 @@ struct CodexPanel: View {
             Image(systemName: systemImage)
                 .accessibilityLabel(title)
         }
+    }
+
+    private func selectedMenuItemLabel(_ title: String) -> some View {
+        Label(title, systemImage: "circle.fill")
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.green, .primary)
     }
 
     private var composer: some View {
@@ -565,9 +571,14 @@ struct CodexPanel: View {
     @ViewBuilder
     private func chatMessageView(_ message: ChatMessage) -> some View {
         if message.text.hasPrefix(AppModel.aiActivityPrefix) {
-            AIActivityView(events: message.text.removingPrefix(AppModel.aiActivityPrefix).split(separator: "\n").map(String.init))
+            AIActivityView(
+                events: message.text.removingPrefix(AppModel.aiActivityPrefix).split(separator: "\n").map(String.init),
+                initiallyExpanded: false
+            )
         } else if message.text.hasPrefix(AppModel.aiConfigurationPrefix) {
             AIConfigurationNotice(summary: message.text.removingPrefix(AppModel.aiConfigurationPrefix))
+        } else if message.text.hasPrefix(AppModel.aiHealthPrefix) {
+            AIConfigurationNotice(summary: message.text.removingPrefix(AppModel.aiHealthPrefix))
         } else {
             ChatBubble(
                 message: message,
@@ -602,7 +613,7 @@ private struct ChatBubble: View {
                     .textSelection(.enabled)
                     .foregroundStyle(message.role == .user ? Color.white : Color.primary)
                     .padding(9)
-                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+                    .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(
                         message.role == .user
@@ -627,10 +638,9 @@ private struct ChatBubble: View {
                 }
                 .buttonStyle(.borderless)
             }
-            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
             if message.role != .user { Spacer(minLength: 24) }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }
 
     private func copyMessage() {
@@ -658,17 +668,25 @@ private struct AIConfigurationNotice: View {
 
 private struct AIActivityView: View {
     let events: [String]
-    @State private var expanded = true
+    @State private var expanded: Bool
+
+    init(events: [String], initiallyExpanded: Bool = true) {
+        self.events = events
+        _expanded = State(initialValue: initiallyExpanded)
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(events.enumerated()), id: \.offset) { _, event in
-                    Label(event, systemImage: "circle.fill")
-                        .sourceLeafFont(.caption2)
-                        .foregroundStyle(.secondary)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.green, .secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Image(systemName: "circle.fill")
+                            .sourceLeafFont(.caption2)
+                            .foregroundStyle(.green)
+                        Text(event)
+                            .sourceLeafFont(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(.top, 5)

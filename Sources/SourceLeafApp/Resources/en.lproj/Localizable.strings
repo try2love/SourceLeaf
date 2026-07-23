@@ -141,6 +141,7 @@
 "provider.healthChecking" = "Testing AI connection…";
 "provider.healthConnected" = "AI connection available";
 "provider.healthUnavailable" = "AI connection unavailable";
+"provider.healthStatusLine" = "Test status: %@";
 "provider.openAI" = "OpenAI";
 "provider.openAICompatible" = "OpenAI-compatible";
 "provider.anthropic" = "Anthropic";

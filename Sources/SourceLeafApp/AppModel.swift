@@ -260,15 +260,21 @@ final class AppModel: ObservableObject {
     func checkSelectedProviderAvailability() {
         guard let id = selectedProviderID else { return }
         setProviderHealth(.checking, for: id)
+        appendAIHealthMessage(status: .checking)
+        persistMessages()
         Task {
             do {
                 let provider = try makeSelectedProvider()
                 _ = try await provider.healthCheck()
                 guard selectedProviderID == id else { return }
                 setProviderHealth(.connected, for: id)
+                appendAIHealthMessage(status: .connected)
+                persistMessages()
             } catch {
                 guard selectedProviderID == id else { return }
                 setProviderHealth(.unavailable(error.localizedDescription), for: id)
+                appendAIHealthMessage(status: .unavailable(error.localizedDescription))
+                persistMessages()
             }
         }
     }
@@ -1412,6 +1418,26 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .system, text: notice))
     }
 
+    func appendAIHealthMessage(status: ProviderHealthStatus) {
+        let statusText: String
+        switch status {
+        case .unknown:
+            statusText = L10n.text("provider.healthUnknown")
+        case .checking:
+            statusText = L10n.text("provider.healthChecking")
+        case .connected:
+            statusText = L10n.text("provider.healthConnected")
+        case let .unavailable(message):
+            statusText = L10n.text("provider.healthUnavailable") + (message.isEmpty ? "" : "：\(message)")
+        }
+        let notice = Self.aiHealthPrefix
+            + currentAIConfigurationSummary
+            + "\n"
+            + String(format: L10n.text("provider.healthStatusLine"), statusText)
+        guard messages.last?.text != notice else { return }
+        messages.append(ChatMessage(role: .system, text: notice))
+    }
+
     var currentAIConfigurationSummary: String {
         let profile = selectedProviderProfile
         let provider = profile?.name ?? L10n.text("ai.provider")
@@ -1430,10 +1456,15 @@ final class AppModel: ObservableObject {
 
     static let aiActivityPrefix = "SourceLeaf::AIActivity\n"
     static let aiConfigurationPrefix = "SourceLeaf::AIConfiguration\n"
+    static let aiHealthPrefix = "SourceLeaf::AIHealth\n"
 
     static func isInternalChatNotice(_ message: ChatMessage) -> Bool {
         message.role == .system
-            && (message.text.hasPrefix(aiActivityPrefix) || message.text.hasPrefix(aiConfigurationPrefix))
+            && (
+                message.text.hasPrefix(aiActivityPrefix)
+                || message.text.hasPrefix(aiConfigurationPrefix)
+                || message.text.hasPrefix(aiHealthPrefix)
+            )
     }
 
     private var selectedProviderProfile: ProviderProfile? {

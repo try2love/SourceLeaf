@@ -141,6 +141,7 @@
 "provider.healthChecking" = "正在测试 AI 连接…";
 "provider.healthConnected" = "AI 连接可用";
 "provider.healthUnavailable" = "AI 连接不可用";
+"provider.healthStatusLine" = "测试状态：%@";
 "provider.openAI" = "OpenAI";
 "provider.openAICompatible" = "OpenAI 兼容接口";
 "provider.anthropic" = "Anthropic";

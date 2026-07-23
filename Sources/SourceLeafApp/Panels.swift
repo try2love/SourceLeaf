@@ -388,15 +388,23 @@ final class ZoomableImageScrollView: NSScrollView {
     }
 
     func centerImage() {
-        updateCenteringInsets()
+        performWithoutImplicitAnimations {
+            layoutSubtreeIfNeeded()
+            updateCenteringInsets()
+        }
         guard let documentView else { return }
         let documentBounds = documentView.bounds
+        let visibleSize = documentVisibleRect.size
+        let maxX = max(0, documentBounds.maxX - visibleSize.width)
+        let maxY = max(0, documentBounds.maxY - visibleSize.height)
         let target = NSPoint(
-            x: max(0, documentBounds.midX - documentVisibleRect.width / 2),
-            y: max(0, documentBounds.midY - documentVisibleRect.height / 2)
+            x: min(max(0, documentBounds.midX - visibleSize.width / 2), maxX),
+            y: min(max(0, documentBounds.midY - visibleSize.height / 2), maxY)
         )
-        contentView.scroll(to: target)
-        reflectScrolledClipView(contentView)
+        performWithoutImplicitAnimations {
+            contentView.scroll(to: target)
+            reflectScrolledClipView(contentView)
+        }
     }
 
     func prepareForDismantle() {
@@ -409,6 +417,10 @@ final class ZoomableImageScrollView: NSScrollView {
         min(8, max(0.1, scale * pow(1.12, scrollingDeltaY)))
     }
 
+    static func draggedScrollOrigin(from origin: NSPoint, delta: NSPoint) -> NSPoint {
+        NSPoint(x: origin.x - delta.x, y: origin.y - delta.y)
+    }
+
     override func mouseDown(with event: NSEvent) {
         lastDragPoint = event.locationInWindow
         NSCursor.closedHand.push()
@@ -419,7 +431,7 @@ final class ZoomableImageScrollView: NSScrollView {
         let point = event.locationInWindow
         let delta = NSPoint(x: point.x - lastDragPoint.x, y: point.y - lastDragPoint.y)
         let clip = contentView
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x - delta.x, y: clip.bounds.origin.y + delta.y))
+        clip.scroll(to: Self.draggedScrollOrigin(from: clip.bounds.origin, delta: delta))
         reflectScrolledClipView(clip)
         self.lastDragPoint = point
     }
@@ -455,7 +467,7 @@ private final class PannableImageView: NSImageView {
         let point = event.locationInWindow
         let delta = NSPoint(x: point.x - lastDragPoint.x, y: point.y - lastDragPoint.y)
         let clip = owner.contentView
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x - delta.x, y: clip.bounds.origin.y + delta.y))
+        clip.scroll(to: ZoomableImageScrollView.draggedScrollOrigin(from: clip.bounds.origin, delta: delta))
         owner.reflectScrolledClipView(clip)
         self.lastDragPoint = point
     }

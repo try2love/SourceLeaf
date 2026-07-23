@@ -168,11 +168,34 @@ import Testing
 @Test func internalChatNoticesAreIdentifiedForContextFiltering() throws {
     let activity = ChatMessage(role: .system, text: AppModel.aiActivityPrefix + "Started")
     let config = ChatMessage(role: .system, text: AppModel.aiConfigurationPrefix + "AI: Local Codex")
+    let health = ChatMessage(role: .system, text: AppModel.aiHealthPrefix + "AI: Local Codex\nTest status: available")
     let userVisibleSystem = ChatMessage(role: .system, text: "System text from user history")
 
     #expect(AppModel.isInternalChatNotice(activity))
     #expect(AppModel.isInternalChatNotice(config))
+    #expect(AppModel.isInternalChatNotice(health))
     #expect(!AppModel.isInternalChatNotice(userVisibleSystem))
+}
+
+@MainActor
+@Test func providerHealthChecksArePrintedIntoTheConversationHistory() throws {
+    let state = try productTestState(named: "provider-health-chat-message")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}".utf8).write(to: project.appendingPathComponent("main.tex"))
+
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    model.newChatSession()
+    model.appendAIHealthMessage(status: .checking)
+
+    let last = try #require(model.messages.last)
+    #expect(last.role == .system)
+    #expect(last.text.hasPrefix(AppModel.aiHealthPrefix))
+    #expect(last.text.contains("Local Codex"))
+    #expect(last.text.contains("Testing") || last.text.contains("正在测试"))
 }
 
 @MainActor

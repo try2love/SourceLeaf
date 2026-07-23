@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SourceLeafCore
 
@@ -200,19 +201,39 @@ private struct ResizableDockColumns: View {
 private struct WideDockDivider: View {
     let onChanged: (CGFloat) -> Void
     let onEnded: () -> Void
+    @State private var cursorIsPushed = false
 
     var body: some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 10)
+            .frame(width: 12)
             .overlay(Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1))
             .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering, !cursorIsPushed {
+                    NSCursor.resizeLeftRight.push()
+                    cursorIsPushed = true
+                } else if !hovering, cursorIsPushed {
+                    NSCursor.pop()
+                    cursorIsPushed = false
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { onChanged($0.translation.width) }
                     .onEnded { _ in onEnded() }
             )
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
             .help(L10n.text("workspace.resizePanels"))
+            .onDisappear {
+                if cursorIsPushed {
+                    NSCursor.pop()
+                    cursorIsPushed = false
+                }
+            }
     }
 }
 

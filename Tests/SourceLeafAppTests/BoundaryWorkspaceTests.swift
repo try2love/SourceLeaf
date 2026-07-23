@@ -92,6 +92,17 @@ import Testing
 }
 
 @MainActor
+@Test func imageDraggingMovesTheViewportWithThePointer() {
+    let next = ZoomableImageScrollView.draggedScrollOrigin(
+        from: NSPoint(x: 120, y: 160),
+        delta: NSPoint(x: 15, y: 20)
+    )
+
+    #expect(next.x == 105)
+    #expect(next.y == 140)
+}
+
+@MainActor
 @Test func imageZoomPreservesTheVisibleDocumentAnchor() throws {
     guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
     let fixtures = URL(fileURLWithPath: fixturesPath, isDirectory: true)

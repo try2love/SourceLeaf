@@ -473,15 +473,17 @@ struct SourceTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !highlighting, let textView else { return }
-            lastLocallyEmittedText = textView.string
-            lastLocallyEmittedSelection = textView.selectedRange()
-            parent.text = textView.string
+            let nativeSelection = textView.selectedRange()
+            lastLocallyEmittedSelection = nativeSelection
+            if parent.selection != nativeSelection { parent.selection = nativeSelection }
             guard !textView.hasMarkedText() else {
                 ruler?.needsDisplay = true
                 glyphOverlay?.restartCaretBlink()
                 glyphOverlay?.needsDisplay = true
                 return
             }
+            lastLocallyEmittedText = textView.string
+            parent.text = textView.string
             highlightTimer?.invalidate()
             let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
             highlightTimer = timer
