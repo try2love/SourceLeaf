@@ -717,6 +717,13 @@ struct SourceTextView: NSViewRepresentable {
             context.coordinator.lastLocallyEmittedSelection = nil
         } else if context.coordinator.shouldIgnoreProtectedSelectionEcho(selection) {
             context.coordinator.lastLocallyEmittedSelection = nil
+        } else if context.coordinator.shouldIgnoreSelectionEchoDuringLocalEdit(
+            selection,
+            nativeSelection: textView.selectedRange(),
+            boundText: text,
+            nativeText: textView.string
+        ) {
+            context.coordinator.lastLocallyEmittedSelection = nil
         } else if NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
@@ -994,6 +1001,25 @@ struct SourceTextView: NSViewRepresentable {
             return Date().timeIntervalSince(lastLocalEditDate) < 0.35
         }
 
+        func shouldIgnoreSelectionEchoDuringLocalEdit(
+            _ range: NSRange,
+            nativeSelection: NSRange,
+            boundText: String,
+            nativeText: String
+        ) -> Bool {
+            guard Date().timeIntervalSince(lastLocalEditDate) < 0.28,
+                  boundText == nativeText,
+                  range.length == 0,
+                  nativeSelection.length == 0 else { return false }
+            // During rapid typing the NSTextView is the source of truth. A
+            // zero-length binding selection behind the native insertion point
+            // is almost always a stale SwiftUI echo from the previous key
+            // event; accepting it reorders text (`test` -> `tset`). Explicit
+            // jumps such as find/outline happen outside this tiny post-edit
+            // window and are still applied normally.
+            return range.location < nativeSelection.location
+        }
+
         private func triggerCompletionIfNeeded() {
             guard let textView,
                   textView.window?.firstResponder === textView,
@@ -1019,7 +1045,7 @@ struct SourceTextView: NSViewRepresentable {
                 in: textView.string as NSString,
                 cursorLocation: textView.selectedRange().location
             ) {
-                index?.pointee = 0
+                index?.pointee = -1
                 return LaTeXCompletionEngine.argumentSuggestions(
                     command: argument.command,
                     prefix: argument.prefix,
@@ -1030,7 +1056,7 @@ struct SourceTextView: NSViewRepresentable {
                 in: textView.string as NSString,
                 cursorLocation: textView.selectedRange().location
             ) else { return [] }
-            index?.pointee = 0
+            index?.pointee = -1
             let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: textView.string)
             let slashIsAlreadyInDocument = charRange.location > 0
                 && (textView.string as NSString).character(at: charRange.location - 1) == 92

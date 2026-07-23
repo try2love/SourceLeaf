@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import SourceLeafCore
 
@@ -36,7 +37,7 @@ struct CodexPanel: View {
                         }
                         if !model.streamingAssistantText.isEmpty {
                             HStack {
-                                Text(model.streamingAssistantText)
+                                RenderedChatText(text: model.streamingAssistantText)
                                     .textSelection(.enabled)
                                     .padding(9)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -685,7 +686,8 @@ final class ComposerNSTextView: NSTextView {
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
-            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.18
+            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.18,
+            compositionInputSourceActive: Self.currentInputSourcePrefersReturnCommit()
         ), onSend?() == true {
             return
         }
@@ -697,13 +699,22 @@ final class ComposerNSTextView: NSTextView {
         modifierFlags: NSEvent.ModifierFlags,
         sendBehavior: ChatSendBehavior,
         hasMarkedText: Bool,
-        recentlyCommittedMarkedText: Bool = false
+        recentlyCommittedMarkedText: Bool = false,
+        compositionInputSourceActive: Bool = false
     ) -> Bool {
         guard characters == "\r" || characters == "\n" else { return false }
         guard !hasMarkedText else { return false }
         guard !recentlyCommittedMarkedText else { return false }
         let shift = modifierFlags.contains(.shift)
+        if compositionInputSourceActive && !shift { return false }
         return sendBehavior == .enter ? !shift : shift
+    }
+
+    static func currentInputSourcePrefersReturnCommit() -> Bool {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let rawID = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
+        let id = unsafeBitCast(rawID, to: CFString.self) as String
+        return !id.contains(".keylayout.")
     }
 }
 
@@ -742,14 +753,22 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
+        ViewThatFits(in: .horizontal) {
+            styledBubble
+                .fixedSize(horizontal: true, vertical: true)
+            styledBubble
+                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
+        }
+        .layoutPriority(1)
+    }
+
+    private var styledBubble: some View {
         RenderedChatText(text: message.text)
             .textSelection(.enabled)
+            .lineLimit(nil)
             .foregroundStyle(message.role == .user ? Color.white : Color.primary)
             .padding(9)
-            .fixedSize(horizontal: false, vertical: true)
             .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 10))
-            .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-            .layoutPriority(1)
     }
 
     private var bubbleBackground: Color {

@@ -27,6 +27,20 @@ final class AppRegressionXCTests: XCTestCase {
             sendBehavior: .enter,
             hasMarkedText: false
         ))
+        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
+            characters: "\r",
+            modifierFlags: [],
+            sendBehavior: .enter,
+            hasMarkedText: false,
+            compositionInputSourceActive: true
+        ))
+        XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
+            characters: "\r",
+            modifierFlags: [.shift],
+            sendBehavior: .shiftEnter,
+            hasMarkedText: false,
+            compositionInputSourceActive: true
+        ))
     }
 
     func testFindMatchesReturnEveryOccurrenceForPersistentHighlighting() {
@@ -45,6 +59,17 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertTrue(suggestions.contains("\\section{}"))
         XCTAssertTrue(suggestions.contains("\\includegraphics[]{}"))
         XCTAssertTrue(suggestions.contains("\\cite{}"))
+    }
+
+    func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {
+        let source = "\\sec" as NSString
+        XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
+            afterChangeIn: source,
+            selection: NSRange(location: source.length, length: 0)
+        ))
+        let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\sec", source: source as String).map(\.insertion)
+        XCTAssertTrue(suggestions.contains("\\section{}"))
+        XCTAssertFalse(suggestions.contains("\\subsection{}"))
     }
 
     @MainActor
@@ -117,6 +142,36 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.string, "alpha tesomega")
         XCTAssertEqual(state.text, "alpha tesomega")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+    }
+
+    @MainActor
+    func testStaleSwiftUISelectionEchoCannotMoveCaretBackwardDuringRapidTyping() async throws {
+        let state = SourceTypingState(text: "alpha omega", selection: NSRange(location: 6, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "t", keyCode: 17, window: host.window)))
+        try await Task.sleep(for: .milliseconds(8))
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 7, length: 0))
+
+        // SwiftUI can deliver a stale selection binding from before the native
+        // NSTextView edit has fully settled. The editor must not accept that
+        // echo and move the caret backward, otherwise fast typing becomes
+        // reordered, e.g. `test` can become `tset`.
+        state.selection = NSRange(location: 6, length: 0)
+        try await Task.sleep(for: .milliseconds(24))
+
+        for (character, keyCode) in [("e", 14), ("s", 1), ("t", 17)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(8))
+        }
+
+        XCTAssertEqual(textView.string, "alpha testomega")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
     }
 
     @MainActor

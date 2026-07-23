@@ -491,6 +491,7 @@ final class AppModel: ObservableObject {
         sourceText = text
         hasUnsavedChanges = canSaveCurrentFile
         scheduleOutlineRefresh()
+        refreshCompletionIndexForActiveSource()
         scheduleCompletionIndexRefresh()
         scheduleSave()
         scheduleCompile()
@@ -511,7 +512,7 @@ final class AppModel: ObservableObject {
         let activeFile = selectedFile
         let activeSource = sourceText
         completionIndexRefreshTask = Task {
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
             let index = await Task.detached(priority: .utility) {
                 ProjectIndexer.completionIndex(
@@ -1245,6 +1246,17 @@ final class AppModel: ObservableObject {
             activeFile: selectedFile,
             activeSource: sourceText
         )
+    }
+
+    private func refreshCompletionIndexForActiveSource() {
+        guard let selectedFile, selectedFile.kind == .tex else { return }
+        var next = completionIndex
+        next.labels = next.labels.filter { $0.value != selectedFile.relativePath }
+        for label in ProjectIndexer.labels(in: sourceText) {
+            next.labels[label] = selectedFile.relativePath
+        }
+        next.generatedAt = Date()
+        completionIndex = next
     }
 
     private func receiveBuildOutput(_ chunk: String) {
