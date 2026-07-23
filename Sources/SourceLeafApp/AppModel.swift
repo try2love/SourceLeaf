@@ -30,6 +30,13 @@ final class AppModel: ObservableObject {
     @Published var selectedRange = NSRange(location: 0, length: 0)
     @Published var pendingLaTeXEdit: LaTeXEditRequest?
     @Published var outline: [DocumentOutlineItem] = []
+    @Published var completionIndex = ProjectIndex(
+        rootDocument: nil,
+        sectionSummaries: [:],
+        labels: [:],
+        citations: [],
+        includedFiles: []
+    )
     @Published var configuration = ProjectConfiguration()
     @Published var layout = DockLayout()
     @Published var pdfURL: URL?
@@ -105,6 +112,7 @@ final class AppModel: ObservableObject {
     private let keychain = KeychainStore()
     private var saveTask: Task<Void, Never>?
     private var outlineRefreshTask: Task<Void, Never>?
+    private var completionIndexRefreshTask: Task<Void, Never>?
     private var compileDebounceTask: Task<Void, Never>?
     private var activeCompileTask: Task<Void, Never>?
     private var activeAITask: Task<Void, Never>?
@@ -322,12 +330,14 @@ final class AppModel: ObservableObject {
     func openProject(_ root: URL) {
         do {
             guard try prepareToLeaveCurrentSource() else { return }
+            completionIndexRefreshTask?.cancel()
             selectedFile = nil
             selectedImageFile = nil
             sourceText = ""
             hasUnsavedChanges = false
             selectedRange = NSRange(location: 0, length: 0)
             outline = []
+            completionIndex = ProjectIndex(rootDocument: nil, sectionSummaries: [:], labels: [:], citations: [], includedFiles: [])
             pdfURL = nil
             pdfSelection = ""
             pdfPageIndex = 0
@@ -388,6 +398,7 @@ final class AppModel: ObservableObject {
                 ?? projectFiles.first
             if let initialFile { openFile(initialFile) }
             refreshProjectOutline()
+            refreshCompletionIndex()
             persistConfiguration()
             defaults.set(root.standardizedFileURL.path, forKey: Self.lastProjectPathKey)
             statusText = root.lastPathComponent
@@ -435,6 +446,7 @@ final class AppModel: ObservableObject {
             hasUnsavedChanges = false
             selectedRange = NSRange(location: 0, length: 0)
             refreshActiveFileOutline()
+            scheduleCompletionIndexRefresh()
             suppressTextChange = false
             updateLayout { layout in
                 layout.show(.source, in: .center)
@@ -479,6 +491,7 @@ final class AppModel: ObservableObject {
         sourceText = text
         hasUnsavedChanges = canSaveCurrentFile
         scheduleOutlineRefresh()
+        scheduleCompletionIndexRefresh()
         scheduleSave()
         scheduleCompile()
     }
@@ -489,6 +502,26 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
             refreshActiveFileOutline()
+        }
+    }
+
+    private func scheduleCompletionIndexRefresh() {
+        completionIndexRefreshTask?.cancel()
+        let files = projectFiles
+        let activeFile = selectedFile
+        let activeSource = sourceText
+        completionIndexRefreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            let index = await Task.detached(priority: .utility) {
+                ProjectIndexer.completionIndex(
+                    files: files,
+                    activeFile: activeFile,
+                    activeSource: activeSource
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            completionIndex = index
         }
     }
 
@@ -892,6 +925,7 @@ final class AppModel: ObservableObject {
                 hasUnsavedChanges = false
                 selectedRange = adjustedSelection
                 outline = ProjectIndexer.outline(for: updated)
+                refreshCompletionIndex()
                 suppressTextChange = false
             }
             editTargets.removeAll { $0.id == target.id }
@@ -1203,6 +1237,14 @@ final class AppModel: ObservableObject {
         outline = orderedPaths.flatMap { path in
             path == selectedFile.relativePath ? updated : (grouped[path] ?? [])
         }
+    }
+
+    private func refreshCompletionIndex() {
+        completionIndex = ProjectIndexer.completionIndex(
+            files: projectFiles,
+            activeFile: selectedFile,
+            activeSource: sourceText
+        )
     }
 
     private func receiveBuildOutput(_ chunk: String) {

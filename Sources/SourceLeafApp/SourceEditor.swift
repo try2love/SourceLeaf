@@ -23,6 +23,20 @@ struct LaTeXCompletionCandidate: Equatable, Sendable {
     var detail: String
 }
 
+struct LaTeXCompletionContext: Equatable, Sendable {
+    var labels: [String] = []
+    var citations: [String] = []
+    var graphicsFiles: [String] = []
+    var projectFiles: [String] = []
+
+    init(index: ProjectIndex? = nil, projectFiles: [String] = []) {
+        labels = index?.labels.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending } ?? []
+        citations = index?.citations ?? []
+        graphicsFiles = index?.includedFiles ?? []
+        self.projectFiles = projectFiles
+    }
+}
+
 enum LaTeXCompletionEngine {
     static let builtInCandidates: [LaTeXCompletionCandidate] = [
         .init(insertion: #"\usepackage{}"#, category: "pkg", detail: "Load a package"),
@@ -80,9 +94,37 @@ enum LaTeXCompletionEngine {
             }
     }
 
+    static func argumentSuggestions(
+        command: String,
+        prefix: String,
+        context: LaTeXCompletionContext
+    ) -> [LaTeXCompletionCandidate] {
+        let values: [(String, String, String)]
+        switch command {
+        case "cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite":
+            values = context.citations.map { ($0, "cite", "Bibliography key") }
+        case "ref", "eqref", "autoref", "cref", "Cref", "pageref":
+            values = context.labels.map { ($0, "ref", "Document label") }
+        case "includegraphics":
+            values = context.graphicsFiles.map { ($0, "file", "Project file") }
+        case "input", "include":
+            values = context.projectFiles.map { ($0, "file", "Project file") }
+        default:
+            return []
+        }
+        let normalized = prefix.lowercased()
+        return values
+            .filter { normalized.isEmpty || $0.0.lowercased().hasPrefix(normalized) }
+            .map { LaTeXCompletionCandidate(insertion: $0.0, category: $0.1, detail: $0.2) }
+    }
+
     static func shouldTriggerCompletion(afterChangeIn source: NSString, selection: NSRange) -> Bool {
         guard selection.length == 0,
-              let command = commandPrefix(in: source, cursorLocation: selection.location) else { return false }
+              selection.location <= source.length else { return false }
+        if let argument = argumentContext(in: source, cursorLocation: selection.location) {
+            return ["cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite", "ref", "eqref", "autoref", "cref", "Cref", "pageref", "includegraphics", "input", "include"].contains(argument.command)
+        }
+        guard let command = commandPrefix(in: source, cursorLocation: selection.location) else { return false }
         return command.prefix == "\\" || command.prefix.count >= 2
     }
 
@@ -104,6 +146,20 @@ enum LaTeXCompletionEngine {
               source.character(at: start) == 92 else { return nil }
         let range = NSRange(location: start, length: cursorLocation - start)
         return (source.substring(with: range), range)
+    }
+
+    static func argumentContext(in source: NSString, cursorLocation: Int) -> (command: String, prefix: String, range: NSRange)? {
+        guard cursorLocation <= source.length else { return nil }
+        let before = source.substring(to: cursorLocation)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\\([A-Za-z]+)\*?(?:\[[^\]]*\])?\{([^{}]*)$"#
+        ) else { return nil }
+        let nsBefore = before as NSString
+        guard let match = regex.matches(in: before, range: NSRange(location: 0, length: nsBefore.length)).last,
+              match.numberOfRanges >= 3 else { return nil }
+        let command = nsBefore.substring(with: match.range(at: 1))
+        let prefix = nsBefore.substring(with: match.range(at: 2))
+        return (command, prefix, NSRange(location: cursorLocation - (prefix as NSString).length, length: (prefix as NSString).length))
     }
 
     private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
@@ -137,6 +193,15 @@ struct SourcePanel: View {
     private var activeFindRange: NSRange? {
         guard findMatches.indices.contains(activeFindIndex) else { return nil }
         return findMatches[activeFindIndex]
+    }
+
+    private var completionContext: LaTeXCompletionContext {
+        return LaTeXCompletionContext(
+            index: model.completionIndex,
+            projectFiles: model.projectFiles
+                .filter { [.tex, .style, .bibliography].contains($0.kind) }
+                .map(\.relativePath)
+        )
     }
 
     var body: some View {
@@ -213,6 +278,7 @@ struct SourcePanel: View {
                 selection: $model.selectedRange,
                 findRanges: findBarVisible ? findMatches : [],
                 activeFindRange: findBarVisible ? activeFindRange : nil,
+                completionContext: completionContext,
                 commandRequest: model.pendingLaTeXEdit,
                 showSelectionButton: model.configuration.showSelectionButton,
                 editorTheme: model.editorTheme,
@@ -511,6 +577,7 @@ struct SourceTextView: NSViewRepresentable {
     @Binding var selection: NSRange
     var findRanges: [NSRange] = []
     var activeFindRange: NSRange?
+    var completionContext = LaTeXCompletionContext()
     var commandRequest: LaTeXEditRequest? = nil
     var showSelectionButton: Bool
     var editorTheme: EditorTheme = .system
@@ -753,7 +820,7 @@ struct SourceTextView: NSViewRepresentable {
             lastLocallyEmittedText = textView.string
             parent.text = textView.string
             highlightTimer?.invalidate()
-            let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
+            let timer = Timer(timeInterval: 0.22, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
             highlightTimer = timer
             RunLoop.main.add(timer, forMode: .common)
             scheduleSelectionCommit()
@@ -821,6 +888,17 @@ struct SourceTextView: NSViewRepresentable {
             forPartialWordRange charRange: NSRange,
             indexOfSelectedItem index: UnsafeMutablePointer<Int>?
         ) -> [String] {
+            if let argument = LaTeXCompletionEngine.argumentContext(
+                in: textView.string as NSString,
+                cursorLocation: textView.selectedRange().location
+            ) {
+                index?.pointee = 0
+                return LaTeXCompletionEngine.argumentSuggestions(
+                    command: argument.command,
+                    prefix: argument.prefix,
+                    context: parent.completionContext
+                ).map(\.insertion)
+            }
             guard let command = LaTeXCompletionEngine.commandPrefix(
                 in: textView.string as NSString,
                 cursorLocation: textView.selectedRange().location
@@ -936,7 +1014,7 @@ struct SourceTextView: NSViewRepresentable {
             )
             let selectedRange = textView.selectedRange()
             let source = textView.string as NSString
-            let full = NSRange(location: 0, length: source.length)
+            let targetRange = highlightingRange(for: source, in: textView)
             textView.textColor = palette.text
             textView.backgroundColor = palette.background
             textView.font = editorFont
@@ -953,12 +1031,12 @@ struct SourceTextView: NSViewRepresentable {
             storage.setAttributes([
                 .font: editorFont,
                 .foregroundColor: palette.text
-            ], range: full)
-            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument, storage: storage, source: textView.string)
-            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command, storage: storage, source: textView.string)
-            apply(#"\$[^$\n]*\$"#, color: palette.math, storage: storage, source: textView.string)
-            apply(#"[{}]"#, color: palette.brace, storage: storage, source: textView.string)
-            apply(#"(?<!\\)%.*$"#, color: palette.comment, storage: storage, source: textView.string, options: [.anchorsMatchLines])
+            ], range: targetRange)
+            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument, storage: storage, source: textView.string, range: targetRange)
+            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command, storage: storage, source: textView.string, range: targetRange)
+            apply(#"\$[^$\n]*\$"#, color: palette.math, storage: storage, source: textView.string, range: targetRange)
+            apply(#"[{}]"#, color: palette.brace, storage: storage, source: textView.string, range: targetRange)
+            apply(#"(?<!\\)%.*$"#, color: palette.comment, storage: storage, source: textView.string, range: targetRange, options: [.anchorsMatchLines])
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
@@ -972,9 +1050,9 @@ struct SourceTextView: NSViewRepresentable {
             ]
             appliedStyleSignature = currentStyleSignature
             glyphOverlay?.palette = palette
-            textView.layoutManager?.invalidateDisplay(forCharacterRange: full)
-            if let textContainer = textView.textContainer {
-                textView.layoutManager?.ensureLayout(for: textContainer)
+            textView.layoutManager?.invalidateDisplay(forCharacterRange: targetRange)
+            if textView.textContainer != nil {
+                textView.layoutManager?.ensureLayout(forCharacterRange: targetRange)
             }
             textView.needsDisplay = true
             glyphOverlay?.synchronizeFrame()
@@ -1021,13 +1099,27 @@ struct SourceTextView: NSViewRepresentable {
             color: NSColor,
             storage: NSTextStorage,
             source: String,
+            range: NSRange,
             options: NSRegularExpression.Options = []
         ) {
             guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-            let range = NSRange(location: 0, length: (source as NSString).length)
             for match in expression.matches(in: source, range: range) {
                 storage.addAttribute(.foregroundColor, value: color, range: match.range)
             }
+        }
+
+        private func highlightingRange(for source: NSString, in textView: NSTextView) -> NSRange {
+            let full = NSRange(location: 0, length: source.length)
+            guard source.length > 80_000,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer,
+                  let scrollView = textView.enclosingScrollView else { return full }
+            let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: scrollView.contentView.bounds, in: textContainer)
+            let visibleCharacterRange = layoutManager.characterRange(forGlyphRange: visibleGlyphRange, actualGlyphRange: nil)
+            let start = max(0, visibleCharacterRange.location - 2_000)
+            let end = min(source.length, NSMaxRange(visibleCharacterRange) + 2_000)
+            guard end > start else { return full }
+            return NSRange(location: start, length: end - start)
         }
     }
 }

@@ -60,8 +60,9 @@ public enum ProjectIndexer {
     ]
 
     public static func discoverFiles(root: URL, fileManager: FileManager = .default) -> [ProjectFile] {
+        let normalizedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
         guard let enumerator = fileManager.enumerator(
-            at: root,
+            at: normalizedRoot,
             includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else { return [] }
@@ -77,7 +78,11 @@ public enum ProjectIndexer {
             let ext = url.pathExtension.lowercased()
             guard acceptedExtensions.contains(ext) else { continue }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            let relative = String(url.path.dropFirst(root.path.hasSuffix("/") ? root.path.count : root.path.count + 1))
+            let normalizedURL = url.standardizedFileURL.resolvingSymlinksInPath()
+            let rootPath = normalizedRoot.path
+            let prefixLength = rootPath.hasSuffix("/") ? rootPath.count : rootPath.count + 1
+            guard normalizedURL.path.count >= prefixLength else { continue }
+            let relative = String(normalizedURL.path.dropFirst(prefixLength))
             files.append(ProjectFile(relativePath: relative, url: url, kind: kind(for: ext)))
         }
 
@@ -185,6 +190,63 @@ public enum ProjectIndexer {
         let start = max(0, target.startLine - radius - 1)
         let end = min(lines.count, target.endLine + radius)
         return lines[start..<end].joined(separator: "\n")
+    }
+
+    public static func completionIndex(
+        files: [ProjectFile],
+        activeFile: ProjectFile?,
+        activeSource: String
+    ) -> ProjectIndex {
+        let texSources: [(ProjectFile, String)] = files.filter { $0.kind == .tex }.compactMap { file in
+            if file.relativePath == activeFile?.relativePath {
+                return (file, activeSource)
+            }
+            guard let source = try? String(contentsOf: file.url, encoding: .utf8) else { return nil }
+            return (file, source)
+        }
+        let labelMap = texSources.reduce(into: [String: String]()) { labelMap, item in
+            for label in labels(in: item.1) {
+                labelMap[label] = item.0.relativePath
+            }
+        }
+        let citations = files.filter { $0.kind == .bibliography }.flatMap { file in
+            guard let source = try? String(contentsOf: file.url, encoding: .utf8) else { return [String]() }
+            return citationKeys(in: source)
+        }
+        let imageFiles = files.filter { $0.kind == .image }.map(\.relativePath)
+        return ProjectIndex(
+            rootDocument: nil,
+            sectionSummaries: [:],
+            labels: labelMap,
+            citations: Array(Set(citations)).sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+            includedFiles: imageFiles.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        )
+    }
+
+    public static func labels(in source: String) -> [String] {
+        captures(
+            in: source,
+            pattern: #"\\label\s*\{([^}]+)\}"#,
+            captureIndex: 1
+        )
+    }
+
+    public static func citationKeys(in bibliography: String) -> [String] {
+        captures(
+            in: bibliography,
+            pattern: #"@[A-Za-z]+\s*\{\s*([^,\s]+)"#,
+            captureIndex: 1
+        )
+    }
+
+    private static func captures(in source: String, pattern: String, captureIndex: Int) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsSource = source as NSString
+        return regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length)).compactMap { match in
+            guard match.numberOfRanges > captureIndex else { return nil }
+            return nsSource.substring(with: match.range(at: captureIndex))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
     }
 
     private static func kind(for ext: String) -> ProjectFile.Kind {

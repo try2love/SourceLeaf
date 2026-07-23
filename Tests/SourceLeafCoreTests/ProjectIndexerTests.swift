@@ -38,6 +38,31 @@ import Testing
     #expect(outline.first?.line == 1)
 }
 
+@Test func completionIndexExtractsLabelsCitationsAndImageFiles() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sourceleaf-completion-index-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("figures", isDirectory: true), withIntermediateDirectories: true)
+    try Data("\\section{Method}\\label{sec:method}\n\\includegraphics{figures/overview.png}".utf8)
+        .write(to: root.appendingPathComponent("main.tex"))
+    try Data("@article{smith2024rag,\n title={RAG}\n}\n@inproceedings{zhang2025attack,\n title={Attack}\n}".utf8)
+        .write(to: root.appendingPathComponent("references.bib"))
+    try Data("png".utf8).write(to: root.appendingPathComponent("figures/overview.png"))
+
+    let files = ProjectIndexer.discoverFiles(root: root)
+    let active = try #require(files.first { $0.relativePath == "main.tex" })
+    let index = ProjectIndexer.completionIndex(
+        files: files,
+        activeFile: active,
+        activeSource: "\\section{Changed}\\label{sec:changed}"
+    )
+
+    #expect(index.labels["sec:changed"] == "main.tex")
+    #expect(index.labels["sec:method"] == nil)
+    #expect(index.citations == ["smith2024rag", "zhang2025attack"])
+    #expect(index.includedFiles == ["figures/overview.png"])
+}
+
 @Test func documentOutlineTreePreservesHeadingHierarchyAndFileBoundaries() throws {
     let first = ProjectIndexer.outline(
         for: "\\section{Method}\n\\subsection{Details}\n\\subsubsection{Proof}\n\\section{Results}",

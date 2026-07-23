@@ -124,6 +124,32 @@ import Testing
 }
 
 @MainActor
+@Test func latexCompletionIndexRefreshesAfterProjectOpenAndSourceEditsWithoutBodyScanning() async throws {
+    let state = try productTestState(named: "completion-index")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("figures", isDirectory: true), withIntermediateDirectories: true)
+    let sourceURL = project.appendingPathComponent("main.tex")
+    try Data("\\documentclass{article}\n\\label{sec:original}\n".utf8).write(to: sourceURL, options: .atomic)
+    try Data("@article{smith2024rag, title={RAG}}\n".utf8).write(to: project.appendingPathComponent("refs.bib"), options: .atomic)
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: project.appendingPathComponent("figures/overview.png"), options: .atomic)
+
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+
+    #expect(model.completionIndex.labels.keys.contains("sec:original"))
+    #expect(model.completionIndex.citations.contains("smith2024rag"))
+    #expect(model.completionIndex.includedFiles.contains("figures/overview.png"))
+
+    model.sourceChanged("\\documentclass{article}\n\\label{sec:edited}\n")
+    try await Task.sleep(for: .milliseconds(700))
+
+    #expect(model.completionIndex.labels.keys.contains("sec:edited"))
+    #expect(!model.completionIndex.labels.keys.contains("sec:original"))
+}
+
+@MainActor
 @Test func manualSaveModeBlocksAutomaticCompilationUntilSourceIsSaved() throws {
     let state = try productTestState(named: "manual-save-auto-build")
     defer { state.cleanup() }

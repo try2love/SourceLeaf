@@ -1,4 +1,5 @@
 import AppKit
+import SourceLeafCore
 import SwiftUI
 import Testing
 @testable import SourceLeafApp
@@ -23,6 +24,13 @@ import Testing
         modifierFlags: [],
         sendBehavior: .enter,
         hasMarkedText: true
+    ))
+    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .enter,
+        hasMarkedText: false,
+        recentlyCommittedMarkedText: true
     ))
     #expect(ComposerNSTextView.shouldTreatReturnAsSend(
         characters: "\r",
@@ -51,6 +59,22 @@ import Testing
     #expect(matches.map(\.location) == [0, 11, 17])
 }
 
+@MainActor
+@Test func sourceFindOverlayPaintsInactiveMatchesAlongsideTheActiveMatch() async throws {
+    let host = makeEditorHost(source: "alpha beta Alpha alphabet", theme: .light, fontFamily: "Menlo", fontSize: 15)
+    defer { closeEditorHost(host) }
+    try await Task.sleep(for: .milliseconds(400))
+    let overlay = try #require(findGlyphOverlay(in: host.view))
+    let matches = SourceFindController.matches(in: "alpha beta Alpha alphabet", query: "alpha")
+
+    overlay.findRanges = matches
+    overlay.activeFindRange = matches.first
+    overlay.needsDisplay = true
+    overlay.displayIfNeeded()
+
+    #expect(overlay.lastFindHighlightRectCount >= matches.count)
+}
+
 @Test func latexCompletionOffersCoreCommandsAfterBackslash() {
     let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\", source: "\\documentclass{article}")
     let insertions = suggestions.map(\.insertion)
@@ -70,6 +94,33 @@ import Testing
     #expect(command.range == NSRange(location: 0, length: 3))
     #expect(suggestions.map(\.insertion).contains("\\usepackage{}"))
     #expect(!suggestions.map(\.insertion).contains("\\begin{}"))
+}
+
+@Test func latexCompletionSuggestsCitationsLabelsAndGraphicsInArguments() throws {
+    let context = LaTeXCompletionContext(
+        index: ProjectIndex(
+            rootDocument: "main.tex",
+            sectionSummaries: [:],
+            labels: ["sec:method": "main.tex", "fig:overview": "main.tex"],
+            citations: ["smith2024rag", "zhang2025attack"],
+            includedFiles: ["figures/overview.png", "figures/results.pdf"]
+        ),
+        projectFiles: ["sections/method.tex", "references.bib"]
+    )
+
+    let citeSource = "\\cite{smi" as NSString
+    let citeContext = try #require(LaTeXCompletionEngine.argumentContext(in: citeSource, cursorLocation: citeSource.length))
+    #expect(citeContext.command == "cite")
+    #expect(citeContext.prefix == "smi")
+    #expect(LaTeXCompletionEngine.argumentSuggestions(command: citeContext.command, prefix: citeContext.prefix, context: context).map(\.insertion) == ["smith2024rag"])
+
+    let refSource = "\\ref{fig:" as NSString
+    let refContext = try #require(LaTeXCompletionEngine.argumentContext(in: refSource, cursorLocation: refSource.length))
+    #expect(LaTeXCompletionEngine.argumentSuggestions(command: refContext.command, prefix: refContext.prefix, context: context).map(\.insertion) == ["fig:overview"])
+
+    let graphicSource = "\\includegraphics{figures/" as NSString
+    let graphicContext = try #require(LaTeXCompletionEngine.argumentContext(in: graphicSource, cursorLocation: graphicSource.length))
+    #expect(LaTeXCompletionEngine.argumentSuggestions(command: graphicContext.command, prefix: graphicContext.prefix, context: context).map(\.insertion) == ["figures/overview.png", "figures/results.pdf"])
 }
 
 @MainActor

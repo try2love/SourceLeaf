@@ -672,13 +672,20 @@ final class ComposerNSTextView: NSTextView {
     var sendBehavior: ChatSendBehavior = .enter
     var isGenerating = false
     var onSend: (() -> Bool)?
+    private var lastMarkedTextCommitDate = Date.distantPast
+
+    override func unmarkText() {
+        super.unmarkText()
+        lastMarkedTextCommitDate = Date()
+    }
 
     override func keyDown(with event: NSEvent) {
         if Self.shouldTreatReturnAsSend(
             characters: event.charactersIgnoringModifiers,
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
-            hasMarkedText: hasMarkedText()
+            hasMarkedText: hasMarkedText(),
+            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.18
         ), onSend?() == true {
             return
         }
@@ -689,10 +696,12 @@ final class ComposerNSTextView: NSTextView {
         characters: String?,
         modifierFlags: NSEvent.ModifierFlags,
         sendBehavior: ChatSendBehavior,
-        hasMarkedText: Bool
+        hasMarkedText: Bool,
+        recentlyCommittedMarkedText: Bool = false
     ) -> Bool {
         guard characters == "\r" || characters == "\n" else { return false }
         guard !hasMarkedText else { return false }
+        guard !recentlyCommittedMarkedText else { return false }
         let shift = modifierFlags.contains(.shift)
         return sendBehavior == .enter ? !shift : shift
     }
@@ -706,13 +715,9 @@ private struct ChatBubble: View {
 
     var body: some View {
         HStack {
-            if message.role == .user { Spacer(minLength: 24) }
+            if message.role == .user { Spacer(minLength: 32) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                ViewThatFits(in: .horizontal) {
-                    bubbleContent(wrapLongLines: false)
-                        .fixedSize(horizontal: true, vertical: false)
-                    bubbleContent(wrapLongLines: true)
-                }
+                bubbleContent
                 HStack(spacing: 7) {
                     Text(message.createdAt, format: .dateTime.month().day().hour().minute())
                         .sourceLeafFont(.caption2)
@@ -730,28 +735,21 @@ private struct ChatBubble: View {
                 }
                 .buttonStyle(.borderless)
             }
-            if message.role != .user { Spacer(minLength: 24) }
+            if message.role != .user { Spacer(minLength: 32) }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }
 
     @ViewBuilder
-    private func bubbleContent(wrapLongLines: Bool) -> some View {
-        let base = RenderedChatText(text: message.text)
+    private var bubbleContent: some View {
+        RenderedChatText(text: message.text)
             .textSelection(.enabled)
             .foregroundStyle(message.role == .user ? Color.white : Color.primary)
             .padding(9)
-        if wrapLongLines {
-            base
-                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .background(bubbleBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            base
-                .background(bubbleBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 10))
+            .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
+            .layoutPriority(1)
     }
 
     private var bubbleBackground: Color {
@@ -770,7 +768,14 @@ private struct RenderedChatText: View {
     let text: String
 
     var body: some View {
-        if let rendered = try? AttributedString(markdown: text) {
+        if text.looksLikeMarkdown,
+           let rendered = try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .full,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+        ) {
             Text(rendered)
         } else {
             Text(text)
@@ -906,6 +911,16 @@ private struct ProposalCard: View {
 private extension String {
     func removingPrefix(_ prefix: String) -> String {
         hasPrefix(prefix) ? String(dropFirst(prefix.count)) : self
+    }
+
+    var looksLikeMarkdown: Bool {
+        contains("**")
+            || contains("__")
+            || contains("`")
+            || contains("[")
+            || contains("](")
+            || range(of: #"(?m)^\s{0,3}([-*+]|\d+\.)\s+"#, options: .regularExpression) != nil
+            || range(of: #"(?m)^\s{0,3}#{1,6}\s+"#, options: .regularExpression) != nil
     }
 }
 
