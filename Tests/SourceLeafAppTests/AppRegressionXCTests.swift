@@ -303,6 +303,29 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testSourceSelectionBindingAdvancesOnEveryKeystroke() async throws {
+        let state = SourceTypingState(text: "alpha omega", selection: NSRange(location: 6, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+        state.selection = NSRange(location: 6, length: 0)
+
+        var expectedLocation = 6
+        for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            expectedLocation += 1
+            XCTAssertEqual(textView.selectedRange(), NSRange(location: expectedLocation, length: 0))
+            XCTAssertEqual(state.selection, NSRange(location: expectedLocation, length: 0))
+        }
+
+        XCTAssertEqual(textView.string, "alpha testomega")
+        XCTAssertEqual(state.text, "alpha testomega")
+    }
+
+    @MainActor
     func testFigureCommandCanInsertAProjectImageTemplateAndSelectCaption() async throws {
         let request = LaTeXEditRequest(command: .figure, argument: "figures/overview.png")
         let state = SourceTypingState(commandRequest: request)

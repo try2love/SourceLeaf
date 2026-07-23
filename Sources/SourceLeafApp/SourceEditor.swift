@@ -896,7 +896,7 @@ struct SourceTextView: NSViewRepresentable {
             lastLocallyEmittedText = textView.string
             parent.text = textView.string
             scheduleDeferredHighlighting()
-            scheduleSelectionCommit()
+            commitSelectionToBinding()
             updateCompletionOverlayIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
@@ -1022,7 +1022,7 @@ struct SourceTextView: NSViewRepresentable {
             let next = source.substring(with: NSRange(location: affectedRange.location, length: 1))
             guard next == replacement else { return false }
             textView.setSelectedRange(NSRange(location: affectedRange.location + (replacement as NSString).length, length: 0))
-            scheduleSelectionCommit()
+            commitSelectionToBinding()
             glyphOverlay?.selectionDidChange()
             return true
         }
@@ -1196,7 +1196,7 @@ struct SourceTextView: NSViewRepresentable {
             textView.scrollRangeToVisible(caret)
             applyingCompletionEdit = false
             hideCompletionOverlay()
-            scheduleSelectionCommit()
+            commitSelectionToBinding()
         }
 
         private static func caretOffset(afterInserting insertion: String) -> Int {
