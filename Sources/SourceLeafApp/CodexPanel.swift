@@ -11,7 +11,6 @@ struct CodexPanel: View {
     @State private var showingRename = false
     @State private var customModelDraft = ""
     @State private var showingCustomModel = false
-    @State private var showingActivity = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,9 +39,12 @@ struct CodexPanel: View {
                                 Text(model.streamingAssistantText)
                                     .textSelection(.enabled)
                                     .padding(9)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                                 Spacer(minLength: 24)
                             }
+                            .frame(maxWidth: .infinity)
                         }
                         if model.generating || !model.generationStatus.isEmpty {
                             HStack {
@@ -73,9 +75,6 @@ struct CodexPanel: View {
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
-                .onChange(of: model.generating) { _, generating in
-                    showingActivity = generating
-                }
             }
             Divider()
             composer
@@ -100,282 +99,304 @@ struct CodexPanel: View {
 
     private var controls: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                Menu {
-                    Button(L10n.text("chat.new")) { model.newChatSession() }
-                    Button(L10n.text("chat.rename")) {
-                        renameTitle = model.chatSessions.first(where: { $0.id == model.selectedChatSessionID })?.title ?? ""
-                        showingRename = true
-                    }
-                    Divider()
-                    ForEach(model.chatSessions) { session in
-                        Button {
-                            model.selectChatSession(session.id)
-                        } label: {
-                            let title = sessionDisplayTitle(session)
-                            if session.id == model.selectedChatSessionID {
-                                Label(title, systemImage: "checkmark")
-                            } else { Text(title) }
-                        }
-                    }
-                } label: {
-                    Label(selectedSessionTitle, systemImage: "bubble.left.and.bubble.right")
-                }
-                .help(String(format: L10n.text("chat.currentSession"), selectedSessionTitle))
-                .popover(isPresented: $showingRename) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.text("chat.rename")).sourceLeafFont(.headline, weight: .semibold)
-                        TextField(L10n.text("chat.title"), text: $renameTitle)
-                            .frame(width: 260)
-                            .onSubmit {
-                                model.renameSelectedChatSession(renameTitle)
-                                showingRename = false
-                            }
-                        HStack {
-                            Spacer()
-                            Button(L10n.text("action.cancel")) { showingRename = false }
-                            Button(L10n.text("action.save")) {
-                                model.renameSelectedChatSession(renameTitle)
-                                showingRename = false
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
-                    .padding(14)
-                }
-
-                Menu {
-                    ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
-                        Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
-                            model.usePrompt(prompt)
-                        }
-                    }
-                } label: {
-                    Label(L10n.text("ai.quickPrompt"), systemImage: "text.bubble")
-                }
-                .help(L10n.text("ai.quickPrompt"))
-
-                providerHealthButton
-
-                Menu {
-                    ForEach(model.providerProfiles.filter(\.enabled)) { profile in
-                        Button {
-                            model.selectProvider(profile.id)
-                        } label: {
-                            if profile.id == model.selectedProviderID {
-                                Label(profile.name, systemImage: "checkmark")
-                            } else {
-                                Text(profile.name)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(selectedProviderName, systemImage: "terminal")
-                }
-                .help(String(format: L10n.text("provider.current"), selectedProviderName))
-
-                Menu {
-                    Button(L10n.text("provider.modelDefault")) { model.selectedProviderModel = "" }
-                    ForEach(modelPresets, id: \.self) { candidate in
-                        Button {
-                            model.selectedProviderModel = candidate
-                        } label: {
-                            if model.selectedProviderModel == candidate {
-                                Label(candidate, systemImage: "checkmark")
-                            } else {
-                                Text(candidate)
-                            }
-                        }
-                    }
-                    Divider()
-                    Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
-                } label: {
-                    Label(model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel, systemImage: "slider.horizontal.3")
-                }
-                .help(String(format: L10n.text("provider.currentModel"), model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel))
-
-                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
-                    Menu {
-                        Button(L10n.text("provider.reasoningDefault")) { model.selectedReasoningEffort = nil }
-                        ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
-                            Button {
-                                model.selectedReasoningEffort = effort
-                            } label: {
-                                if model.selectedReasoningEffort == effort {
-                                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
-                                } else {
-                                    Text(L10n.text("reasoning.\(effort.rawValue)"))
-                                }
-                            }
-                        }
-                    } label: {
-                        Label(reasoningLabel, systemImage: "brain.head.profile")
-                    }
-                    .help(String(format: L10n.text("provider.currentReasoning"), reasoningLabel))
-                }
-
-                Menu {
-                    ForEach(ContextScope.allCases) { scope in
-                        Button {
-                            model.setContextScope(scope)
-                        } label: {
-                            if scope == model.contextScope {
-                                Label(L10n.context(scope), systemImage: "checkmark")
-                            } else {
-                                Text(L10n.context(scope))
-                            }
-                        }
-                    }
-                } label: {
-                    Label(L10n.context(model.contextScope), systemImage: "doc.text.magnifyingglass")
-                }
-                .help(String(format: L10n.text("ai.currentContext"), L10n.context(model.contextScope)))
-
-                if model.contextScope == .custom {
-                    Menu {
-                        ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
-                            Toggle(file.relativePath, isOn: Binding(
-                                get: { model.customContextPaths.contains(file.relativePath) },
-                                set: { enabled in
-                                    if enabled { model.customContextPaths.insert(file.relativePath) }
-                                    else { model.customContextPaths.remove(file.relativePath) }
-                                }
-                            ))
-                        }
-                    } label: {
-                        Label("\(model.customContextPaths.count)", systemImage: "doc.badge.plus")
-                    }
-                    .help(L10n.text("ai.customContextFiles"))
-                }
-            }
-            .buttonStyle(.borderless)
+            fullControls
             compactControls
+            iconOnlyControls
         }
         .padding(7)
         .background(.bar)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+    }
+
+    private var fullControls: some View {
+        HStack(spacing: 8) {
+            sessionMenu(labelStyle: .title, maxWidth: 190)
+            quickPromptMenu(labelStyle: .title)
+            providerHealthButton
+            providerMenu(maxWidth: 130)
+            modelMenu(maxWidth: 150)
+            if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
+                reasoningMenu(maxWidth: 120)
+            }
+            contextMenu(maxWidth: 120)
+            customContextMenuIfNeeded
+        }
+        .buttonStyle(.borderless)
     }
 
     private var compactControls: some View {
         HStack(spacing: 8) {
-            Menu {
-                Button(L10n.text("chat.new")) { model.newChatSession() }
-                Button(L10n.text("chat.rename")) {
-                    renameTitle = selectedSessionTitle
-                    showingRename = true
-                }
-                Divider()
-                ForEach(model.chatSessions) { session in
-                    Button {
-                        model.selectChatSession(session.id)
-                    } label: {
-                        if session.id == model.selectedChatSessionID {
-                            Label(session.title, systemImage: "checkmark")
-                        } else {
-                            Text(session.title)
-                        }
-                    }
-                }
-            } label: {
-                Label(selectedSessionTitle, systemImage: "bubble.left.and.bubble.right")
-                    .lineLimit(1)
-            }
-            .help(String(format: L10n.text("chat.currentSession"), selectedSessionTitle))
-
-            Menu {
-                ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
-                    Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
-                        model.usePrompt(prompt)
-                    }
-                }
-            } label: {
-                Image(systemName: "text.bubble")
-            }
-            .help(L10n.text("ai.quickPrompt"))
-
+            sessionMenu(labelStyle: .title, maxWidth: 150)
+            quickPromptMenu(labelStyle: .icon)
             providerHealthButton
-
-            Menu {
-                Section(L10n.text("ai.provider")) {
-                    ForEach(model.providerProfiles.filter(\.enabled)) { profile in
-                        Button {
-                            model.selectProvider(profile.id)
-                        } label: {
-                            if profile.id == model.selectedProviderID {
-                                Label(profile.name, systemImage: "checkmark")
-                            } else {
-                                Text(profile.name)
-                            }
-                        }
-                    }
-                }
-                Section(L10n.text("provider.model")) {
-                    Button {
-                        model.selectedProviderModel = ""
-                    } label: {
-                        if model.selectedProviderModel.isEmpty {
-                            Label(L10n.text("provider.modelDefault"), systemImage: "checkmark")
-                        } else {
-                            Text(L10n.text("provider.modelDefault"))
-                        }
-                    }
-                    ForEach(modelPresets, id: \.self) { candidate in
-                        Button {
-                            model.selectedProviderModel = candidate
-                        } label: {
-                            if model.selectedProviderModel == candidate {
-                                Label(candidate, systemImage: "checkmark")
-                            } else {
-                                Text(candidate)
-                            }
-                        }
-                    }
-                    Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
-                }
-                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
-                    Section(L10n.text("provider.reasoning")) {
-                        Button {
-                            model.selectedReasoningEffort = nil
-                        } label: {
-                            if model.selectedReasoningEffort == nil {
-                                Label(L10n.text("provider.reasoningDefault"), systemImage: "checkmark")
-                            } else {
-                                Text(L10n.text("provider.reasoningDefault"))
-                            }
-                        }
-                        ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
-                            Button {
-                                model.selectedReasoningEffort = effort
-                            } label: {
-                                if model.selectedReasoningEffort == effort {
-                                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
-                                } else {
-                                    Text(L10n.text("reasoning.\(effort.rawValue)"))
-                                }
-                            }
-                        }
-                    }
-                }
-                Section(L10n.text("ai.context")) {
-                    ForEach(ContextScope.allCases) { scope in
-                        Button {
-                            model.setContextScope(scope)
-                        } label: {
-                            if scope == model.contextScope {
-                                Label(L10n.context(scope), systemImage: "checkmark")
-                            } else {
-                                Text(L10n.context(scope))
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label(compactAISettingsLabel, systemImage: "slider.horizontal.3")
-            }
-            .help(model.currentAIConfigurationSummary)
-
+            combinedAISettingsMenu(labelStyle: .title)
             Spacer(minLength: 0)
         }
         .buttonStyle(.borderless)
+    }
+
+    private var iconOnlyControls: some View {
+        HStack(spacing: 8) {
+            sessionMenu(labelStyle: .icon, maxWidth: nil)
+            quickPromptMenu(labelStyle: .icon)
+            providerHealthButton
+            combinedAISettingsMenu(labelStyle: .icon)
+            Spacer(minLength: 0)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private enum ToolbarLabelStyle {
+        case title
+        case icon
+    }
+
+    private func sessionMenu(labelStyle: ToolbarLabelStyle, maxWidth: CGFloat?) -> some View {
+        Menu {
+            Button(L10n.text("chat.new")) { model.newChatSession() }
+            Button(L10n.text("chat.rename")) {
+                renameTitle = model.chatSessions.first(where: { $0.id == model.selectedChatSessionID })?.title ?? ""
+                showingRename = true
+            }
+            Divider()
+            ForEach(model.chatSessions) { session in
+                Button {
+                    model.selectChatSession(session.id)
+                } label: {
+                    let title = sessionDisplayTitle(session)
+                    if session.id == model.selectedChatSessionID {
+                        Label(title, systemImage: "checkmark")
+                    } else {
+                        Text(title)
+                    }
+                }
+            }
+        } label: {
+            toolbarLabel(
+                title: selectedSessionTitle,
+                systemImage: "bubble.left.and.bubble.right",
+                style: labelStyle,
+                maxWidth: maxWidth
+            )
+        }
+        .help(String(format: L10n.text("chat.currentSession"), selectedSessionTitle))
+        .popover(isPresented: $showingRename) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.text("chat.rename")).sourceLeafFont(.headline, weight: .semibold)
+                TextField(L10n.text("chat.title"), text: $renameTitle)
+                    .frame(width: 260)
+                    .onSubmit {
+                        model.renameSelectedChatSession(renameTitle)
+                        showingRename = false
+                    }
+                HStack {
+                    Spacer()
+                    Button(L10n.text("action.cancel")) { showingRename = false }
+                    Button(L10n.text("action.save")) {
+                        model.renameSelectedChatSession(renameTitle)
+                        showingRename = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private func quickPromptMenu(labelStyle: ToolbarLabelStyle) -> some View {
+        Menu {
+            ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
+                Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
+                    model.usePrompt(prompt)
+                }
+            }
+        } label: {
+            toolbarLabel(
+                title: L10n.text("ai.quickPrompt"),
+                systemImage: "text.bubble",
+                style: labelStyle,
+                maxWidth: 130
+            )
+        }
+        .help(L10n.text("ai.quickPrompt"))
+    }
+
+    private func providerMenu(maxWidth: CGFloat?) -> some View {
+        Menu {
+            providerMenuItems
+        } label: {
+            toolbarLabel(title: selectedProviderName, systemImage: "terminal", style: .title, maxWidth: maxWidth)
+        }
+        .help(String(format: L10n.text("provider.current"), selectedProviderName))
+    }
+
+    private func modelMenu(maxWidth: CGFloat?) -> some View {
+        Menu {
+            modelMenuItems
+        } label: {
+            toolbarLabel(title: modelMenuTitle, systemImage: "slider.horizontal.3", style: .title, maxWidth: maxWidth)
+        }
+        .help(String(format: L10n.text("provider.currentModel"), modelMenuTitle))
+    }
+
+    private func reasoningMenu(maxWidth: CGFloat?) -> some View {
+        Menu {
+            reasoningMenuItems
+        } label: {
+            toolbarLabel(title: reasoningLabel, systemImage: "brain.head.profile", style: .title, maxWidth: maxWidth)
+        }
+        .help(String(format: L10n.text("provider.currentReasoning"), reasoningLabel))
+    }
+
+    private func contextMenu(maxWidth: CGFloat?) -> some View {
+        Menu {
+            contextMenuItems
+        } label: {
+            toolbarLabel(title: L10n.context(model.contextScope), systemImage: "doc.text.magnifyingglass", style: .title, maxWidth: maxWidth)
+        }
+        .help(String(format: L10n.text("ai.currentContext"), L10n.context(model.contextScope)))
+    }
+
+    private func combinedAISettingsMenu(labelStyle: ToolbarLabelStyle) -> some View {
+        Menu {
+            Section(L10n.text("ai.provider")) { providerMenuItems }
+            Section(L10n.text("provider.model")) { modelMenuItems }
+            if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
+                Section(L10n.text("provider.reasoning")) { reasoningMenuItems }
+            }
+            Section(L10n.text("ai.context")) { contextMenuItems }
+            if model.contextScope == .custom {
+                Section(L10n.text("ai.customContextFiles")) { customContextMenuItems }
+            }
+        } label: {
+            toolbarLabel(
+                title: L10n.text("ai.settings"),
+                systemImage: "slider.horizontal.3",
+                style: labelStyle,
+                maxWidth: 120
+            )
+        }
+        .help(model.currentAIConfigurationSummary)
+    }
+
+    @ViewBuilder
+    private var providerMenuItems: some View {
+        ForEach(model.providerProfiles.filter(\.enabled)) { profile in
+            Button {
+                model.selectProvider(profile.id)
+            } label: {
+                if profile.id == model.selectedProviderID {
+                    Label(profile.name, systemImage: "checkmark")
+                } else {
+                    Text(profile.name)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var modelMenuItems: some View {
+        Button {
+            model.selectedProviderModel = ""
+        } label: {
+            if model.selectedProviderModel.isEmpty {
+                Label(L10n.text("provider.modelDefault"), systemImage: "checkmark")
+            } else {
+                Text(L10n.text("provider.modelDefault"))
+            }
+        }
+        ForEach(modelPresets, id: \.self) { candidate in
+            Button {
+                model.selectedProviderModel = candidate
+            } label: {
+                if model.selectedProviderModel == candidate {
+                    Label(candidate, systemImage: "checkmark")
+                } else {
+                    Text(candidate)
+                }
+            }
+        }
+        Divider()
+        Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
+    }
+
+    @ViewBuilder
+    private var reasoningMenuItems: some View {
+        Button {
+            model.selectedReasoningEffort = nil
+        } label: {
+            if model.selectedReasoningEffort == nil {
+                Label(L10n.text("provider.reasoningDefault"), systemImage: "checkmark")
+            } else {
+                Text(L10n.text("provider.reasoningDefault"))
+            }
+        }
+        ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
+            Button {
+                model.selectedReasoningEffort = effort
+            } label: {
+                if model.selectedReasoningEffort == effort {
+                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
+                } else {
+                    Text(L10n.text("reasoning.\(effort.rawValue)"))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        ForEach(ContextScope.allCases) { scope in
+            Button {
+                model.setContextScope(scope)
+            } label: {
+                if scope == model.contextScope {
+                    Label(L10n.context(scope), systemImage: "checkmark")
+                } else {
+                    Text(L10n.context(scope))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var customContextMenuIfNeeded: some View {
+        if model.contextScope == .custom {
+            Menu {
+                customContextMenuItems
+            } label: {
+                toolbarLabel(title: "\(model.customContextPaths.count)", systemImage: "doc.badge.plus", style: .title, maxWidth: 52)
+            }
+            .help(L10n.text("ai.customContextFiles"))
+        }
+    }
+
+    @ViewBuilder
+    private var customContextMenuItems: some View {
+        ForEach(model.projectFiles.filter { [.tex, .bibliography, .style].contains($0.kind) }) { file in
+            Toggle(file.relativePath, isOn: Binding(
+                get: { model.customContextPaths.contains(file.relativePath) },
+                set: { enabled in
+                    if enabled { model.customContextPaths.insert(file.relativePath) }
+                    else { model.customContextPaths.remove(file.relativePath) }
+                }
+            ))
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarLabel(title: String, systemImage: String, style: ToolbarLabelStyle, maxWidth: CGFloat?) -> some View {
+        switch style {
+        case .title:
+            Label(title, systemImage: systemImage)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: maxWidth, alignment: .leading)
+        case .icon:
+            Image(systemName: systemImage)
+                .accessibilityLabel(title)
+        }
     }
 
     private var composer: some View {
@@ -455,10 +476,14 @@ struct CodexPanel: View {
             }
             HStack {
                 Text(model.editTargets.isEmpty ? L10n.text("ai.chatOnlyHint") : L10n.text("ai.targetHint"))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Text(model.configuration.chatSendBehavior == .enter
                      ? L10n.text("chat.sendWithEnter")
                      : L10n.text("chat.sendWithShiftEnter"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .sourceLeafFont(.caption2)
             .foregroundStyle(.secondary)
@@ -515,6 +540,12 @@ struct CodexPanel: View {
             ?? L10n.text("provider.reasoningDefault")
     }
 
+    private var modelMenuTitle: String {
+        model.selectedProviderModel.isEmpty
+            ? L10n.text("provider.modelDefaultShort")
+            : model.selectedProviderModel
+    }
+
     private var modelPresets: [String] {
         switch model.selectedProviderKind {
         case .localCodex:
@@ -522,13 +553,6 @@ struct CodexPanel: View {
         default:
             model.selectedProviderModel.isEmpty ? [] : [model.selectedProviderModel]
         }
-    }
-
-    private var compactAISettingsLabel: String {
-        let modelLabel = model.selectedProviderModel.isEmpty
-            ? L10n.text("provider.modelDefaultShort")
-            : model.selectedProviderModel
-        return "\(selectedProviderName) · \(modelLabel) · \(reasoningLabel)"
     }
 
     private func sessionDisplayTitle(_ session: ChatSession) -> String {
@@ -578,6 +602,8 @@ private struct ChatBubble: View {
                     .textSelection(.enabled)
                     .foregroundStyle(message.role == .user ? Color.white : Color.primary)
                     .padding(9)
+                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(
                         message.role == .user
                             ? Color.accentColor
@@ -588,6 +614,7 @@ private struct ChatBubble: View {
                     Text(message.createdAt, format: .dateTime.month().day().hour().minute())
                         .sourceLeafFont(.caption2)
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                     Button { copyMessage() } label: { Image(systemName: "doc.on.doc") }
                         .help(L10n.text("action.copy"))
                     if message.role == .user {
@@ -600,8 +627,10 @@ private struct ChatBubble: View {
                 }
                 .buttonStyle(.borderless)
             }
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
             if message.role != .user { Spacer(minLength: 24) }
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func copyMessage() {
@@ -617,6 +646,8 @@ private struct AIConfigurationNotice: View {
         Label(summary, systemImage: "slider.horizontal.3")
             .sourceLeafFont(.caption)
             .foregroundStyle(.secondary)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -659,9 +690,11 @@ private struct ProposalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Label(target.map { "\($0.relativePath):\($0.startLine)-\($0.endLine)" } ?? L10n.text("diff.untitled"), systemImage: "arrow.left.arrow.right")
                     .sourceLeafFont(.caption, design: .monospaced).bold()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
                 if validation?.hasErrors == true {
                     Label(L10n.text("validation.error"), systemImage: "xmark.octagon.fill").foregroundStyle(.red)
@@ -673,13 +706,12 @@ private struct ProposalCard: View {
             }
             if !replacement.explanation.isEmpty {
                 Text(replacement.explanation).sourceLeafFont(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .top, spacing: 0) {
-                DiffText(title: L10n.text("diff.original"), text: target?.originalText ?? "", color: .red)
-                Divider()
-                DiffText(title: L10n.text("diff.proposed"), text: replacement.replacement, color: .green)
-            }
-            .frame(minHeight: 100, maxHeight: 260)
+            AdaptiveDiffPair(
+                original: target?.originalText ?? "",
+                proposed: replacement.replacement
+            )
             if let validation, !validation.issues.isEmpty {
                 ForEach(validation.issues) { issue in
                     Label(L10n.validationMessage(issue), systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle")
@@ -715,10 +747,12 @@ private struct ProposalCard: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.validatingReplacementID != nil)
             }
+            .lineLimit(1)
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25)))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -733,23 +767,41 @@ private struct AcceptedDiffCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Label(entry.relativePath, systemImage: "checkmark.circle.fill")
                     .sourceLeafFont(.caption, design: .monospaced, weight: .bold)
                     .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
                 Text(L10n.text("diff.accepted")).sourceLeafFont(.caption).foregroundStyle(.secondary)
             }
-            HStack(alignment: .top, spacing: 0) {
-                DiffText(title: L10n.text("diff.original"), text: entry.originalText, color: .red)
-                Divider()
-                DiffText(title: L10n.text("diff.proposed"), text: entry.replacementText, color: .green)
-            }
-            .frame(minHeight: 100, maxHeight: 260)
+            AdaptiveDiffPair(original: entry.originalText, proposed: entry.replacementText)
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.35)))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AdaptiveDiffPair: View {
+    let original: String
+    let proposed: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 0) {
+                DiffText(title: L10n.text("diff.original"), text: original, color: .red)
+                Divider()
+                DiffText(title: L10n.text("diff.proposed"), text: proposed, color: .green)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                DiffText(title: L10n.text("diff.original"), text: original, color: .red)
+                DiffText(title: L10n.text("diff.proposed"), text: proposed, color: .green)
+            }
+        }
+        .frame(minHeight: 100, maxHeight: 300)
     }
 }
 
@@ -771,5 +823,6 @@ private struct DiffText: View {
         .padding(8)
         .background(color.opacity(0.05))
         .frame(maxWidth: .infinity)
+        .clipped()
     }
 }

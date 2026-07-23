@@ -698,6 +698,77 @@ import Testing
 }
 
 @MainActor
+@Test func codexPanelAdaptsToolbarAndDiffsToNarrowWidths() throws {
+    let support = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-narrow-codex-\(UUID().uuidString)", isDirectory: true)
+    let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.narrow-codex.\(UUID().uuidString)"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
+    let providerID = try #require(model.selectedProviderID)
+    if let index = model.providerProfiles.firstIndex(where: { $0.id == providerID }) {
+        model.providerProfiles[index].model = "gpt-5.4-mini-with-a-long-visible-model-name"
+    }
+    let target = SourceTarget(
+        relativePath: "MutedRAG.tex",
+        utf16Location: 0,
+        utf16Length: 120,
+        startLine: 691,
+        endLine: 698,
+        originalText: "在本节中，我们在若干潜在防御策略下评估 MutedRAG 的性能。实验结果表明，现有部分防御方案不足以有效防御 MutedRAG。",
+        contentHash: "narrow-codex"
+    )
+    let replacement = ProposedReplacement(
+        targetID: target.id,
+        replacement: "在本节中，我们系统评估 MutedRAG 在多种潜在防御策略下的性能，并说明现有防御仍不足以稳定阻断该攻击。",
+        explanation: "压缩表达并保持技术含义不变。"
+    )
+    model.chatSessions = [ChatSession(title: "这篇文章的标题是什么以及是否需要继续压缩", projectPath: support.path)]
+    model.selectedChatSessionID = model.chatSessions[0].id
+    model.messages = [
+        ChatMessage(role: .user, text: "这篇文章的标题是什么以及是否需要继续压缩"),
+        ChatMessage(role: .assistant, text: "标题已经定位，并生成了一个较长的修改建议用于测试窄宽度布局。")
+    ]
+    model.editTargets = [target]
+    model.pendingProposal = AIProposal(summary: "Generated one replacement.", replacements: [replacement], providerName: "Local Codex")
+    model.proposalValidation = [replacement.id: LaTeXValidator.validate(original: target.originalText, replacement: replacement.replacement)]
+    model.history = [
+        AIEditHistoryEntry(
+            projectPath: support.path,
+            relativePath: "MutedRAG.tex",
+            originalText: target.originalText,
+            replacementText: replacement.replacement,
+            instruction: "测试窄宽度布局",
+            providerName: "Local Codex",
+            sessionID: model.selectedChatSessionID
+        )
+    ]
+
+    let size = NSSize(width: 360, height: 760)
+    let hostingView = NSHostingView(
+        rootView: CodexPanel()
+            .environmentObject(model)
+            .environment(\.colorScheme, .light)
+            .frame(width: size.width, height: size.height)
+    )
+    hostingView.frame = NSRect(origin: .zero, size: size)
+    let window = NSWindow(contentRect: hostingView.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+        try? FileManager.default.removeItem(at: support)
+    }
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+
+    #expect(hostingView.fittingSize.width <= size.width + 1)
+    let representation = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+    hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+    #expect(visibleInkPixelCount(in: representation) > 1_000)
+}
+
+@MainActor
 private func render<V: View>(_ view: V, size: NSSize) throws -> Data {
     let hostingView = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
     hostingView.frame = NSRect(origin: .zero, size: size)
