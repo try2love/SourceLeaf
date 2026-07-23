@@ -965,7 +965,11 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            handleCompletionCommand(commandSelector, in: textView)
+            if handleCompletionCommand(commandSelector, in: textView) { return true }
+            if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                return jumpToNextLaTeXPlaceholderIfNeeded(in: textView)
+            }
+            return false
         }
 
         func textView(
@@ -1061,6 +1065,60 @@ struct SourceTextView: NSViewRepresentable {
             case "$": "$"
             default: nil
             }
+        }
+
+        private func jumpToNextLaTeXPlaceholderIfNeeded(in textView: NSTextView) -> Bool {
+            let selection = textView.selectedRange()
+            guard selection.length == 0 else { return false }
+            let source = textView.string as NSString
+            guard selection.location <= source.length,
+                  let currentClose = Self.currentArgumentClosingBraceLocation(in: source, cursorLocation: selection.location),
+                  let nextPlaceholder = Self.nextEmptyPlaceholder(in: source, searchFrom: currentClose + 1) else {
+                return false
+            }
+            textView.setSelectedRange(NSRange(location: nextPlaceholder.location + 1, length: 0))
+            textView.scrollRangeToVisible(NSRange(location: nextPlaceholder.location + 1, length: 0))
+            commitSelectionToBinding()
+            glyphOverlay?.selectionDidChange()
+            return true
+        }
+
+        private static func currentArgumentClosingBraceLocation(in source: NSString, cursorLocation: Int) -> Int? {
+            guard cursorLocation <= source.length else { return nil }
+            var openLocation: Int?
+            var index = cursorLocation - 1
+            while index >= 0 {
+                let character = source.character(at: index)
+                if character == 125 { return nil }
+                if character == 123 {
+                    openLocation = index
+                    break
+                }
+                index -= 1
+            }
+            guard let openLocation else { return nil }
+            var close = max(cursorLocation, openLocation + 1)
+            while close < source.length {
+                let character = source.character(at: close)
+                if character == 123 { return nil }
+                if character == 125 { return close }
+                close += 1
+            }
+            return nil
+        }
+
+        private static func nextEmptyPlaceholder(in source: NSString, searchFrom: Int) -> NSRange? {
+            guard searchFrom < source.length else { return nil }
+            var index = searchFrom
+            while index + 1 < source.length {
+                let current = source.character(at: index)
+                let next = source.character(at: index + 1)
+                if (current == 123 && next == 125) || (current == 91 && next == 93) {
+                    return NSRange(location: index, length: 2)
+                }
+                index += 1
+            }
+            return nil
         }
 
         private func scheduleSelectionCommit() {

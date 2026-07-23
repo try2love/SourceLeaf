@@ -117,6 +117,42 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testTabJumpsBetweenLatexCompletionPlaceholders() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [("\\", 42), ("f", 3), ("r", 15)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.first?.insertion, "\\frac{}{}")
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(textView.string, "\\frac{}{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 6, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "x", keyCode: 7, window: host.window)))
+        try await Task.sleep(for: .milliseconds(20))
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\frac{x}{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "y", keyCode: 16, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(textView.string, "\\frac{x}{y}")
+        XCTAssertEqual(state.selection, NSRange(location: 10, length: 0))
+    }
+
+    @MainActor
     func testCitationCompletionUsesProjectBibliographyIndex() async throws {
         let state = SourceTypingState()
         let context = LaTeXCompletionContext(index: ProjectIndex(
