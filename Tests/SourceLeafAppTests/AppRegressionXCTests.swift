@@ -181,6 +181,35 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testFullBeginEnvironmentCandidateInsertsMatchingEndEnvironment() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [
+            ("\\", 42), ("b", 11), ("e", 14), ("g", 5), ("i", 34), ("n", 45)
+        ] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        let insertions = overlay.candidates.map(\.insertion)
+        let figureIndex = try XCTUnwrap(insertions.firstIndex(of: "\\begin{figure}"))
+
+        overlay.onPick?(figureIndex)
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(textView.string, "\\begin{figure}\n\n\\end{figure}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
+        XCTAssertEqual(state.selection, NSRange(location: 15, length: 0))
+    }
+
+    @MainActor
     func testEscapeDismissesLatexCompletionOverlay() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)

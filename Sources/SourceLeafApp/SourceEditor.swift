@@ -1173,12 +1173,12 @@ struct SourceTextView: NSViewRepresentable {
             guard var state = activeCompletionState, let textView else { return }
             state.selectedIndex = min(max(0, index), max(0, state.candidates.count - 1))
             activeCompletionState = state
-            acceptCompletion(in: textView)
+            acceptCompletion(in: textView, selectedIndexOverride: state.selectedIndex)
         }
 
-        private func acceptCompletion(in textView: NSTextView) {
+        private func acceptCompletion(in textView: NSTextView, selectedIndexOverride: Int? = nil) {
             guard var state = activeCompletionState, !state.candidates.isEmpty else { return }
-            state.selectedIndex = min(max(0, completionOverlay?.selectedIndex ?? state.selectedIndex), state.candidates.count - 1)
+            state.selectedIndex = min(max(0, selectedIndexOverride ?? completionOverlay?.selectedIndex ?? state.selectedIndex), state.candidates.count - 1)
             let candidate = state.candidates[state.selectedIndex]
             guard NSMaxRange(state.replacementRange) <= (textView.string as NSString).length else { return }
             let insertion = candidate.insertion
@@ -1188,7 +1188,13 @@ struct SourceTextView: NSViewRepresentable {
             if state.argumentCommand == "begin" {
                 caret = insertMatchingEndEnvironmentIfNeeded(
                     environmentName: insertion,
-                    prefixEndLocation: state.replacementRange.location + (insertion as NSString).length,
+                    closingBraceLocation: state.replacementRange.location + (insertion as NSString).length,
+                    in: textView
+                ) ?? caret
+            } else if let environmentName = Self.beginEnvironmentName(in: insertion) {
+                caret = insertMatchingEndEnvironmentIfNeeded(
+                    environmentName: environmentName,
+                    closingBraceLocation: state.replacementRange.location + (insertion as NSString).length - 1,
                     in: textView
                 ) ?? caret
             }
@@ -1209,17 +1215,29 @@ struct SourceTextView: NSViewRepresentable {
             return ns.length
         }
 
+        private static func beginEnvironmentName(in insertion: String) -> String? {
+            guard insertion.hasPrefix(#"\begin{"#), insertion.hasSuffix("}") else { return nil }
+            let nsInsertion = insertion as NSString
+            let start = (#"\begin{"# as NSString).length
+            let length = nsInsertion.length - start - 1
+            guard length > 0 else { return nil }
+            let name = nsInsertion.substring(with: NSRange(location: start, length: length))
+            guard name.range(of: #"^[A-Za-z*]+$"#, options: .regularExpression) != nil else { return nil }
+            return name
+        }
+
         private func insertMatchingEndEnvironmentIfNeeded(
             environmentName: String,
-            prefixEndLocation: Int,
+            closingBraceLocation: Int,
             in textView: NSTextView
         ) -> NSRange? {
             let source = textView.string as NSString
             guard !environmentName.isEmpty,
-                  prefixEndLocation < source.length,
-                  source.substring(with: NSRange(location: prefixEndLocation, length: 1)) == "}" else { return nil }
+                  closingBraceLocation >= 0,
+                  closingBraceLocation < source.length,
+                  source.substring(with: NSRange(location: closingBraceLocation, length: 1)) == "}" else { return nil }
             let closing = "\n\n\\end{\(environmentName)}"
-            let insertLocation = prefixEndLocation + 1
+            let insertLocation = closingBraceLocation + 1
             textView.insertText(closing, replacementRange: NSRange(location: insertLocation, length: 0))
             return NSRange(location: insertLocation + 1, length: 0)
         }
