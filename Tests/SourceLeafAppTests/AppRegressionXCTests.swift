@@ -116,6 +116,30 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBackslashCompletionKeepsAllCandidatesReachableByKeyboardNavigation() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertGreaterThanOrEqual(overlay.candidates.count, 60)
+
+        for _ in 0..<14 {
+            textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        }
+
+        XCTAssertGreaterThanOrEqual(overlay.selectedIndex, 14)
+        XCTAssertLessThan(overlay.selectedIndex, overlay.candidates.count)
+    }
+
+    @MainActor
     func testTabAcceptsNarrowedLatexCompletionAndPlacesCaretInsideBraces() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)

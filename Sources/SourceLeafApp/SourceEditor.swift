@@ -1739,6 +1739,7 @@ struct LaTeXCompletionState: Equatable {
 final class LaTeXCompletionOverlayView: NSView {
     private(set) var candidates: [LaTeXCompletionCandidate] = []
     private(set) var selectedIndex = 0
+    private var firstVisibleIndex = 0
     var palette = SourceEditorPalette(theme: .light, appearance: NSApp.effectiveAppearance) {
         didSet { needsDisplay = true }
     }
@@ -1760,10 +1761,11 @@ final class LaTeXCompletionOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { isShowing ? self : nil }
 
     func show(candidates: [LaTeXCompletionCandidate], selectedIndex: Int, anchor: NSRect, palette: SourceEditorPalette) {
-        self.candidates = Array(candidates.prefix(maxRows))
+        self.candidates = candidates
         self.selectedIndex = min(max(0, selectedIndex), max(0, self.candidates.count - 1))
+        ensureSelectionVisible()
         self.palette = palette
-        let rows = max(1, self.candidates.count)
+        let rows = max(1, min(maxRows, self.candidates.count))
         let height = CGFloat(rows) * rowHeight + 10
         let containerBounds = superview?.bounds ?? NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         let maxX = max(8, containerBounds.maxX - overlayWidth - 8)
@@ -1779,6 +1781,7 @@ final class LaTeXCompletionOverlayView: NSView {
     func hide() {
         candidates = []
         selectedIndex = 0
+        firstVisibleIndex = 0
         isHidden = true
         needsDisplay = true
     }
@@ -1786,16 +1789,21 @@ final class LaTeXCompletionOverlayView: NSView {
     func moveSelection(delta: Int) {
         guard !candidates.isEmpty else { return }
         selectedIndex = (selectedIndex + delta + candidates.count) % candidates.count
+        ensureSelectionVisible()
         needsDisplay = true
     }
 
     override func mouseDown(with event: NSEvent) {
         guard isShowing else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let row = Int(max(0, min(CGFloat(candidates.count - 1), floor((point.y - 5) / rowHeight))))
-        selectedIndex = row
+        let visibleCandidates = visibleCandidateSlice()
+        guard !visibleCandidates.isEmpty else { return }
+        let row = Int(max(0, min(CGFloat(visibleCandidates.count - 1), floor((point.y - 5) / rowHeight))))
+        let absoluteIndex = firstVisibleIndex + row
+        selectedIndex = min(max(0, absoluteIndex), candidates.count - 1)
+        ensureSelectionVisible()
         needsDisplay = true
-        onPick?(row)
+        onPick?(selectedIndex)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1809,14 +1817,52 @@ final class LaTeXCompletionOverlayView: NSView {
         path.lineWidth = 1
         path.stroke()
 
-        for (index, candidate) in candidates.enumerated() {
-            let row = NSRect(x: 5, y: 5 + CGFloat(index) * rowHeight, width: bounds.width - 10, height: rowHeight)
+        for (offset, candidate) in visibleCandidateSlice().enumerated() {
+            let index = firstVisibleIndex + offset
+            let row = NSRect(x: 5, y: 5 + CGFloat(offset) * rowHeight, width: bounds.width - 10, height: rowHeight)
             if index == selectedIndex {
                 NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
                 NSBezierPath(roundedRect: row.insetBy(dx: 2, dy: 2), xRadius: 5, yRadius: 5).fill()
             }
             draw(candidate: candidate, in: row, selected: index == selectedIndex)
         }
+        drawScrollIndicatorIfNeeded()
+    }
+
+    private func visibleCandidateSlice() -> ArraySlice<LaTeXCompletionCandidate> {
+        guard !candidates.isEmpty else { return [] }
+        let start = min(max(0, firstVisibleIndex), max(0, candidates.count - 1))
+        let end = min(candidates.count, start + maxRows)
+        return candidates[start..<end]
+    }
+
+    private func ensureSelectionVisible() {
+        guard !candidates.isEmpty else {
+            firstVisibleIndex = 0
+            return
+        }
+        selectedIndex = min(max(0, selectedIndex), candidates.count - 1)
+        if selectedIndex < firstVisibleIndex {
+            firstVisibleIndex = selectedIndex
+        } else if selectedIndex >= firstVisibleIndex + maxRows {
+            firstVisibleIndex = selectedIndex - maxRows + 1
+        }
+        firstVisibleIndex = min(max(0, firstVisibleIndex), max(0, candidates.count - maxRows))
+    }
+
+    private func drawScrollIndicatorIfNeeded() {
+        guard candidates.count > maxRows else { return }
+        let track = NSRect(x: bounds.maxX - 7, y: 8, width: 3, height: max(8, bounds.height - 16))
+        NSColor.separatorColor.withAlphaComponent(0.35).setFill()
+        NSBezierPath(roundedRect: track, xRadius: 1.5, yRadius: 1.5).fill()
+        let visibleFraction = CGFloat(maxRows) / CGFloat(candidates.count)
+        let thumbHeight = max(12, track.height * visibleFraction)
+        let maxFirst = max(1, candidates.count - maxRows)
+        let progress = CGFloat(firstVisibleIndex) / CGFloat(maxFirst)
+        let thumbY = track.minY + (track.height - thumbHeight) * progress
+        let thumb = NSRect(x: track.minX, y: thumbY, width: track.width, height: thumbHeight)
+        NSColor.secondaryLabelColor.withAlphaComponent(0.55).setFill()
+        NSBezierPath(roundedRect: thumb, xRadius: 1.5, yRadius: 1.5).fill()
     }
 
     private func draw(candidate: LaTeXCompletionCandidate, in row: NSRect, selected: Bool) {
