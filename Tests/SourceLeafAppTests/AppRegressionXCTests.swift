@@ -36,6 +36,117 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(matches.map(\.location), [0, 11, 17])
     }
 
+    func testLatexCompletionCandidatesCoverCoreAuthoringCommands() {
+        let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\", source: "\\documentclass{article}")
+            .map(\.insertion)
+
+        XCTAssertTrue(suggestions.contains("\\usepackage{}"))
+        XCTAssertTrue(suggestions.contains("\\begin{}"))
+        XCTAssertTrue(suggestions.contains("\\section{}"))
+        XCTAssertTrue(suggestions.contains("\\includegraphics[]{}"))
+        XCTAssertTrue(suggestions.contains("\\cite{}"))
+    }
+
+    @MainActor
+    func testSourceTypingKeepsCaretMovingForwardAfterBackslashCompletionTrigger() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [
+            ("\\", 42), ("s", 1), ("e", 14), ("c", 8), ("t", 17), ("i", 34), ("o", 31), ("n", 45)
+        ] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(18))
+        }
+        try await Task.sleep(for: .milliseconds(260))
+
+        XCTAssertEqual(textView.string, "\\section")
+        XCTAssertEqual(state.text, "\\section")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 8, length: 0))
+    }
+
+    @MainActor
+    func testAcceptedLatexCompletionPlacesCaretInsideRequiredBraces() async throws {
+        let state = SourceTypingState(text: "\\section{}", selection: NSRange(location: 8, length: 2))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 8, length: 2))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+
+        for (character, keyCode) in [("I", 34), ("n", 45), ("t", 17), ("r", 15), ("o", 31)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(12))
+        }
+
+        XCTAssertEqual(textView.string, "\\section{Intro}")
+        XCTAssertEqual(state.text, "\\section{Intro}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 14, length: 0))
+    }
+
+    @MainActor
+    func testRapidMidLineTypingAndDeleteKeepCaretAtTheNativeInsertionPoint() async throws {
+        let state = SourceTypingState(text: "alpha omega", selection: NSRange(location: 6, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(12))
+        }
+
+        XCTAssertEqual(textView.string, "alpha testomega")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\u{7f}", keyCode: 51, window: host.window)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "alpha tesomega")
+        XCTAssertEqual(state.text, "alpha tesomega")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+    }
+
+    @MainActor
+    func testLatexSmartPairsInsertBracesAndSkipDuplicateClosers() async throws {
+        let state = SourceTypingState(text: "\\section", selection: NSRange(location: 8, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 8, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "{", keyCode: 33, window: host.window)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+
+        for (character, keyCode) in [("I", 34), ("n", 45), ("t", 17), ("r", 15), ("o", 31)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "}", keyCode: 30, window: host.window)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "\\section{Intro}")
+        XCTAssertEqual(state.text, "\\section{Intro}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
+    }
+
     func testRealMutedRAGProjectBuildsUsableFileAndCompletionIndexesWhenProvided() throws {
         guard let path = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { throw XCTSkip("SOURCELEAF_REAL_PROJECT not set") }
         let root = URL(fileURLWithPath: path, isDirectory: true)
@@ -124,4 +235,73 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertTrue(model.completionIndex.labels.keys.contains("sec:edited"))
         XCTAssertFalse(model.completionIndex.labels.keys.contains("sec:original"))
     }
+}
+
+@MainActor
+private final class SourceTypingState: ObservableObject {
+    @Published var text: String
+    @Published var selection: NSRange
+
+    init(text: String = "", selection: NSRange = NSRange(location: 0, length: 0)) {
+        self.text = text
+        self.selection = selection
+    }
+}
+
+@MainActor
+private func makeSourceEditorHost(state: SourceTypingState) -> (window: NSWindow, view: NSHostingView<SourceTextView>) {
+    let view = NSHostingView(rootView: SourceTextView(
+        text: Binding(get: { state.text }, set: { state.text = $0 }),
+        selection: Binding(get: { state.selection }, set: { state.selection = $0 }),
+        showSelectionButton: false,
+        editorTheme: .light,
+        editorFontFamily: "Menlo",
+        editorFontSize: 14,
+        onAskAI: {}
+    ))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 720, height: 420),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    window.makeKeyAndOrderFront(nil)
+    view.layoutSubtreeIfNeeded()
+    return (window, view)
+}
+
+@MainActor
+private func closeWindow(_ window: NSWindow) {
+    window.contentView = nil
+    window.close()
+}
+
+@MainActor
+private func findSourceTextView(in view: NSView) -> NSTextView? {
+    if let textView = view as? NSTextView,
+       textView.delegate is SourceTextView.Coordinator {
+        return textView
+    }
+    for child in view.subviews {
+        if let match = findSourceTextView(in: child) { return match }
+    }
+    return nil
+}
+
+@MainActor
+private func keyEvent(character: String, keyCode: UInt16, window: NSWindow) -> NSEvent? {
+    NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: character,
+        charactersIgnoringModifiers: character,
+        isARepeat: false,
+        keyCode: keyCode
+    )
 }

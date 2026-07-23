@@ -122,10 +122,11 @@ enum LaTeXCompletionEngine {
         guard selection.length == 0,
               selection.location <= source.length else { return false }
         if let argument = argumentContext(in: source, cursorLocation: selection.location) {
-            return ["cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite", "ref", "eqref", "autoref", "cref", "Cref", "pageref", "includegraphics", "input", "include"].contains(argument.command)
+            return argument.prefix.isEmpty
+                && ["cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite", "ref", "eqref", "autoref", "cref", "Cref", "pageref", "includegraphics", "input", "include"].contains(argument.command)
         }
         guard let command = commandPrefix(in: source, cursorLocation: selection.location) else { return false }
-        return command.prefix == "\\" || command.prefix.count >= 2
+        return command.prefix == "\\"
     }
 
     static func commandPrefix(in source: NSString, cursorLocation: Int) -> (prefix: String, range: NSRange)? {
@@ -756,6 +757,7 @@ struct SourceTextView: NSViewRepresentable {
         private var highlightTimer: Timer?
         private var lastLocalEditDate = Date.distantPast
         private var protectedSelectionEcho: NSRange?
+        private var applyingSmartPairEdit = false
         var lastLocallyEmittedText: String?
         var lastLocallyEmittedSelection: NSRange?
 
@@ -805,6 +807,7 @@ struct SourceTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !highlighting, let textView else { return }
+            normalizeCompletionPlaceholderSelectionIfNeeded()
             let nativeSelection = textView.selectedRange()
             lastLocalEditDate = Date()
             lastLocallyEmittedSelection = nativeSelection
@@ -830,12 +833,33 @@ struct SourceTextView: NSViewRepresentable {
             glyphOverlay?.needsDisplay = true
         }
 
+        private func normalizeCompletionPlaceholderSelectionIfNeeded() {
+            guard let textView else { return }
+            let selection = textView.selectedRange()
+            guard let normalized = normalizedCompletionPlaceholderSelection(selection, in: textView) else { return }
+            textView.setSelectedRange(normalized)
+        }
+
+        private func normalizedCompletionPlaceholderSelection(_ selection: NSRange, in textView: NSTextView) -> NSRange? {
+            guard selection.length == 2,
+                  NSMaxRange(selection) <= (textView.string as NSString).length else { return nil }
+            let source = textView.string as NSString
+            let selected = source.substring(with: selection)
+            guard selected == "{}" || selected == "[]" else { return nil }
+            guard selection.location > 0 else { return nil }
+            let previous = source.character(at: selection.location - 1)
+            guard let scalar = UnicodeScalar(previous),
+                  CharacterSet.alphanumerics.contains(scalar) || previous == 92 else { return nil }
+            return NSRange(location: selection.location + 1, length: 0)
+        }
+
         @objc private func applyDeferredHighlighting() {
             applyHighlighting()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView else { return }
+            normalizeCompletionPlaceholderSelectionIfNeeded()
             lastLocallyEmittedSelection = textView.selectedRange()
             guard !textView.hasMarkedText() else {
                 glyphOverlay?.selectionDidChange()
@@ -845,6 +869,109 @@ struct SourceTextView: NSViewRepresentable {
             // higher-level SwiftUI binding while a pointer drag is in flight.
             scheduleSelectionCommit()
             glyphOverlay?.selectionDidChange()
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange,
+            toCharacterRange newSelectedCharRange: NSRange
+        ) -> NSRange {
+            normalizedCompletionPlaceholderSelection(newSelectedCharRange, in: textView) ?? newSelectedCharRange
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextIn affectedCharRange: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            guard !applyingSmartPairEdit,
+                  !highlighting,
+                  !textView.hasMarkedText(),
+                  let replacementString,
+                  affectedCharRange.location != NSNotFound else { return true }
+            if skipDuplicateCloserIfNeeded(
+                replacementString,
+                in: textView,
+                affectedRange: affectedCharRange
+            ) {
+                return false
+            }
+            if insertSmartPairIfNeeded(
+                replacementString,
+                in: textView,
+                affectedRange: affectedCharRange
+            ) {
+                return false
+            }
+            return true
+        }
+
+        private func insertSmartPairIfNeeded(
+            _ replacement: String,
+            in textView: NSTextView,
+            affectedRange: NSRange
+        ) -> Bool {
+            guard let closing = Self.smartPairClosingDelimiter(for: replacement),
+                  NSMaxRange(affectedRange) <= (textView.string as NSString).length else { return false }
+            let source = textView.string as NSString
+            let selected = affectedRange.length > 0 ? source.substring(with: affectedRange) : ""
+            let pair = replacement + selected + closing
+            let caret = NSRange(location: affectedRange.location + (replacement as NSString).length + (selected as NSString).length, length: 0)
+            applySmartPairEdit(pair, replacementRange: affectedRange, resultingSelection: caret, in: textView)
+            return true
+        }
+
+        private func skipDuplicateCloserIfNeeded(
+            _ replacement: String,
+            in textView: NSTextView,
+            affectedRange: NSRange
+        ) -> Bool {
+            guard affectedRange.length == 0,
+                  Self.smartPairOpeningDelimiter(for: replacement) != nil,
+                  affectedRange.location < (textView.string as NSString).length else { return false }
+            let source = textView.string as NSString
+            let next = source.substring(with: NSRange(location: affectedRange.location, length: 1))
+            guard next == replacement else { return false }
+            textView.setSelectedRange(NSRange(location: affectedRange.location + (replacement as NSString).length, length: 0))
+            scheduleSelectionCommit()
+            glyphOverlay?.selectionDidChange()
+            return true
+        }
+
+        private func applySmartPairEdit(
+            _ replacement: String,
+            replacementRange: NSRange,
+            resultingSelection: NSRange,
+            in textView: NSTextView
+        ) {
+            applyingSmartPairEdit = true
+            if textView.shouldChangeText(in: replacementRange, replacementString: replacement) {
+                textView.textStorage?.replaceCharacters(in: replacementRange, with: replacement)
+                textView.didChangeText()
+                textView.setSelectedRange(resultingSelection)
+                textView.scrollRangeToVisible(resultingSelection)
+            }
+            applyingSmartPairEdit = false
+        }
+
+        private static func smartPairClosingDelimiter(for opening: String) -> String? {
+            switch opening {
+            case "{": "}"
+            case "[": "]"
+            case "(": ")"
+            case "$": "$"
+            default: nil
+            }
+        }
+
+        private static func smartPairOpeningDelimiter(for closing: String) -> String? {
+            switch closing {
+            case "}": "{"
+            case "]": "["
+            case ")": "("
+            case "$": "$"
+            default: nil
+            }
         }
 
         private func scheduleSelectionCommit() {
