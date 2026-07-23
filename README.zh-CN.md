@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.6" src="https://img.shields.io/badge/version-0.3.6-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="版本 0.3.7" src="https://img.shields.io/badge/version-0.3.7-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -68,7 +68,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 - **可选择上下文范围**：无、仅选区、附近内容、当前章节、全文、整个项目或自定义文件；没有修改目标时自动使用普通纯文本对话协议。
 - **写入前审阅 Diff**：先检查警告、试编译结果与原文/建议，再选择接受或拒绝。
 - **提示词库**：包含紧凑的快捷 Prompt 菜单，支持内置和个人提示词的新增、复制、编辑、启停与删除；长中英文模板使用单语言大编辑区。
-- **完整会话管理**：支持新建、重命名和切换会话；消息可选择、复制、修改、重新回答并显示时间；支持终止回答、自定义发送键和系统提示词。
+- **完整会话管理**：支持新建、重命名和切换会话；消息可选择、复制、修改、针对指定回答重新生成并显示时间；支持终止回答、自定义发送键、系统提示词和可折叠的真实 Provider 活动流。
 - **安全历史恢复**：已接受 Diff 会保留为只读记录；历史恢复同样经过完整原文/修改后 Diff 审阅，不会静默覆盖源码。
 
 ### 灵活的原生界面

@@ -12,7 +12,7 @@
   <a href="https://swift.org"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0A84FF?logo=apple&logoColor=white">
   <img alt="Universal" src="https://img.shields.io/badge/Universal-arm64%20%7C%20x86__64-555555">
-  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.6" src="https://img.shields.io/badge/version-0.3.6-2ea44f"></a>
+  <a href="https://github.com/try2love/SourceLeaf/releases"><img alt="Version 0.3.7" src="https://img.shields.io/badge/version-0.3.7-2ea44f"></a>
   <a href="LICENSE"><img alt="PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet"></a>
 </p>
 
@@ -68,7 +68,7 @@ The rest of the application follows the same local-first boundary. Project metad
 - **Selectable context scope**: none, selection only, nearby text, section, full document, project, or custom files; no-target requests use a normal plain-text conversation protocol.
 - **Diff before write**: inspect warnings and original/proposed text before accepting or rejecting a change.
 - **Prompt library**: a compact Quick Prompt menu plus built-in and user-managed prompts; long bilingual templates use a full-height language-focused editor.
-- **Conversation sessions** with create, rename, switch, editable/copyable timestamped messages, regenerate/stop controls, configurable send keys, and a user-defined system prompt.
+- **Conversation sessions** with create, rename, switch, editable/copyable timestamped messages, message-specific regenerate/stop controls, configurable send keys, a user-defined system prompt, and a collapsible real provider-activity stream.
 - **History through review**: accepted diffs remain visible without action buttons, and restoring an earlier change returns through a full original/updated diff workflow instead of overwriting source silently.
 
 ### Flexible native interface
