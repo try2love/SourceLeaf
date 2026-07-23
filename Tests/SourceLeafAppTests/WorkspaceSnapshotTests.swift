@@ -107,6 +107,65 @@ import Testing
 }
 
 @MainActor
+@Test func realPDFPreviewLoadsPagesAndPaintsVisibleContent() async throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let pdfURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+        .appendingPathComponent("输出/MutedRAG.pdf")
+    let hostingView = NSHostingView(
+        rootView: PDFKitView(
+            url: pdfURL,
+            selection: .constant(""),
+            pageIndex: .constant(0),
+            pageCount: .constant(0),
+            showThumbnails: false,
+            navigationTarget: nil,
+            onCommandClick: { _, _, _, _ in }
+        )
+        .frame(width: 700, height: 760)
+    )
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 700, height: 760),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    window.makeKeyAndOrderFront(nil)
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+    let pdfView = try #require(findPDFView(in: hostingView))
+    for _ in 0..<20 where pdfView.currentPage == nil {
+        hostingView.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        pdfView.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
+    #expect((pdfView.document?.pageCount ?? 0) > 1)
+    #expect(pdfView.currentPage != nil)
+    #expect(pdfView.displayMode == .singlePageContinuous)
+    #expect(pdfView.displayDirection == .vertical)
+    #expect((pdfView.currentPage?.string?.count ?? 0) > 100)
+    window.orderFrontRegardless()
+    try await Task.sleep(for: .milliseconds(300))
+    let representation = try #require(captureWindow(window))
+    if let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_SNAPSHOT_OUTPUT"],
+       let data = representation.representation(using: .png, properties: [:]) {
+        try data.write(
+            to: URL(fileURLWithPath: outputPath, isDirectory: true)
+                .appendingPathComponent("PDF真实窗口-可见页面.png"),
+            options: .atomic
+        )
+    }
+}
+
+@MainActor
 @Test func pdfControlWheelZoomUsesBoundedMultiplicativeSteps() {
     #expect(NavigablePDFView.zoomedScale(from: 1, scrollingDeltaY: 1) > 1)
     #expect(NavigablePDFView.zoomedScale(from: 1, scrollingDeltaY: -1) < 1)
@@ -160,6 +219,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil
@@ -342,6 +402,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil
@@ -382,6 +443,7 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.key-window-editor.\(UUID().uuidString)"))
     let model = AppModel(restoreLastProject: false, supportDirectory: support, defaults: defaults)
     model.openProject(URL(fileURLWithPath: projectPath, isDirectory: true))
+    model.setAutoSave(false)
     let hostingView = NSHostingView(rootView: WorkspaceView().environmentObject(model))
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
@@ -389,6 +451,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.orderOut(nil)
@@ -443,6 +506,11 @@ import Testing
     let changedPixels = sampledPixelDifference(populated, blank, in: sourcePixels)
     #expect(changedPixels > 300)
 
+    textView.insertText(
+        original,
+        replacementRange: NSRange(location: 0, length: (blankSource as NSString).length)
+    )
+
     if let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_SNAPSHOT_OUTPUT"] {
         let output = URL(fileURLWithPath: outputPath, isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
@@ -466,6 +534,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil
@@ -533,6 +602,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil
@@ -637,6 +707,7 @@ private func render<V: View>(_ view: V, size: NSSize) throws -> Data {
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil

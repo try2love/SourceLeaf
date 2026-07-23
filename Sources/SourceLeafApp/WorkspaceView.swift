@@ -155,14 +155,16 @@ private struct DockCanvasView: View {
     var body: some View {
         VSplitView {
             ResizableDockColumns()
-            .frame(minHeight: 420)
+                .frame(minHeight: 420)
+                .layoutPriority(1)
 
             DockZoneView(zone: .bottom)
                 .frame(
                     minHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 58,
-                    idealHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 82,
-                    maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 180
+                    idealHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 28 : 72,
+                    maxHeight: (model.layout.zones[.bottom] ?? []).isEmpty ? 36 : 140
                 )
+                .layoutPriority(-1)
         }
     }
 }

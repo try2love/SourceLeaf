@@ -93,80 +93,127 @@ private struct LaTeXSourceToolbar: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 9) {
-                Button { NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil) } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .buttonStyle(.borderless)
-                .help(L10n.text("source.findReplace"))
-
-                Divider().frame(height: 17)
-
-                formatButton(.bold, key: "source.format.bold", symbol: "bold")
-                formatButton(.italic, key: "source.format.italic", symbol: "italic")
-                formatButton(.underline, key: "source.format.underline", symbol: "underline")
-
-                Divider().frame(height: 17)
-
-                Menu {
-                    menuButton(.section, key: "source.heading.section")
-                    menuButton(.subsection, key: "source.heading.subsection")
-                    menuButton(.subsubsection, key: "source.heading.subsubsection")
-                    menuButton(.paragraph, key: "source.heading.paragraph")
-                } label: {
-                    Label(L10n.text("source.toolbar.heading"), systemImage: "textformat.size")
-                }
-
-                Menu {
-                    menuButton(.tiny, title: "\\tiny")
-                    menuButton(.scriptsize, title: "\\scriptsize")
-                    menuButton(.footnotesize, title: "\\footnotesize")
-                    menuButton(.small, title: "\\small")
-                    menuButton(.normalsize, title: "\\normalsize")
-                    menuButton(.large, title: "\\large")
-                    menuButton(.largeUpper, title: "\\Large")
-                    menuButton(.largeAllCaps, title: "\\LARGE")
-                    menuButton(.huge, title: "\\huge")
-                    menuButton(.hugeUpper, title: "\\Huge")
-                } label: {
-                    Label(L10n.text("source.toolbar.fontSize"), systemImage: "textformat")
-                }
-
-                Menu {
-                    menuButton(.inlineMath, key: "source.math.inline")
-                    menuButton(.displayMath, key: "source.math.display")
-                    menuButton(.equation, key: "source.math.equation")
-                    Divider()
-                    menuButton(.fraction, key: "source.math.fraction")
-                    menuButton(.superscript, key: "source.math.superscript")
-                    menuButton(.subscriptText, key: "source.math.subscript")
-                } label: {
-                    Label(L10n.text("source.toolbar.math"), systemImage: "function")
-                }
-
-                Menu {
-                    menuButton(.emphasis, key: "source.format.emphasis")
-                    menuButton(.itemize, key: "source.insert.itemize")
-                    menuButton(.enumerate, key: "source.insert.enumerate")
-                    menuButton(.table, key: "source.insert.table")
-                    menuButton(.figure, key: "source.insert.figure")
-                    Divider()
-                    menuButton(.cite, key: "source.insert.cite")
-                    menuButton(.reference, key: "source.insert.reference")
-                    menuButton(.label, key: "source.insert.label")
-                    menuButton(.url, key: "source.insert.url")
-                } label: {
-                    Label(L10n.text("source.toolbar.insert"), systemImage: "plus")
-                }
-            }
-            .font(.system(size: 11 * model.interfaceFontScale))
-            .menuStyle(.borderlessButton)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+        ViewThatFits(in: .horizontal) {
+            fullToolbar
+                .fixedSize(horizontal: true, vertical: false)
+            compactToolbar
         }
+        .font(.system(size: 11 * model.interfaceFontScale))
+        .menuStyle(.borderlessButton)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var fullToolbar: some View {
+        HStack(spacing: 9) {
+            findButton
+            Divider().frame(height: 17)
+            formatButton(.bold, key: "source.format.bold", symbol: "bold")
+            formatButton(.italic, key: "source.format.italic", symbol: "italic")
+            formatButton(.underline, key: "source.format.underline", symbol: "underline")
+            Divider().frame(height: 17)
+            headingMenu
+            fontSizeMenu
+            mathMenu
+            insertMenu
+        }
+    }
+
+    private var compactToolbar: some View {
+        HStack(spacing: 11) {
+            findButton
+            formatButton(.bold, key: "source.format.bold", symbol: "bold")
+            formatButton(.italic, key: "source.format.italic", symbol: "italic")
+            formatButton(.underline, key: "source.format.underline", symbol: "underline")
+            Menu {
+                Section(L10n.text("source.toolbar.heading")) { headingItems }
+                Section(L10n.text("source.toolbar.fontSize")) { fontSizeItems }
+                Section(L10n.text("source.toolbar.math")) { mathItems }
+                Section(L10n.text("source.toolbar.insert")) { insertItems }
+            } label: {
+                Label(L10n.text("source.toolbar.more"), systemImage: "ellipsis.circle")
+            }
+            .accessibilityLabel(L10n.text("source.toolbar.more"))
+        }
+    }
+
+    private var findButton: some View {
+        Button { NotificationCenter.default.post(name: .sourceLeafShowFind, object: nil) } label: {
+            Image(systemName: "magnifyingglass")
+        }
+        .buttonStyle(.borderless)
+        .help(L10n.text("source.findReplace"))
+        .accessibilityLabel(L10n.text("source.findReplace"))
+    }
+
+    private var headingMenu: some View {
+        Menu { headingItems } label: {
+            Label(L10n.text("source.toolbar.heading"), systemImage: "textformat.size")
+        }
+    }
+
+    private var fontSizeMenu: some View {
+        Menu { fontSizeItems } label: {
+            Label(L10n.text("source.toolbar.fontSize"), systemImage: "textformat")
+        }
+    }
+
+    private var mathMenu: some View {
+        Menu { mathItems } label: {
+            Label(L10n.text("source.toolbar.math"), systemImage: "function")
+        }
+    }
+
+    private var insertMenu: some View {
+        Menu { insertItems } label: {
+            Label(L10n.text("source.toolbar.insert"), systemImage: "plus")
+        }
+    }
+
+    @ViewBuilder private var headingItems: some View {
+        menuButton(.section, key: "source.heading.section")
+        menuButton(.subsection, key: "source.heading.subsection")
+        menuButton(.subsubsection, key: "source.heading.subsubsection")
+        menuButton(.paragraph, key: "source.heading.paragraph")
+    }
+
+    @ViewBuilder private var fontSizeItems: some View {
+        menuButton(.tiny, title: "\\tiny")
+        menuButton(.scriptsize, title: "\\scriptsize")
+        menuButton(.footnotesize, title: "\\footnotesize")
+        menuButton(.small, title: "\\small")
+        menuButton(.normalsize, title: "\\normalsize")
+        menuButton(.large, title: "\\large")
+        menuButton(.largeUpper, title: "\\Large")
+        menuButton(.largeAllCaps, title: "\\LARGE")
+        menuButton(.huge, title: "\\huge")
+        menuButton(.hugeUpper, title: "\\Huge")
+    }
+
+    @ViewBuilder private var mathItems: some View {
+        menuButton(.inlineMath, key: "source.math.inline")
+        menuButton(.displayMath, key: "source.math.display")
+        menuButton(.equation, key: "source.math.equation")
+        Divider()
+        menuButton(.fraction, key: "source.math.fraction")
+        menuButton(.superscript, key: "source.math.superscript")
+        menuButton(.subscriptText, key: "source.math.subscript")
+    }
+
+    @ViewBuilder private var insertItems: some View {
+        menuButton(.emphasis, key: "source.format.emphasis")
+        menuButton(.itemize, key: "source.insert.itemize")
+        menuButton(.enumerate, key: "source.insert.enumerate")
+        menuButton(.table, key: "source.insert.table")
+        menuButton(.figure, key: "source.insert.figure")
+        Divider()
+        menuButton(.cite, key: "source.insert.cite")
+        menuButton(.reference, key: "source.insert.reference")
+        menuButton(.label, key: "source.insert.label")
+        menuButton(.url, key: "source.insert.url")
     }
 
     private func formatButton(_ command: LaTeXEditCommand, key: String, symbol: String) -> some View {
@@ -251,6 +298,9 @@ struct SourceTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.string = text
+        if NSMaxRange(selection) <= (text as NSString).length {
+            textView.setSelectedRange(selection)
+        }
 
         let ruler = LineNumberRulerView(textView: textView)
         ruler.backgroundColor = palette.gutterBackground
@@ -334,6 +384,10 @@ struct SourceTextView: NSViewRepresentable {
         }
     }
 
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.tearDown()
+    }
+
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: SourceTextView
@@ -356,6 +410,19 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         init(parent: SourceTextView) { self.parent = parent }
+
+        func tearDown() {
+            selectionSyncTimer?.invalidate()
+            selectionSyncTimer = nil
+            highlightTimer?.invalidate()
+            highlightTimer = nil
+            NotificationCenter.default.removeObserver(self)
+            textView?.delegate = nil
+            glyphOverlay?.removeFromSuperview()
+            glyphOverlay = nil
+            ruler = nil
+            textView = nil
+        }
 
         func observeScrollView(_ scrollView: NSScrollView) {
             scrollView.contentView.postsBoundsChangedNotifications = true

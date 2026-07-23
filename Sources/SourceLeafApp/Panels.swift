@@ -232,6 +232,10 @@ struct ZoomableImagePreview: NSViewRepresentable {
         if view.loadedURL != url { view.load(url: url) }
         view.setZoomScale(zoomScale)
     }
+
+    static func dismantleNSView(_ view: ZoomableImageScrollView, coordinator: Void) {
+        view.prepareForDismantle()
+    }
 }
 
 final class ZoomableImageScrollView: NSScrollView {
@@ -239,6 +243,7 @@ final class ZoomableImageScrollView: NSScrollView {
     private(set) var loadedURL: URL?
     var onScaleChanged: ((Double) -> Void)?
     private var centeringUpdateScheduled = false
+    private var isActive = true
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -259,6 +264,7 @@ final class ZoomableImageScrollView: NSScrollView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func load(url: URL) {
+        isActive = true
         loadedURL = url
         imageView.image = NSImage(contentsOf: url)
         let size = imageView.image?.size ?? NSSize(width: 1, height: 1)
@@ -297,17 +303,17 @@ final class ZoomableImageScrollView: NSScrollView {
     }
 
     private func scheduleCenteringInsetsUpdate() {
-        guard !centeringUpdateScheduled else { return }
+        guard isActive, !centeringUpdateScheduled else { return }
         centeringUpdateScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.isActive else { return }
             centeringUpdateScheduled = false
             updateCenteringInsets()
         }
     }
 
     private func updateCenteringInsets() {
-        guard let documentView else { return }
+        guard isActive, let documentView else { return }
         let scaledWidth = documentView.bounds.width * magnification
         let scaledHeight = documentView.bounds.height * magnification
         let desired = NSEdgeInsets(
@@ -322,6 +328,13 @@ final class ZoomableImageScrollView: NSScrollView {
               desired.right.isFinite,
               !contentInsets.isApproximatelyEqual(to: desired) else { return }
         contentInsets = desired
+    }
+
+    func prepareForDismantle() {
+        isActive = false
+        centeringUpdateScheduled = false
+        onScaleChanged = nil
+        imageView.owner = nil
     }
 
     static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
@@ -374,94 +387,9 @@ struct PDFPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Button { showsThumbnails.toggle() } label: { Image(systemName: "sidebar.left") }
-                    .help(L10n.text("pdf.thumbnails"))
-                Button { zoomScale = max(0.1, (zoomScale > 0 ? zoomScale : 1) / 1.2) } label: { Image(systemName: "minus.magnifyingglass") }
-                    .help(L10n.text("preview.zoomOut"))
-                Text(zoomScale > 0 ? "\(Int((zoomScale * 100).rounded()))%" : L10n.text("pdf.fit"))
-                    .sourceLeafFont(.caption, design: .monospaced)
-                    .frame(minWidth: 42)
-                Button { zoomScale = min(8, (zoomScale > 0 ? zoomScale : 1) * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
-                    .help(L10n.text("preview.zoomIn"))
-                Button { zoomScale = 0 } label: { Image(systemName: "arrow.counterclockwise") }
-                    .help(L10n.text("pdf.fit"))
-                Button {
-                    if model.buildRunning { model.cancelCompile() }
-                    else { model.compile() }
-                } label: {
-                    Label(
-                        model.buildRunning ? L10n.text("build.stop") : L10n.compile,
-                        systemImage: model.buildRunning ? "stop.fill" : "play.fill"
-                    )
-                }
-                .labelStyle(.iconOnly)
-                .foregroundStyle(model.buildRunning ? .red : .primary)
-                .help(model.buildRunning ? L10n.text("build.stop") : L10n.compile)
-                Toggle(isOn: Binding(
-                    get: { model.configuration.build.autoBuild },
-                    set: {
-                        model.configuration.build.autoBuild = $0
-                        model.persistConfiguration()
-                    }
-                )) { Image(systemName: model.configuration.build.autoBuild ? "bolt.fill" : "bolt.slash") }
-                    .toggleStyle(.button)
-                    .help(model.configuration.build.autoBuild
-                        ? L10n.text("build.autoCompileOn")
-                        : L10n.text("build.autoCompileOff"))
-                if model.pdfPageCount > 0 {
-                    Divider().frame(height: 16)
-                    Button {
-                        model.pdfPageIndex = max(0, model.pdfPageIndex - 1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(model.pdfPageIndex == 0)
-                    .help(L10n.text("pdf.previousPage"))
-
-                    Text("\(model.pdfPageIndex + 1)/\(model.pdfPageCount)")
-                        .sourceLeafFont(.caption, design: .monospaced)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help(String(format: L10n.text("pdf.pageIndicator"), model.pdfPageIndex + 1, model.pdfPageCount))
-
-                    Button {
-                        model.pdfPageIndex = min(model.pdfPageCount - 1, model.pdfPageIndex + 1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(model.pdfPageIndex >= model.pdfPageCount - 1)
-                    .help(L10n.text("pdf.nextPage"))
-                }
-                if model.syncTeXDocument != nil {
-                    Label(L10n.text("synctex.commandClickHint"), systemImage: "cursorarrow.click")
-                        .sourceLeafFont(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .labelStyle(.iconOnly)
-                        .help(L10n.text("synctex.commandClickHint"))
-                }
-                Spacer()
-                if model.buildRunning {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text(L10n.buildPhase(model.buildPhase))
-                    }
-                    .sourceLeafFont(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                if let succeeded = model.buildSucceeded {
-                    Label(
-                        succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed"),
-                        systemImage: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-                    )
-                    .foregroundStyle(succeeded ? .green : .orange)
-                    .sourceLeafFont(.caption)
-                }
-                Button { model.presentPDFExportPanel() } label: { Image(systemName: "square.and.arrow.down") }
-                    .disabled(model.pdfURL == nil)
-                    .help(L10n.text("pdf.export"))
+            ViewThatFits(in: .horizontal) {
+                fullPDFToolbar
+                compactPDFToolbar
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 8)
@@ -507,6 +435,167 @@ struct PDFPanel: View {
                 )
             }
         }
+    }
+
+    private var fullPDFToolbar: some View {
+        HStack(spacing: 7) {
+            Button { showsThumbnails.toggle() } label: { Image(systemName: "sidebar.left") }
+                .help(L10n.text("pdf.thumbnails"))
+            Button { zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+                .help(L10n.text("preview.zoomOut"))
+            Text(zoomScale > 0 ? "\(Int((zoomScale * 100).rounded()))%" : L10n.text("pdf.fit"))
+                .sourceLeafFont(.caption, design: .monospaced)
+                .frame(minWidth: 42)
+            Button { zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+                .help(L10n.text("preview.zoomIn"))
+            Button { zoomScale = 0 } label: { Image(systemName: "arrow.counterclockwise") }
+                .help(L10n.text("pdf.fit"))
+            compileButton
+            autoBuildToggle
+            pageNavigation
+            if model.syncTeXDocument != nil {
+                Image(systemName: "cursorarrow.click")
+                    .foregroundStyle(.tertiary)
+                    .help(L10n.text("synctex.commandClickHint"))
+            }
+            Spacer(minLength: 0)
+            buildStatus
+            exportButton
+        }
+    }
+
+    private var compactPDFToolbar: some View {
+        HStack(spacing: 7) {
+            Button { showsThumbnails.toggle() } label: { Image(systemName: "sidebar.left") }
+                .help(L10n.text("pdf.thumbnails"))
+            Button { zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+                .help(L10n.text("preview.zoomOut"))
+            Button { zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+                .help(L10n.text("preview.zoomIn"))
+            pageNavigation
+            Spacer(minLength: 0)
+            compactBuildStatus
+            compileButton
+            Menu {
+                Button(L10n.text("pdf.fit")) { zoomScale = 0 }
+                Toggle(
+                    model.configuration.build.autoBuild
+                        ? L10n.text("build.autoCompileOn")
+                        : L10n.text("build.autoCompileOff"),
+                    isOn: autoBuildBinding
+                )
+                if model.syncTeXDocument != nil {
+                    Text(L10n.text("synctex.commandClickHint"))
+                }
+                Divider()
+                Button(L10n.text("pdf.export")) { model.presentPDFExportPanel() }
+                    .disabled(model.pdfURL == nil)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .help(L10n.text("pdf.moreActions"))
+        }
+    }
+
+    private var compileButton: some View {
+        Button {
+            if model.buildRunning { model.cancelCompile() }
+            else { model.compile() }
+        } label: {
+            Image(systemName: model.buildRunning ? "stop.fill" : "play.fill")
+        }
+        .foregroundStyle(model.buildRunning ? .red : .primary)
+        .help(model.buildRunning ? L10n.text("build.stop") : L10n.compile)
+    }
+
+    private var autoBuildBinding: Binding<Bool> {
+        Binding(
+            get: { model.configuration.build.autoBuild },
+            set: {
+                model.configuration.build.autoBuild = $0
+                model.persistConfiguration()
+            }
+        )
+    }
+
+    private var autoBuildToggle: some View {
+        Toggle(isOn: autoBuildBinding) {
+            Image(systemName: model.configuration.build.autoBuild ? "bolt.fill" : "bolt.slash")
+        }
+        .toggleStyle(.button)
+        .help(model.configuration.build.autoBuild
+            ? L10n.text("build.autoCompileOn")
+            : L10n.text("build.autoCompileOff"))
+    }
+
+    @ViewBuilder
+    private var pageNavigation: some View {
+        if model.pdfPageCount > 0 {
+            Button { model.pdfPageIndex = max(0, model.pdfPageIndex - 1) } label: {
+                Image(systemName: "chevron.left")
+            }
+            .disabled(model.pdfPageIndex == 0)
+            .help(L10n.text("pdf.previousPage"))
+            Text("\(model.pdfPageIndex + 1)/\(model.pdfPageCount)")
+                .sourceLeafFont(.caption, design: .monospaced)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Button {
+                model.pdfPageIndex = min(model.pdfPageCount - 1, model.pdfPageIndex + 1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .disabled(model.pdfPageIndex >= model.pdfPageCount - 1)
+            .help(L10n.text("pdf.nextPage"))
+        }
+    }
+
+    @ViewBuilder
+    private var buildStatus: some View {
+        if model.buildRunning {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(L10n.buildPhase(model.buildPhase))
+            }
+            .sourceLeafFont(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        } else if let succeeded = model.buildSucceeded {
+            Label(
+                succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed"),
+                systemImage: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(succeeded ? .green : .orange)
+            .sourceLeafFont(.caption)
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var compactBuildStatus: some View {
+        if model.buildRunning {
+            ProgressView()
+                .controlSize(.small)
+                .help(L10n.buildPhase(model.buildPhase))
+        } else if let succeeded = model.buildSucceeded {
+            Image(systemName: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(succeeded ? .green : .orange)
+                .help(succeeded ? L10n.text("status.buildSucceeded") : L10n.text("status.buildFailed"))
+        }
+    }
+
+    private var exportButton: some View {
+        Button { model.presentPDFExportPanel() } label: { Image(systemName: "square.and.arrow.down") }
+            .disabled(model.pdfURL == nil)
+            .help(L10n.text("pdf.export"))
+    }
+
+    private func zoomOut() {
+        zoomScale = max(0.1, (zoomScale > 0 ? zoomScale : 1) / 1.2)
+    }
+
+    private func zoomIn() {
+        zoomScale = min(8, (zoomScale > 0 ? zoomScale : 1) * 1.2)
     }
 }
 
@@ -896,11 +985,12 @@ private struct HistoryDiffText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).sourceLeafFont(.caption2, weight: .bold).foregroundStyle(color)
-            ScrollView([.vertical, .horizontal]) {
+            ScrollView(.vertical) {
                 Text(text)
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .sourceLeafFont(.body, design: .monospaced)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(7)

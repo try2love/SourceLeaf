@@ -6,13 +6,15 @@ import Testing
     let request = AIRequest(
         instruction: "Explain this paper",
         targets: [],
-        context: ["system-instructions": "Be concise"],
+        context: [:],
+        systemPrompt: "Be concise",
         projectRoot: URL(fileURLWithPath: "/tmp/project")
     )
     let prompt = AIEditPromptBuilder.build(request)
     #expect(prompt.contains("Answer the user's request directly in plain text"))
-    #expect(prompt.contains("Be concise"))
+    #expect(!prompt.contains("Be concise"))
     #expect(!prompt.contains("target_id"))
+    #expect(AIEditPromptBuilder.buildForCLI(request).contains("System instructions:\nBe concise"))
 }
 
 @Test func decodesProposalFromMarkdownWrappedJSON() throws {
@@ -34,6 +36,21 @@ import Testing
     {"type":"item.completed","item":{"type":"agent_message","text":"last"}}
     """
     #expect(CodexCLIProvider.lastAgentMessage(in: lines) == "last")
+}
+
+@Test func codexJSONEventsBecomeSafeUserFacingProgressAndOutputEvents() {
+    let lines = """
+    {"type":"thread.started","thread_id":"abc"}
+    {"type":"turn.started"}
+    {"type":"item.completed","item":{"type":"reasoning","text":"private reasoning must not be surfaced"}}
+    {"type":"item.completed","item":{"type":"agent_message","text":"Visible answer"}}
+    """
+    let events = CodexCLIProvider.providerEvents(in: lines)
+    #expect(events.contains(.sessionStarted))
+    #expect(events.contains(.working))
+    #expect(events.contains(.responseStarted))
+    #expect(events.contains(.textDelta("Visible answer")))
+    #expect(!events.contains(.textDelta("private reasoning must not be surfaced")))
 }
 
 @Test func localCodexInvocationUsesTheSelectedModelAndReasoningEffort() {
@@ -110,6 +127,55 @@ import Testing
         JSONSerialization.jsonObject(with: compatibleData) as? [String: Any]
     )
     #expect(compatibleBody["reasoning_effort"] as? String == "xhigh")
+}
+
+@Test func systemPromptUsesEachHTTPProvidersNativeRoleChannel() throws {
+    let system = "You are a careful academic editor."
+
+    let openAI = HTTPAIProvider(
+        profile: ProviderProfile(name: "OpenAI", kind: .openAI, model: "gpt-test"),
+        apiKey: "test-key"
+    )
+    let openAIBody = try requestBody(openAI.makeRequest(prompt: "Review", systemPrompt: system))
+    #expect(openAIBody["instructions"] as? String == system)
+
+    for kind in [ProviderKind.openAICompatible, .lmStudio, .ollama] {
+        let provider = HTTPAIProvider(
+            profile: ProviderProfile(
+                name: kind.rawValue,
+                kind: kind,
+                model: "test-model",
+                baseURL: kind == .openAICompatible ? "http://127.0.0.1:1234/v1/chat/completions" : nil
+            ),
+            apiKey: nil
+        )
+        let body = try requestBody(provider.makeRequest(prompt: "Review", systemPrompt: system))
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        #expect(messages.first?["role"] as? String == "system")
+        #expect(messages.first?["content"] as? String == system)
+        #expect(messages.last?["role"] as? String == "user")
+    }
+
+    let anthropic = HTTPAIProvider(
+        profile: ProviderProfile(name: "Anthropic", kind: .anthropic, model: "claude-test"),
+        apiKey: "test-key"
+    )
+    let anthropicBody = try requestBody(anthropic.makeRequest(prompt: "Review", systemPrompt: system))
+    #expect(anthropicBody["system"] as? String == system)
+
+    let gemini = HTTPAIProvider(
+        profile: ProviderProfile(name: "Gemini", kind: .gemini, model: "gemini-test"),
+        apiKey: "test-key"
+    )
+    let geminiBody = try requestBody(gemini.makeRequest(prompt: "Review", systemPrompt: system))
+    let instruction = try #require(geminiBody["systemInstruction"] as? [String: Any])
+    let parts = try #require(instruction["parts"] as? [[String: String]])
+    #expect(parts.first?["text"] == system)
+}
+
+private func requestBody(_ request: URLRequest) throws -> [String: Any] {
+    let data = try #require(request.httpBody)
+    return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
 
 @Test func builtInPromptsContainTheTemperedAcademicReviewer() throws {

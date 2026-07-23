@@ -63,7 +63,21 @@ import Testing
             .frame(width: 720, height: 520)
     )
     hostingView.frame = NSRect(x: 0, y: 0, width: 720, height: 520)
+    let window = NSWindow(
+        contentRect: hostingView.frame,
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    window.makeKeyAndOrderFront(nil)
+    defer {
+        window.contentView = nil
+        window.close()
+    }
     hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
     let preview = try #require(findZoomableImagePreview(in: hostingView))
     #expect(preview.loadedURL == svg.url)
@@ -73,6 +87,7 @@ import Testing
     #expect(ZoomableImageScrollView.zoomedScale(from: 1, scrollingDeltaY: 1) > 1)
     preview.setZoomScale(0.1)
     preview.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
     #expect(preview.contentInsets.left > 0 || preview.contentInsets.top > 0)
 }
 
@@ -95,6 +110,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = hostingView
     defer {
         window.contentView = nil

@@ -14,7 +14,20 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
-        let text = try await perform(prompt: AIEditPromptBuilder.build(request))
+        try await generateProposal(for: request, onEvent: { _ in })
+    }
+
+    public func generateProposal(
+        for request: AIRequest,
+        onEvent: @escaping @Sendable (AIProviderEvent) -> Void
+    ) async throws -> AIProposal {
+        onEvent(.requestStarted)
+        let text = try await perform(
+            prompt: AIEditPromptBuilder.build(request),
+            systemPrompt: request.systemPrompt
+        )
+        onEvent(.responseStarted)
+        if request.targets.isEmpty { onEvent(.textDelta(text)) }
         if request.targets.isEmpty {
             return AIProposal(summary: text.trimmingCharacters(in: .whitespacesAndNewlines), replacements: [], providerName: displayName)
         }
@@ -22,11 +35,13 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func healthCheck() async throws -> String {
-        try AIProviderHealthCheck.validated(try await perform(prompt: AIProviderHealthCheck.prompt))
+        try AIProviderHealthCheck.validated(
+            try await perform(prompt: AIProviderHealthCheck.prompt, systemPrompt: "")
+        )
     }
 
-    private func perform(prompt: String) async throws -> String {
-        let urlRequest = try makeRequest(prompt: prompt)
+    private func perform(prompt: String, systemPrompt: String) async throws -> String {
+        let urlRequest = try makeRequest(prompt: prompt, systemPrompt: systemPrompt)
         let (data, response) = try await session.data(for: urlRequest)
         guard let http = response as? HTTPURLResponse else {
             throw AIProviderError.invalidResponse("No HTTP response was returned.")
@@ -37,7 +52,7 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
         return try extractText(from: data)
     }
 
-    func makeRequest(prompt: String) throws -> URLRequest {
+    func makeRequest(prompt: String, systemPrompt: String = "") throws -> URLRequest {
         let endpoint = try endpointURL()
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -51,6 +66,7 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
             guard let apiKey, !apiKey.isEmpty else { throw AIProviderError.missingCredential }
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             var openAIBody: [String: Any] = ["model": profile.model, "input": prompt]
+            if !systemPrompt.isEmpty { openAIBody["instructions"] = systemPrompt }
             if let effort = profile.reasoningEffort {
                 openAIBody["reasoning"] = ["effort": effort.rawValue]
             }
@@ -59,9 +75,12 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
             if let apiKey, !apiKey.isEmpty {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }
+            var messages: [[String: String]] = []
+            if !systemPrompt.isEmpty { messages.append(["role": "system", "content": systemPrompt]) }
+            messages.append(["role": "user", "content": prompt])
             var compatibleBody: [String: Any] = [
                 "model": profile.model,
-                "messages": [["role": "user", "content": prompt]],
+                "messages": messages,
                 "temperature": 0
             ]
             if let effort = profile.reasoningEffort {
@@ -72,20 +91,25 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
             if let apiKey, !apiKey.isEmpty {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }
+            var messages: [[String: String]] = []
+            if !systemPrompt.isEmpty { messages.append(["role": "system", "content": systemPrompt]) }
+            messages.append(["role": "user", "content": prompt])
             body = [
                 "model": profile.model,
-                "messages": [["role": "user", "content": prompt]],
+                "messages": messages,
                 "temperature": 0
             ] as [String: Any]
         case .anthropic:
             guard let apiKey, !apiKey.isEmpty else { throw AIProviderError.missingCredential }
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            body = [
+            var anthropicBody: [String: Any] = [
                 "model": profile.model,
                 "max_tokens": 8192,
                 "messages": [["role": "user", "content": prompt]]
-            ] as [String: Any]
+            ]
+            if !systemPrompt.isEmpty { anthropicBody["system"] = systemPrompt }
+            body = anthropicBody
         case .gemini:
             guard let apiKey, !apiKey.isEmpty else { throw AIProviderError.missingCredential }
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
@@ -93,12 +117,21 @@ public final class HTTPAIProvider: AIProvider, @unchecked Sendable {
             components?.queryItems = existingItems + [URLQueryItem(name: "key", value: apiKey)]
             guard let keyedURL = components?.url else { throw AIProviderError.invalidResponse("Invalid Gemini endpoint.") }
             request.url = keyedURL
-            body = ["contents": [["parts": [["text": prompt]]]]]
+            var geminiBody: [String: Any] = [
+                "contents": [["parts": [["text": prompt]]]]
+            ]
+            if !systemPrompt.isEmpty {
+                geminiBody["systemInstruction"] = ["parts": [["text": systemPrompt]]]
+            }
+            body = geminiBody
         case .ollama:
+            var messages: [[String: String]] = []
+            if !systemPrompt.isEmpty { messages.append(["role": "system", "content": systemPrompt]) }
+            messages.append(["role": "user", "content": prompt])
             body = [
                 "model": profile.model,
                 "stream": false,
-                "messages": [["role": "user", "content": prompt]]
+                "messages": messages
             ] as [String: Any]
         default:
             throw AIProviderError.invalidResponse("This profile is not an HTTP provider.")

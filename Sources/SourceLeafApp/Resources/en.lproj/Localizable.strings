@@ -125,6 +125,8 @@
 "provider.modelDefault" = "Use provider default model";
 "provider.modelDefaultShort" = "Default model";
 "provider.modelHint" = "Leave blank to use the CLI or API default, or type a model ID directly.";
+"provider.customModel" = "Custom model…";
+"provider.customModelPlaceholder" = "Enter a model ID";
 "provider.reasoning" = "Reasoning effort";
 "provider.reasoningDefault" = "Provider default";
 "provider.baseURL" = "Base URL";
@@ -156,6 +158,9 @@
 "reasoning.ultra" = "Ultra";
 "prompt.builtIn" = "Built-in";
 "ai.quickPrompt" = "Quick Prompt";
+"ai.settings" = "AI Settings";
+"ai.resizeComposer" = "Drag to resize the message box";
+"ai.resizeComposerHelp" = "Drag vertically to make the message box taller or shorter.";
 "prompt.select" = "Select a prompt";
 "prompt.enabled" = "Enabled";
 "prompt.nameEnglish" = "English name";
@@ -209,6 +214,7 @@
 "source.toolbar.fontSize" = "Font Size";
 "source.toolbar.math" = "Math";
 "source.toolbar.insert" = "Insert";
+"source.toolbar.more" = "More Formatting";
 "source.format.bold" = "Bold";
 "source.format.italic" = "Italic";
 "source.format.underline" = "Underline";
@@ -239,6 +245,7 @@
 "preview.actualSize" = "Actual Size";
 "pdf.thumbnails" = "Thumbnails";
 "pdf.export" = "Save PDF As…";
+"pdf.moreActions" = "More PDF actions";
 "pdf.fit" = "Fit";
 "status.pdfExported" = "PDF saved";
 "source.findReplace" = "Find and Replace";
@@ -251,6 +258,12 @@
 "history.prepareRestoreHelp" = "Create a reviewable reverse diff; no source is changed until you accept it.";
 "ai.preparingContext" = "Preparing context";
 "ai.waitingProvider" = "Waiting for the selected AI provider";
+"ai.providerStarted" = "Request sent to the selected AI provider";
+"ai.providerSession" = "Provider session started";
+"ai.providerWorking" = "Provider is processing the request";
+"ai.receivingResponse" = "Receiving the provider response";
+"ai.validatingResponse" = "Validating the response";
+"ai.activity" = "AI activity";
 "ai.cancelled" = "Response stopped";
 "ai.stop" = "Stop response";
 "ai.send" = "Send";

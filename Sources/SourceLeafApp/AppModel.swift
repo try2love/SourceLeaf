@@ -56,6 +56,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var providerHealth: [UUID: ProviderHealthStatus] = [:]
     @Published var generating = false
     @Published var generationStatus = ""
+    @Published var generationEvents: [String] = []
+    @Published var streamingAssistantText = ""
     @Published var validatingReplacementID: UUID?
     @Published var lastError: String?
     @Published var history: [AIEditHistoryEntry] = []
@@ -111,6 +113,7 @@ final class AppModel: ObservableObject {
     private var chatSessionsStore: JSONFileStore<[ChatSession]>?
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
     private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
+    private var currentProjectStateKey: String?
     private let supportDirectoryOverride: URL?
     private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
@@ -240,16 +243,16 @@ final class AppModel: ObservableObject {
 
     func checkSelectedProviderAvailability() {
         guard let id = selectedProviderID else { return }
-        providerHealth[id] = .checking
+        setProviderHealth(.checking, for: id)
         Task {
             do {
                 let provider = try makeSelectedProvider()
                 _ = try await provider.healthCheck()
                 guard selectedProviderID == id else { return }
-                providerHealth[id] = .connected
+                setProviderHealth(.connected, for: id)
             } catch {
                 guard selectedProviderID == id else { return }
-                providerHealth[id] = .unavailable(error.localizedDescription)
+                setProviderHealth(.unavailable(error.localizedDescription), for: id)
             }
         }
     }
@@ -302,11 +305,13 @@ final class AppModel: ObservableObject {
             buildLog = ""
             buildSucceeded = nil
             buildPhase = .idle
+            customContextPaths = []
             projectRoot = root.standardizedFileURL
             projectFiles = ProjectIndexer.discoverFiles(root: root)
             projectTree = ProjectIndexer.tree(files: projectFiles)
             let support = try resolvedSupportDirectory()
             let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
+            currentProjectStateKey = key
             let stateRoot = support.appendingPathComponent("Projects/\(key)", isDirectory: true)
             projectConfigStore = JSONFileStore(url: stateRoot.appendingPathComponent("configuration.json"))
             historyStore = JSONFileStore(url: stateRoot.appendingPathComponent("ai-history.json"))
@@ -329,8 +334,12 @@ final class AppModel: ObservableObject {
                     )]
                 }
             }
-            selectedChatSessionID = chatSessions.first?.id
-            messages = chatSessions.first?.messages ?? []
+            let selectedSessionKey = "SourceLeaf.selectedChatSession.\(key)"
+            let restoredSessionID = defaults.string(forKey: selectedSessionKey).flatMap(UUID.init(uuidString:))
+            let restoredSession = restoredSessionID.flatMap { id in chatSessions.first { $0.id == id } }
+                ?? chatSessions.first
+            selectedChatSessionID = restoredSession?.id
+            messages = restoredSession?.messages ?? []
 
             let lastFileKey = "SourceLeaf.lastFile.\(key)"
             let lastFile = defaults.string(forKey: lastFileKey)
@@ -650,6 +659,8 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: userInstruction))
         persistMessages()
         generating = true
+        generationEvents = [L10n.text("ai.preparingContext")]
+        streamingAssistantText = ""
         pendingProposal = nil
         proposalValidation = [:]
         instruction = ""
@@ -666,10 +677,17 @@ final class AppModel: ObservableObject {
                     instruction: userInstruction,
                     targets: targets,
                     context: context,
+                    systemPrompt: configuration.systemPrompt,
                     projectRoot: root
                 )
-                let proposal = try await provider.generateProposal(for: request)
+                let proposal = try await provider.generateProposal(for: request) { [weak self] event in
+                    Task { @MainActor [weak self] in
+                        self?.receiveAIProviderEvent(event, showText: targets.isEmpty)
+                    }
+                }
                 try Task.checkCancellation()
+                generationStatus = L10n.text("ai.validatingResponse")
+                appendGenerationEvent(generationStatus)
                 guard Set(proposal.replacements.map(\.targetID)).isSubset(of: Set(targets.map(\.id))) else {
                     throw AppPresentationError.unknownProposalTarget
                 }
@@ -683,10 +701,13 @@ final class AppModel: ObservableObject {
                     }
                 }
                 messages.append(ChatMessage(role: .assistant, text: proposal.summary))
+                streamingAssistantText = ""
                 persistMessages()
             } catch {
                 if error is CancellationError {
                     generationStatus = L10n.text("ai.cancelled")
+                    appendGenerationEvent(generationStatus)
+                    streamingAssistantText = ""
                     generating = false
                     return
                 }
@@ -704,6 +725,8 @@ final class AppModel: ObservableObject {
         activeAITask = nil
         generating = false
         generationStatus = L10n.text("ai.cancelled")
+        appendGenerationEvent(generationStatus)
+        streamingAssistantText = ""
     }
 
     func newChatSession() {
@@ -712,6 +735,7 @@ final class AppModel: ObservableObject {
         let session = ChatSession(title: L10n.text("chat.new"), projectPath: root.path)
         chatSessions.insert(session, at: 0)
         selectedChatSessionID = session.id
+        persistSelectedChatSession()
         messages = []
         editTargets = []
         pendingProposal = nil
@@ -722,6 +746,7 @@ final class AppModel: ObservableObject {
         persistMessages()
         guard let session = chatSessions.first(where: { $0.id == id }) else { return }
         selectedChatSessionID = id
+        persistSelectedChatSession()
         messages = session.messages
         editTargets = []
         pendingProposal = nil
@@ -746,13 +771,21 @@ final class AppModel: ObservableObject {
         persistMessages()
     }
 
-    func regenerateLastResponse() {
+    @discardableResult
+    func prepareRegeneration(after assistantMessageID: UUID) -> Bool {
         guard !generating,
-              let lastUserIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
-        let prompt = messages[lastUserIndex].text
-        messages.removeSubrange(lastUserIndex..<messages.count)
+              let assistantIndex = messages.firstIndex(where: { $0.id == assistantMessageID && $0.role == .assistant }),
+              let userIndex = messages[..<assistantIndex].lastIndex(where: { $0.role == .user }) else { return false }
+        let prompt = messages[userIndex].text
+        messages.removeSubrange(userIndex..<messages.count)
         persistMessages()
         instruction = prompt
+        pendingProposal = nil
+        return true
+    }
+
+    func regenerateResponse(after assistantMessageID: UUID) {
+        guard prepareRegeneration(after: assistantMessageID) else { return }
         sendToAI()
     }
 
@@ -1042,9 +1075,7 @@ final class AppModel: ObservableObject {
                 original: target.originalText,
                 replacement: replacement.replacement
             )]
-            layout.show(.codex, in: .trailing)
-            configuration.layout = layout
-            persistConfiguration()
+            revealPanel(.codex, in: .trailing)
         } catch { report(error) }
     }
 
@@ -1215,9 +1246,7 @@ final class AppModel: ObservableObject {
 
     private func baseConversationContext() -> [String: String] {
         var result: [String: String] = [:]
-        let system = configuration.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !system.isEmpty { result["system-instructions"] = system }
-        let prior = messages.dropLast().suffix(12).map { "\($0.role.rawValue): \($0.text)" }.joined(separator: "\n\n")
+        let prior = messages.dropLast().map { "\($0.role.rawValue): \($0.text)" }.joined(separator: "\n\n")
         if !prior.isEmpty { result["conversation-history"] = prior }
         return result
     }
@@ -1252,6 +1281,41 @@ final class AppModel: ObservableObject {
         } catch { report(error) }
     }
 
+    private func persistSelectedChatSession() {
+        guard let key = currentProjectStateKey else { return }
+        let defaultsKey = "SourceLeaf.selectedChatSession.\(key)"
+        if let selectedChatSessionID {
+            defaults.set(selectedChatSessionID.uuidString, forKey: defaultsKey)
+        } else {
+            defaults.removeObject(forKey: defaultsKey)
+        }
+    }
+
+    private func receiveAIProviderEvent(_ event: AIProviderEvent, showText: Bool) {
+        switch event {
+        case .requestStarted:
+            generationStatus = L10n.text("ai.providerStarted")
+            appendGenerationEvent(generationStatus)
+        case .sessionStarted:
+            generationStatus = L10n.text("ai.providerSession")
+            appendGenerationEvent(generationStatus)
+        case .working:
+            generationStatus = L10n.text("ai.providerWorking")
+            appendGenerationEvent(generationStatus)
+        case .responseStarted:
+            generationStatus = L10n.text("ai.receivingResponse")
+            appendGenerationEvent(generationStatus)
+        case let .textDelta(text):
+            guard showText else { return }
+            streamingAssistantText += text
+        }
+    }
+
+    private func appendGenerationEvent(_ event: String) {
+        guard !event.isEmpty, generationEvents.last != event else { return }
+        generationEvents.append(event)
+    }
+
     private var selectedProviderProfile: ProviderProfile? {
         providerProfiles.first { $0.id == selectedProviderID }
             ?? providerProfiles.first(where: { $0.enabled })
@@ -1261,7 +1325,12 @@ final class AppModel: ObservableObject {
         guard let id = selectedProviderID,
               let index = providerProfiles.firstIndex(where: { $0.id == id }) else { return }
         update(&providerProfiles[index])
+        setProviderHealth(.unknown, for: id)
         saveProviderProfiles()
+    }
+
+    func setProviderHealth(_ status: ProviderHealthStatus, for id: UUID) {
+        providerHealth[id] = status
     }
 
     private func updateLayout(_ update: (inout DockLayout) -> Void) {

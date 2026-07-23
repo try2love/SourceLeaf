@@ -125,6 +125,8 @@
 "provider.modelDefault" = "跟随提供方默认模型";
 "provider.modelDefaultShort" = "默认模型";
 "provider.modelHint" = "留空时跟随当前 CLI 或 API 的默认模型，也可直接输入模型 ID。";
+"provider.customModel" = "自定义模型…";
+"provider.customModelPlaceholder" = "输入模型 ID";
 "provider.reasoning" = "思考深度";
 "provider.reasoningDefault" = "默认深度";
 "provider.baseURL" = "基础 URL";
@@ -156,6 +158,9 @@
 "reasoning.ultra" = "极高";
 "prompt.builtIn" = "内置";
 "ai.quickPrompt" = "快捷 Prompt";
+"ai.settings" = "AI 设置";
+"ai.resizeComposer" = "拖动调整输入框高度";
+"ai.resizeComposerHelp" = "上下拖动可自由拉高或缩短消息输入框。";
 "prompt.select" = "选择一个提示词";
 "prompt.enabled" = "启用";
 "prompt.nameEnglish" = "英文名称";
@@ -209,6 +214,7 @@
 "source.toolbar.fontSize" = "字号";
 "source.toolbar.math" = "公式";
 "source.toolbar.insert" = "插入";
+"source.toolbar.more" = "更多格式";
 "source.format.bold" = "加粗";
 "source.format.italic" = "斜体";
 "source.format.underline" = "下划线";
@@ -239,6 +245,7 @@
 "preview.actualSize" = "实际大小";
 "pdf.thumbnails" = "缩略图";
 "pdf.export" = "PDF 另存为…";
+"pdf.moreActions" = "更多 PDF 操作";
 "pdf.fit" = "适合";
 "status.pdfExported" = "PDF 已保存";
 "source.findReplace" = "查找与替换";
@@ -251,6 +258,12 @@
 "history.prepareRestoreHelp" = "生成一份可审阅的反向差异；接受前不会修改源码。";
 "ai.preparingContext" = "正在准备上下文";
 "ai.waitingProvider" = "正在等待所选 AI 服务";
+"ai.providerStarted" = "请求已发送到所选 AI 服务";
+"ai.providerSession" = "AI 服务会话已启动";
+"ai.providerWorking" = "AI 服务正在处理请求";
+"ai.receivingResponse" = "正在接收 AI 服务响应";
+"ai.validatingResponse" = "正在校验响应";
+"ai.activity" = "AI 活动";
 "ai.cancelled" = "已终止回答";
 "ai.stop" = "终止回答";
 "ai.send" = "发送";

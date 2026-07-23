@@ -4,17 +4,20 @@ public struct AIRequest: Sendable {
     public var instruction: String
     public var targets: [SourceTarget]
     public var context: [String: String]
+    public var systemPrompt: String
     public var projectRoot: URL
 
     public init(
         instruction: String,
         targets: [SourceTarget],
         context: [String: String],
+        systemPrompt: String = "",
         projectRoot: URL
     ) {
         self.instruction = instruction
         self.targets = targets
         self.context = context
+        self.systemPrompt = systemPrompt
         self.projectRoot = projectRoot
     }
 }
@@ -22,7 +25,31 @@ public struct AIRequest: Sendable {
 public protocol AIProvider: Sendable {
     var displayName: String { get }
     func generateProposal(for request: AIRequest) async throws -> AIProposal
+    func generateProposal(
+        for request: AIRequest,
+        onEvent: @escaping @Sendable (AIProviderEvent) -> Void
+    ) async throws -> AIProposal
     func healthCheck() async throws -> String
+}
+
+public enum AIProviderEvent: Equatable, Sendable {
+    case requestStarted
+    case sessionStarted
+    case working
+    case responseStarted
+    case textDelta(String)
+}
+
+public extension AIProvider {
+    func generateProposal(
+        for request: AIRequest,
+        onEvent: @escaping @Sendable (AIProviderEvent) -> Void
+    ) async throws -> AIProposal {
+        onEvent(.requestStarted)
+        let proposal = try await generateProposal(for: request)
+        onEvent(.responseStarted)
+        return proposal
+    }
 }
 
 public enum AIProviderHealthCheck {
@@ -147,6 +174,20 @@ public enum AIEditPromptBuilder {
         Include one replacement per target that should change. Never invent target IDs. If the request is unsafe or ambiguous, return an empty replacements array and explain why in summary.
         """
     }
+
+    /// CLI providers do not expose a native system-message channel, so preserve
+    /// the same role separation explicitly at the outermost prompt boundary.
+    public static func buildForCLI(_ request: AIRequest) -> String {
+        let prompt = build(request)
+        let system = request.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !system.isEmpty else { return prompt }
+        return """
+        System instructions:
+        \(system)
+
+        \(prompt)
+        """
+    }
 }
 
 public enum AIChatPromptBuilder {
@@ -188,7 +229,15 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
-        let prompt = AIEditPromptBuilder.build(request)
+        try await generateProposal(for: request, onEvent: { _ in })
+    }
+
+    public func generateProposal(
+        for request: AIRequest,
+        onEvent: @escaping @Sendable (AIProviderEvent) -> Void
+    ) async throws -> AIProposal {
+        onEvent(.requestStarted)
+        let prompt = AIEditPromptBuilder.buildForCLI(request)
         let sandboxDirectory = try Self.sandboxDirectory(
             key: String(SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16))
         )
@@ -197,6 +246,9 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
             executableURL: executableURL,
             arguments: Self.invocationArguments(for: profile),
             currentDirectoryURL: sandboxDirectory,
+            onOutput: { chunk in
+                for event in Self.providerEvents(in: chunk) { onEvent(event) }
+            },
             input: Data(prompt.utf8)
         )
         guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
@@ -261,6 +313,30 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         }
         return latest
     }
+
+    public static func providerEvents(in jsonLines: String) -> [AIProviderEvent] {
+        var events: [AIProviderEvent] = []
+        for line in jsonLines.split(separator: "\n") {
+            guard let data = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let type = object["type"] as? String
+            if type == "thread.started" {
+                events.append(.sessionStarted)
+            } else if type == "turn.started" {
+                events.append(.working)
+            }
+            if let item = object["item"] as? [String: Any],
+               let itemType = item["type"] as? String {
+                if itemType == "agent_message", let text = item["text"] as? String {
+                    events.append(.responseStarted)
+                    events.append(.textDelta(text))
+                } else if itemType == "reasoning" || itemType == "command_execution" {
+                    events.append(.working)
+                }
+            }
+        }
+        return events
+    }
 }
 
 public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
@@ -286,9 +362,19 @@ public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func generateProposal(for request: AIRequest) async throws -> AIProposal {
-        let text = try await run(prompt: AIEditPromptBuilder.build(request), workspaceKey: String(
+        try await generateProposal(for: request, onEvent: { _ in })
+    }
+
+    public func generateProposal(
+        for request: AIRequest,
+        onEvent: @escaping @Sendable (AIProviderEvent) -> Void
+    ) async throws -> AIProposal {
+        onEvent(.requestStarted)
+        let text = try await run(prompt: AIEditPromptBuilder.buildForCLI(request), workspaceKey: String(
             SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16)
-        ))
+        ), onOutput: { _ in onEvent(.working) })
+        onEvent(.responseStarted)
+        if request.targets.isEmpty { onEvent(.textDelta(text)) }
         if request.targets.isEmpty {
             return AIProposal(summary: text.trimmingCharacters(in: .whitespacesAndNewlines), replacements: [], providerName: displayName)
         }
@@ -301,7 +387,11 @@ public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
         )
     }
 
-    private func run(prompt: String, workspaceKey: String) async throws -> String {
+    private func run(
+        prompt: String,
+        workspaceKey: String,
+        onOutput: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
         let directory = try ApplicationDirectories.supportDirectory()
             .appendingPathComponent("ProviderWorkspaces", isDirectory: true)
             .appendingPathComponent(workspaceKey, isDirectory: true)
@@ -310,6 +400,7 @@ public final class CodeBuddyCLIProvider: AIProvider, @unchecked Sendable {
             executableURL: executableURL,
             arguments: Self.invocationArguments(for: profile),
             currentDirectoryURL: directory,
+            onOutput: onOutput,
             input: Data(prompt.utf8)
         )
         guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }

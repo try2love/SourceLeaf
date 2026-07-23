@@ -165,6 +165,85 @@ import Testing
     restored.openProject(project)
     #expect(restored.chatSessions.contains { $0.title == "Methods discussion" })
     #expect(restored.chatSessions.count == 2)
+    #expect(restored.selectedChatSessionID == newID)
+}
+
+@MainActor
+@Test func regeneratingAnOlderAssistantResponseUsesItsOwnUserPrompt() throws {
+    let state = try productTestState(named: "message-specific-regeneration")
+    defer { state.cleanup() }
+    let model = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    let firstUser = ChatMessage(role: .user, text: "Explain the threat model")
+    let firstAssistant = ChatMessage(role: .assistant, text: "First answer")
+    let secondUser = ChatMessage(role: .user, text: "Now rewrite the conclusion")
+    let secondAssistant = ChatMessage(role: .assistant, text: "Second answer")
+    model.messages = [firstUser, firstAssistant, secondUser, secondAssistant]
+
+    #expect(model.prepareRegeneration(after: firstAssistant.id))
+    #expect(model.instruction == firstUser.text)
+    #expect(model.messages.isEmpty)
+}
+
+@MainActor
+@Test func preparingAHistoryRestoreActivatesTheReviewPanel() throws {
+    let state = try productTestState(named: "history-review-activation")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("Accepted replacement".utf8).write(to: project.appendingPathComponent("main.tex"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    model.revealPanel(.pdf, in: .trailing)
+    let trailing = try #require(model.layout.zone(containing: .codex))
+    model.layout.selected[trailing] = .pdf
+    let entry = AIEditHistoryEntry(
+        projectPath: project.path,
+        relativePath: "main.tex",
+        originalText: "Original text",
+        replacementText: "Accepted replacement",
+        instruction: "Revise",
+        providerName: "Test"
+    )
+
+    model.prepareRevert(entry)
+
+    #expect(model.pendingProposal?.replacements.first?.replacement == "Original text")
+    #expect(model.layout.selected[trailing] == .codex)
+}
+
+@MainActor
+@Test func customContextDoesNotLeakAcrossProjects() throws {
+    let state = try productTestState(named: "project-context-isolation")
+    defer { state.cleanup() }
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    let firstProject = state.support.appendingPathComponent("项目一", isDirectory: true)
+    let secondProject = state.support.appendingPathComponent("项目二", isDirectory: true)
+    try FileManager.default.createDirectory(at: firstProject, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: secondProject, withIntermediateDirectories: true)
+    try Data("First".utf8).write(to: firstProject.appendingPathComponent("main.tex"))
+    try Data("Second".utf8).write(to: secondProject.appendingPathComponent("main.tex"))
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(firstProject)
+    model.customContextPaths.insert("main.tex")
+
+    model.openProject(secondProject)
+
+    #expect(model.customContextPaths.isEmpty)
+}
+
+@MainActor
+@Test func changingProviderConfigurationInvalidatesTheHealthCheck() throws {
+    let state = try productTestState(named: "provider-health-invalidation")
+    defer { state.cleanup() }
+    let model = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    let id = try #require(model.selectedProviderID)
+    model.setProviderHealth(.connected, for: id)
+    #expect(model.selectedProviderHealth == .connected)
+
+    model.selectedProviderModel = "different-model"
+
+    #expect(model.selectedProviderHealth == .unknown)
 }
 
 @MainActor

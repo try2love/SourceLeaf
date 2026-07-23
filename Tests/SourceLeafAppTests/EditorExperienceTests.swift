@@ -21,6 +21,7 @@ import Testing
     let state = TypingState()
     let view = NSHostingView(rootView: TypingHarness(state: state))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = view
     window.makeKeyAndOrderFront(nil)
     defer { window.contentView = nil; window.close() }
@@ -134,6 +135,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = view
     window.makeKeyAndOrderFront(nil)
     defer {
@@ -201,6 +203,7 @@ import Testing
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = view
     window.makeKeyAndOrderFront(nil)
     defer {
@@ -335,6 +338,7 @@ private func makeEditorHost(
     )
     let view = NSHostingView(rootView: editor)
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.contentView = view
     window.makeKeyAndOrderFront(nil)
     view.layoutSubtreeIfNeeded()

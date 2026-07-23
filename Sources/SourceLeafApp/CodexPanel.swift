@@ -9,6 +9,9 @@ struct CodexPanel: View {
     @State private var composerDragStart: Double?
     @State private var renameTitle = ""
     @State private var showingRename = false
+    @State private var customModelDraft = ""
+    @State private var showingCustomModel = false
+    @State private var showingActivity = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +24,7 @@ struct CodexPanel: View {
                             ChatBubble(
                                 message: message,
                                 onEdit: { model.editMessage(message) },
-                                onRegenerate: model.regenerateLastResponse
+                                onRegenerate: { model.regenerateResponse(after: message.id) }
                             ).id(message.id)
                         }
                         ForEach(acceptedEdits) { entry in
@@ -32,18 +35,56 @@ struct CodexPanel: View {
                                 ProposalCard(replacement: replacement)
                             }
                         }
-                        if model.generating {
+                        if !model.streamingAssistantText.isEmpty {
                             HStack {
-                                ProgressView()
+                                Text(model.streamingAssistantText)
+                                    .textSelection(.enabled)
+                                    .padding(9)
+                                    .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                                Spacer(minLength: 24)
+                            }
+                        }
+                        if model.generating || !model.generationStatus.isEmpty {
+                            HStack {
+                                if model.generating {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "stop.circle")
+                                }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(L10n.text("ai.thinking"))
-                                    Text(model.generationStatus).sourceLeafFont(.caption2)
+                                    if model.generating {
+                                        Text(L10n.text("ai.thinking"))
+                                    }
+                                    if !model.generationStatus.isEmpty {
+                                        Text(model.generationStatus).sourceLeafFont(.caption2)
+                                    }
                                 }
                                 Spacer()
-                                Button(L10n.text("ai.stop")) { model.cancelAIResponse() }
-                                    .buttonStyle(.bordered)
+                                if model.generating {
+                                    Button(L10n.text("ai.stop")) { model.cancelAIResponse() }
+                                        .buttonStyle(.bordered)
+                                }
                             }
                             .foregroundStyle(.secondary)
+                        }
+                        if !model.generationEvents.isEmpty {
+                            DisclosureGroup(
+                                isExpanded: $showingActivity,
+                                content: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        ForEach(Array(model.generationEvents.enumerated()), id: \.offset) { _, event in
+                                            Label(event, systemImage: "circle.fill")
+                                                .sourceLeafFont(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.top, 5)
+                                },
+                                label: {
+                                    Text(L10n.text("ai.activity"))
+                                        .sourceLeafFont(.caption, weight: .semibold)
+                                }
+                            )
                         }
                     }
                     .padding(12)
@@ -51,15 +92,33 @@ struct CodexPanel: View {
                 .onChange(of: model.messages.count) { _, _ in
                     if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
+                .onChange(of: model.generating) { _, generating in
+                    showingActivity = generating
+                }
             }
             Divider()
             composer
         }
         .background(colorScheme == .dark ? Color(red: 0.055, green: 0.055, blue: 0.06) : Color.white)
+        .popover(isPresented: $showingCustomModel) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.text("provider.customModel")).sourceLeafFont(.headline, weight: .semibold)
+                TextField(L10n.text("provider.customModelPlaceholder"), text: $customModelDraft)
+                    .frame(width: 300)
+                    .onSubmit { applyCustomModel() }
+                HStack {
+                    Spacer()
+                    Button(L10n.text("action.cancel")) { showingCustomModel = false }
+                    Button(L10n.text("action.save")) { applyCustomModel() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(14)
+        }
     }
 
     private var controls: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 Menu {
                     Button(L10n.text("chat.new")) { model.newChatSession() }
@@ -146,6 +205,8 @@ struct CodexPanel: View {
                             }
                         }
                     }
+                    Divider()
+                    Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
                 } label: {
                     Label(model.selectedProviderModel.isEmpty ? L10n.text("provider.modelDefaultShort") : model.selectedProviderModel, systemImage: "slider.horizontal.3")
                 }
@@ -206,18 +267,108 @@ struct CodexPanel: View {
                 }
             }
             .buttonStyle(.borderless)
+            compactControls
         }
         .padding(7)
         .background(.bar)
     }
 
+    private var compactControls: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button(L10n.text("chat.new")) { model.newChatSession() }
+                Button(L10n.text("chat.rename")) {
+                    renameTitle = selectedSessionTitle
+                    showingRename = true
+                }
+                Divider()
+                ForEach(model.chatSessions) { session in
+                    Button {
+                        model.selectChatSession(session.id)
+                    } label: {
+                        if session.id == model.selectedChatSessionID {
+                            Label(session.title, systemImage: "checkmark")
+                        } else {
+                            Text(session.title)
+                        }
+                    }
+                }
+            } label: {
+                Label(selectedSessionTitle, systemImage: "bubble.left.and.bubble.right")
+                    .lineLimit(1)
+            }
+            .help(String(format: L10n.text("chat.currentSession"), selectedSessionTitle))
+
+            Menu {
+                ForEach(model.promptTemplates.filter(\.enabled)) { prompt in
+                    Button(model.appLanguage.isChinese ? prompt.nameZH : prompt.name) {
+                        model.usePrompt(prompt)
+                    }
+                }
+            } label: {
+                Image(systemName: "text.bubble")
+            }
+            .help(L10n.text("ai.quickPrompt"))
+
+            providerHealthButton
+
+            Menu {
+                Section(L10n.text("ai.provider")) {
+                    ForEach(model.providerProfiles.filter(\.enabled)) { profile in
+                        Button {
+                            model.selectProvider(profile.id)
+                        } label: {
+                            if profile.id == model.selectedProviderID {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                }
+                Section(L10n.text("provider.model")) {
+                    Button(L10n.text("provider.modelDefault")) { model.selectedProviderModel = "" }
+                    ForEach(modelPresets, id: \.self) { candidate in
+                        Button(candidate) { model.selectedProviderModel = candidate }
+                    }
+                    Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
+                }
+                if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
+                    Section(L10n.text("provider.reasoning")) {
+                        Button(L10n.text("provider.reasoningDefault")) { model.selectedReasoningEffort = nil }
+                        ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
+                            Button(L10n.text("reasoning.\(effort.rawValue)")) {
+                                model.selectedReasoningEffort = effort
+                            }
+                        }
+                    }
+                }
+                Section(L10n.text("ai.context")) {
+                    ForEach(ContextScope.allCases) { scope in
+                        Button(L10n.context(scope)) { model.contextScope = scope }
+                    }
+                }
+            } label: {
+                Label(L10n.text("ai.settings"), systemImage: "slider.horizontal.3")
+            }
+            .help(L10n.text("ai.settings"))
+
+            Spacer(minLength: 0)
+        }
+        .buttonStyle(.borderless)
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 7) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.secondary.opacity(0.45))
-                .frame(width: 44, height: 4)
-                .frame(maxWidth: .infinity, minHeight: 7)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.and.down")
+                Text(L10n.text("ai.resizeComposer"))
+            }
+                .sourceLeafFont(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 18)
                 .contentShape(Rectangle())
+                .help(L10n.text("ai.resizeComposerHelp"))
                 .gesture(
                     DragGesture(minimumDistance: 1)
                         .onChanged { value in
@@ -282,9 +433,15 @@ struct CodexPanel: View {
                 .disabled(!model.generating && model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help(model.generating ? L10n.text("ai.stop") : L10n.text("ai.send"))
             }
-            Text(model.editTargets.isEmpty ? L10n.text("ai.chatOnlyHint") : L10n.text("ai.targetHint"))
-                .sourceLeafFont(.caption2)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(model.editTargets.isEmpty ? L10n.text("ai.chatOnlyHint") : L10n.text("ai.targetHint"))
+                Spacer()
+                Text(model.configuration.chatSendBehavior == .enter
+                     ? L10n.text("chat.sendWithEnter")
+                     : L10n.text("chat.sendWithShiftEnter"))
+            }
+            .sourceLeafFont(.caption2)
+            .foregroundStyle(.secondary)
         }
         .padding(9)
     }
@@ -309,7 +466,9 @@ struct CodexPanel: View {
             .help(L10n.text("provider.healthUnavailable") + "\n" + message)
         case .unknown:
             Button { model.checkSelectedProviderAvailability() } label: {
-                Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+                Label(L10n.text("provider.healthUnknown"), systemImage: "questionmark.circle")
+                    .foregroundStyle(.secondary)
+                    .sourceLeafFont(.caption)
             }
             .help(L10n.text("provider.healthCheck"))
         }
@@ -324,7 +483,7 @@ struct CodexPanel: View {
     }
 
     private var acceptedEdits: [AIEditHistoryEntry] {
-        Array(model.history.lazy.filter { $0.sessionID == model.selectedChatSessionID }.prefix(8))
+        model.history.filter { $0.sessionID == model.selectedChatSessionID }
     }
 
     private var reasoningLabel: String {
@@ -340,6 +499,16 @@ struct CodexPanel: View {
         default:
             model.selectedProviderModel.isEmpty ? [] : [model.selectedProviderModel]
         }
+    }
+
+    private func presentCustomModelEditor() {
+        customModelDraft = model.selectedProviderModel
+        showingCustomModel = true
+    }
+
+    private func applyCustomModel() {
+        model.selectedProviderModel = customModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        showingCustomModel = false
     }
 }
 
@@ -493,11 +662,12 @@ private struct DiffText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).sourceLeafFont(.caption, weight: .bold).foregroundStyle(color)
-            ScrollView([.vertical, .horizontal]) {
+            ScrollView(.vertical) {
                 Text(text)
-                    .font(.system(size: 11, design: .monospaced))
+                    .sourceLeafFont(.body, design: .monospaced)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(8)
