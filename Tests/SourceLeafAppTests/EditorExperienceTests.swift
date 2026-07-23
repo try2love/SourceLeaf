@@ -32,6 +32,20 @@ import Testing
         hasMarkedText: false,
         recentlyCommittedMarkedText: true
     ))
+    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .enter,
+        hasMarkedText: false,
+        compositionInputSourceActive: true
+    ))
+    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+        characters: "\r",
+        modifierFlags: [],
+        sendBehavior: .enter,
+        hasMarkedText: false,
+        recentlyTypedWithCompositionInputSource: true
+    ))
     #expect(ComposerNSTextView.shouldTreatReturnAsSend(
         characters: "\r",
         modifierFlags: [],
@@ -50,6 +64,20 @@ import Testing
         sendBehavior: .shiftEnter,
         hasMarkedText: false
     ))
+}
+
+@MainActor
+@Test func composerRecognizesCommonCJKInputSourcesAsReturnCommitSources() {
+    #expect(ComposerNSTextView.inputSourcePrefersReturnCommit(
+        sourceID: "com.apple.inputmethod.SCIM.ITABC",
+        localizedName: "简体拼音",
+        languages: ["zh-Hans"]
+    ))
+    #expect(ComposerNSTextView.inputSourcePrefersReturnCommit(
+        sourceID: "com.apple.keylayout.ABC",
+        localizedName: "ABC",
+        languages: ["en"]
+    ) == false)
 }
 
 @Test func sourceFindMatchesAllOccurrencesForPersistentHighlighting() {

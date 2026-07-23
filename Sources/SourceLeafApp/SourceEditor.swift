@@ -895,15 +895,25 @@ struct SourceTextView: NSViewRepresentable {
             }
             lastLocallyEmittedText = textView.string
             parent.text = textView.string
-            highlightTimer?.invalidate()
-            let timer = Timer(timeInterval: 0.22, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
-            highlightTimer = timer
-            RunLoop.main.add(timer, forMode: .common)
+            scheduleDeferredHighlighting()
             scheduleSelectionCommit()
             updateCompletionOverlayIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
+        }
+
+        private func scheduleDeferredHighlighting(after delay: TimeInterval = 0.45) {
+            highlightTimer?.invalidate()
+            let timer = Timer(
+                timeInterval: delay,
+                target: self,
+                selector: #selector(applyDeferredHighlighting),
+                userInfo: nil,
+                repeats: false
+            )
+            highlightTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
         }
 
         private func normalizeCompletionPlaceholderSelectionIfNeeded() {
@@ -1416,9 +1426,6 @@ struct SourceTextView: NSViewRepresentable {
             glyphOverlay?.palette = palette
             if completionOverlay?.isShowing == true { completionOverlay?.palette = palette }
             textView.layoutManager?.invalidateDisplay(forCharacterRange: targetRange)
-            if textView.textContainer != nil {
-                textView.layoutManager?.ensureLayout(forCharacterRange: targetRange)
-            }
             textView.needsDisplay = true
             glyphOverlay?.synchronizeFrame()
             glyphOverlay?.needsDisplay = true
@@ -1721,9 +1728,12 @@ final class SourceGlyphOverlayView: NSView {
                   NSIntersectionRange(clamped, visibleCharacterRange).length > 0 else { continue }
             let glyphRange = layoutManager.glyphRange(forCharacterRange: clamped, actualCharacterRange: nil)
             let active = activeFindRange == range
-            let fill = (active ? NSColor.systemYellow : NSColor.systemYellow.withAlphaComponent(0.32))
-                .withAlphaComponent(active ? 0.52 : 0.24)
-            let stroke = active ? NSColor.systemOrange : NSColor.systemYellow.withAlphaComponent(0.75)
+            let fill = active
+                ? NSColor.systemYellow.withAlphaComponent(0.50)
+                : NSColor.systemYellow.withAlphaComponent(0.34)
+            let stroke = active
+                ? NSColor.systemOrange
+                : NSColor.systemOrange.withAlphaComponent(0.65)
             layoutManager.enumerateEnclosingRects(
                 forGlyphRange: glyphRange,
                 withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
@@ -1735,7 +1745,7 @@ final class SourceGlyphOverlayView: NSView {
                 fill.setFill()
                 path.fill()
                 stroke.setStroke()
-                path.lineWidth = active ? 1.2 : 0.8
+                path.lineWidth = active ? 1.3 : 1.0
                 path.stroke()
                 self.lastFindHighlightRectCount += 1
             }

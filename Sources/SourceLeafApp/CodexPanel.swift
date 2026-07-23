@@ -674,6 +674,7 @@ final class ComposerNSTextView: NSTextView {
     var isGenerating = false
     var onSend: (() -> Bool)?
     private var lastMarkedTextCommitDate = Date.distantPast
+    private var lastCompositionLikeKeyDate = Date.distantPast
 
     override func unmarkText() {
         super.unmarkText()
@@ -681,13 +682,19 @@ final class ComposerNSTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        let compositionInputSourceActive = Self.currentInputSourcePrefersReturnCommit()
+        if Self.isPlainPrintableInput(event),
+           compositionInputSourceActive {
+            lastCompositionLikeKeyDate = Date()
+        }
         if Self.shouldTreatReturnAsSend(
             characters: event.charactersIgnoringModifiers,
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
             recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.18,
-            compositionInputSourceActive: Self.currentInputSourcePrefersReturnCommit()
+            compositionInputSourceActive: compositionInputSourceActive,
+            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 1.2
         ), onSend?() == true {
             return
         }
@@ -700,13 +707,15 @@ final class ComposerNSTextView: NSTextView {
         sendBehavior: ChatSendBehavior,
         hasMarkedText: Bool,
         recentlyCommittedMarkedText: Bool = false,
-        compositionInputSourceActive: Bool = false
+        compositionInputSourceActive: Bool = false,
+        recentlyTypedWithCompositionInputSource: Bool = false
     ) -> Bool {
         guard characters == "\r" || characters == "\n" else { return false }
         guard !hasMarkedText else { return false }
         guard !recentlyCommittedMarkedText else { return false }
         let shift = modifierFlags.contains(.shift)
         if compositionInputSourceActive && !shift { return false }
+        if recentlyTypedWithCompositionInputSource && !shift { return false }
         return sendBehavior == .enter ? !shift : shift
     }
 
@@ -714,7 +723,48 @@ final class ComposerNSTextView: NSTextView {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
               let rawID = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
         let id = unsafeBitCast(rawID, to: CFString.self) as String
+        let localizedName = (TISGetInputSourceProperty(source, kTISPropertyLocalizedName).map {
+            unsafeBitCast($0, to: CFString.self) as String
+        }) ?? ""
+        let languages = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages)
+            .flatMap { unsafeBitCast($0, to: NSArray.self) as? [String] } ?? []
+        return inputSourcePrefersReturnCommit(sourceID: id, localizedName: localizedName, languages: languages)
+    }
+
+    static func inputSourcePrefersReturnCommit(
+        sourceID id: String,
+        localizedName: String = "",
+        languages: [String] = []
+    ) -> Bool {
+        let lowered = (id + " " + localizedName).lowercased()
+        if lowered.contains("pinyin")
+            || lowered.contains("shuangpin")
+            || lowered.contains("wubi")
+            || lowered.contains("zhuyin")
+            || lowered.contains("cangjie")
+            || lowered.contains("scim")
+            || lowered.contains("kotoeri")
+            || lowered.contains("hangul")
+            || lowered.contains("拼音")
+            || lowered.contains("双拼")
+            || lowered.contains("五笔") {
+            return true
+        }
+        if languages.contains(where: { language in
+            let lower = language.lowercased()
+            return lower.hasPrefix("zh") || lower.hasPrefix("ja") || lower.hasPrefix("ko")
+        }) {
+            return true
+        }
         return !id.contains(".keylayout.")
+    }
+
+    private static func isPlainPrintableInput(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+              let characters = event.characters,
+              characters.count == 1,
+              let scalar = characters.unicodeScalars.first else { return false }
+        return !CharacterSet.controlCharacters.contains(scalar)
     }
 }
 
@@ -753,12 +803,9 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        ViewThatFits(in: .horizontal) {
-            styledBubble
-                .fixedSize(horizontal: true, vertical: true)
-            styledBubble
-                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-        }
+        styledBubble
+            .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(1)
     }
 
@@ -787,8 +834,7 @@ private struct RenderedChatText: View {
     let text: String
 
     var body: some View {
-        if text.looksLikeMarkdown,
-           let rendered = try? AttributedString(
+        if let rendered = try? AttributedString(
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .full,

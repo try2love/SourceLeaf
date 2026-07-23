@@ -1449,13 +1449,13 @@ final class AppModel: ObservableObject {
     private func bufferStreamingAssistantText(_ text: String) {
         pendingStreamingAssistantText += text
         let now = Date()
-        if pendingStreamingAssistantText.count >= 160 || now.timeIntervalSince(lastStreamingFlush) >= 0.08 {
+        if pendingStreamingAssistantText.count >= 80 || now.timeIntervalSince(lastStreamingFlush) >= 0.05 {
             flushStreamingAssistantText()
             return
         }
         guard streamingFlushTask == nil else { return }
         streamingFlushTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(80))
+            try? await Task.sleep(for: .milliseconds(50))
             guard let self else { return }
             self.flushStreamingAssistantText()
         }
