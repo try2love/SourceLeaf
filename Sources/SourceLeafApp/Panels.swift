@@ -276,7 +276,11 @@ final class ZoomableImageScrollView: NSScrollView {
 
     func setZoomScale(_ scale: Double) {
         let bounded = min(8, max(0.1, scale))
-        if abs(magnification - bounded) > 0.005 { setMagnification(bounded, centeredAt: visibleRect.center) }
+        if abs(magnification - bounded) > 0.005 {
+            let visibleDocument = documentVisibleRect
+            let documentAnchor = NSPoint(x: visibleDocument.midX, y: visibleDocument.midY)
+            setMagnification(bounded, centeredAt: documentAnchor)
+        }
         updateCenteringInsets()
     }
 
@@ -292,7 +296,13 @@ final class ZoomableImageScrollView: NSScrollView {
             return
         }
         let next = Self.zoomedScale(from: magnification, scrollingDeltaY: event.scrollingDeltaY)
-        setMagnification(next, centeredAt: convert(event.locationInWindow, from: nil))
+        let locationInScrollView = convert(event.locationInWindow, from: nil)
+        let documentAnchor = documentView?.convert(locationInScrollView, from: self)
+            ?? NSPoint(
+                x: documentVisibleRect.midX,
+                y: documentVisibleRect.midY
+            )
+        setMagnification(next, centeredAt: documentAnchor)
         updateCenteringInsets()
         onScaleChanged?(next)
     }

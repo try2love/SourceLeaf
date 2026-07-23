@@ -92,6 +92,62 @@ import Testing
 }
 
 @MainActor
+@Test func imageZoomPreservesTheVisibleDocumentAnchor() throws {
+    guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
+    let fixtures = URL(fileURLWithPath: fixturesPath, isDirectory: true)
+    let model = try isolatedModel(named: "image-zoom-anchor")
+    model.openProject(fixtures.appendingPathComponent("图片格式", isDirectory: true))
+    let image = try #require(model.projectFiles.first { $0.relativePath == "portrait.jpg" })
+    model.openFile(image)
+
+    let hostingView = NSHostingView(
+        rootView: ImagePanel()
+            .environmentObject(model)
+            .frame(width: 720, height: 520)
+    )
+    hostingView.frame = NSRect(x: 0, y: 0, width: 720, height: 520)
+    let window = NSWindow(
+        contentRect: hostingView.frame,
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    window.makeKeyAndOrderFront(nil)
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    let preview = try #require(findZoomableImagePreview(in: hostingView))
+
+    preview.setZoomScale(2.4)
+    preview.contentView.scroll(to: NSPoint(x: 95, y: 110))
+    preview.reflectScrolledClipView(preview.contentView)
+    let beforeRect = preview.documentVisibleRect
+    let before = NSPoint(x: beforeRect.midX, y: beforeRect.midY)
+    preview.setZoomScale(3.1)
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    let afterRect = preview.documentVisibleRect
+    let after = NSPoint(x: afterRect.midX, y: afterRect.midY)
+
+    #expect(abs(before.x - after.x) < 1)
+    #expect(abs(before.y - after.y) < 1)
+
+    preview.setZoomScale(1.8)
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    let afterZoomOutRect = preview.documentVisibleRect
+    let afterZoomOut = NSPoint(x: afterZoomOutRect.midX, y: afterZoomOutRect.midY)
+
+    #expect(abs(after.x - afterZoomOut.x) < 1)
+    #expect(abs(after.y - afterZoomOut.y) < 1)
+}
+
+@MainActor
 @Test func authorPhotoSurvivesRepeatedWindowLayoutWithoutCrashing() throws {
     guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
     let project = URL(fileURLWithPath: projectPath, isDirectory: true)
