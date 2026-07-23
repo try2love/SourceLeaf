@@ -37,12 +37,12 @@ struct CodexPanel: View {
                         }
                         if !model.streamingAssistantText.isEmpty {
                             HStack {
-                                Text(model.streamingAssistantText)
+                                RenderedChatText(text: model.streamingAssistantText)
                                     .textSelection(.enabled)
                                     .padding(9)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .fixedSize(horizontal: false, vertical: true)
                                     .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                                    .frame(maxWidth: ChatBubble.maximumBubbleWidth, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Spacer(minLength: 24)
                             }
                             .frame(maxWidth: .infinity)
@@ -681,6 +681,13 @@ final class ComposerNSTextView: NSTextView {
         lastMarkedTextCommitDate = Date()
     }
 
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        if Self.currentInputSourcePrefersReturnCommit() {
+            lastCompositionLikeKeyDate = Date()
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
     override func keyDown(with event: NSEvent) {
         let compositionInputSourceActive = Self.currentInputSourcePrefersReturnCommit()
         if Self.isPlainPrintableInput(event),
@@ -692,9 +699,9 @@ final class ComposerNSTextView: NSTextView {
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
-            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.18,
+            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.3,
             compositionInputSourceActive: compositionInputSourceActive,
-            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 1.2
+            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 2.0
         ), onSend?() == true {
             return
         }
@@ -815,15 +822,13 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        ViewThatFits(in: .horizontal) {
-            styledBubble
-                .fixedSize(horizontal: true, vertical: true)
-            styledBubble
-                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        styledBubble
+            .frame(maxWidth: Self.maximumBubbleWidth, alignment: message.role == .user ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(1)
     }
+
+    static let maximumBubbleWidth: CGFloat = 720
 
     private var styledBubble: some View {
         RenderedChatText(text: message.text)

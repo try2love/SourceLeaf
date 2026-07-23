@@ -171,6 +171,29 @@ import Testing
     #expect(outdented.resultingSelection == fullSelection)
 }
 
+@Test func latexNewlinePreservesIndentAndContinuesListItems() throws {
+    let environmentSource = "\\begin{itemize}"
+    let environmentEdit = LaTeXSourceFormatter.newlineEdit(
+        source: environmentSource,
+        selection: NSRange(location: (environmentSource as NSString).length, length: 0)
+    )
+    #expect(environmentEdit.replacement == "\n  \\item ")
+
+    let itemSource = "  \\item First"
+    let itemEdit = LaTeXSourceFormatter.newlineEdit(
+        source: itemSource,
+        selection: NSRange(location: (itemSource as NSString).length, length: 0)
+    )
+    #expect(itemEdit.replacement == "\n  \\item ")
+
+    let figureSource = "  \\begin{figure}"
+    let figureEdit = LaTeXSourceFormatter.newlineEdit(
+        source: figureSource,
+        selection: NSRange(location: (figureSource as NSString).length, length: 0)
+    )
+    #expect(figureEdit.replacement == "\n    ")
+}
+
 @MainActor
 @Test func latexCompletionIndexRefreshesAfterProjectOpenAndSourceEditsWithoutBodyScanning() async throws {
     let state = try productTestState(named: "completion-index")

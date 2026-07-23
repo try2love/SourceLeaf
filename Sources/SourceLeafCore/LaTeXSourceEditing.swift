@@ -35,6 +35,21 @@ public struct LaTeXSourceEdit: Equatable, Sendable {
 }
 
 public enum LaTeXSourceFormatter {
+    public static func newlineEdit(
+        source: String,
+        selection proposedSelection: NSRange
+    ) -> LaTeXSourceEdit {
+        let sourceLength = (source as NSString).length
+        let selection = validRange(proposedSelection, sourceLength: sourceLength)
+        let nsSource = source as NSString
+        let insertion = newlineInsertion(in: nsSource, cursorLocation: selection.location)
+        return LaTeXSourceEdit(
+            replacementRange: selection,
+            replacement: insertion,
+            resultingSelection: NSRange(location: selection.location + (insertion as NSString).length, length: 0)
+        )
+    }
+
     public static func edit(
         command: LaTeXEditCommand,
         source: String,
@@ -166,6 +181,57 @@ public enum LaTeXSourceFormatter {
             replacement: template,
             resultingSelection: NSRange(location: selection.location + targetRange.location, length: targetRange.length)
         )
+    }
+
+    private static func newlineInsertion(in source: NSString, cursorLocation: Int) -> String {
+        guard source.length > 0 else { return "\n" }
+        let cursor = min(max(0, cursorLocation), source.length)
+        let lineRange = source.lineRange(for: NSRange(location: min(cursor, max(0, source.length - 1)), length: 0))
+        let lineStart = lineRange.location
+        let beforeCursorLength = max(0, cursor - lineStart)
+        let beforeCursor = source.substring(with: NSRange(location: lineStart, length: beforeCursorLength))
+        let currentIndent = leadingWhitespace(in: beforeCursor)
+        let trimmedBeforeCursor = beforeCursor.trimmingCharacters(in: .whitespaces)
+
+        if beginsListEnvironment(trimmedBeforeCursor) {
+            return "\n\(currentIndent)  \\item "
+        }
+        if startsCompletedItem(trimmedBeforeCursor) {
+            return "\n\(currentIndent)\\item "
+        }
+        if beginsEnvironment(trimmedBeforeCursor) || opensBlock(trimmedBeforeCursor) {
+            return "\n\(currentIndent)  "
+        }
+        return "\n\(currentIndent)"
+    }
+
+    private static func leadingWhitespace(in line: String) -> String {
+        String(line.prefix { $0 == " " || $0 == "\t" })
+    }
+
+    private static func beginsListEnvironment(_ line: String) -> Bool {
+        guard line.hasPrefix("\\begin{") else { return false }
+        return line.contains("\\begin{itemize}")
+            || line.contains("\\begin{enumerate}")
+            || line.contains("\\begin{description}")
+    }
+
+    private static func beginsEnvironment(_ line: String) -> Bool {
+        line.hasPrefix("\\begin{") && line.contains("}")
+    }
+
+    private static func startsCompletedItem(_ line: String) -> Bool {
+        guard line.hasPrefix("\\item") else { return false }
+        let remainder = line.dropFirst("\\item".count)
+        guard !remainder.isEmpty else { return false }
+        if remainder.first == "[" {
+            return line.contains("]") && line.split(separator: "]", maxSplits: 1, omittingEmptySubsequences: false).last?.trimmingCharacters(in: .whitespaces).isEmpty == false
+        }
+        return remainder.trimmingCharacters(in: .whitespaces).isEmpty == false
+    }
+
+    private static func opensBlock(_ line: String) -> Bool {
+        line.hasSuffix("{") || line.hasSuffix("[")
     }
 
     private struct TextDelta {

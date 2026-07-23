@@ -640,6 +640,44 @@ import Testing
 }
 
 @MainActor
+@Test func enterAutoIndentsLatexLinesWithoutBreakingUndoOrSelection() async throws {
+    let state = SourceEditorHarnessState()
+    state.text = "\\begin{itemize}"
+    state.selection = NSRange(location: (state.text as NSString).length, length: 0)
+    let hostingView = NSHostingView(rootView: SourceEditorHarnessView(state: state))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    hostingView.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+    let textView = try #require(findSourceTextView(in: hostingView))
+    window.makeFirstResponder(textView)
+    textView.setSelectedRange(state.selection)
+
+    textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+    try await Task.sleep(for: .milliseconds(80))
+
+    #expect(state.text == "\\begin{itemize}\n  \\item ")
+    #expect(textView.selectedRange() == NSRange(location: (state.text as NSString).length, length: 0))
+    #expect(textView.undoManager?.canUndo == true)
+
+    textView.undoManager?.undo()
+    try await Task.sleep(for: .milliseconds(80))
+    #expect(state.text == "\\begin{itemize}")
+    #expect(textView.selectedRange() == NSRange(location: ("\\begin{itemize}" as NSString).length, length: 0))
+}
+
+@MainActor
 @Test func projectTreeAndOutlineUseAResizableVerticalSplit() throws {
     guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
     let support = FileManager.default.temporaryDirectory

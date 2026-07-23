@@ -491,7 +491,6 @@ final class AppModel: ObservableObject {
         sourceText = text
         hasUnsavedChanges = canSaveCurrentFile
         scheduleOutlineRefresh()
-        refreshCompletionIndexForActiveSource()
         scheduleCompletionIndexRefresh()
         scheduleSave()
         scheduleCompile()

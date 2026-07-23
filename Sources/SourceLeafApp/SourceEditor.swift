@@ -216,7 +216,7 @@ enum LaTeXCompletionEngine {
 
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
-    @AppStorage("SourceLeaf.findBarShowsReplace") private var findBarShowsReplace = false
+    @State private var findBarShowsReplace = false
     @State private var findBarVisible = false
     @State private var findQuery = ""
     @State private var replaceQuery = ""
@@ -983,6 +983,9 @@ struct SourceTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if handleCompletionCommand(commandSelector, in: textView) { return true }
             switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                return applySmartNewlineCommand(in: textView)
             case #selector(NSResponder.insertBacktab(_:)):
                 return applyLineShiftCommand(.outdentLines, in: textView)
             case #selector(NSResponder.insertTab(_:)):
@@ -1021,6 +1024,33 @@ struct SourceTextView: NSViewRepresentable {
             ) {
                 return false
             }
+            return true
+        }
+
+        private func applySmartNewlineCommand(in textView: NSTextView) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
+            let edit = LaTeXSourceFormatter.newlineEdit(
+                source: textView.string,
+                selection: textView.selectedRange()
+            )
+            guard edit.replacementRange.location != NSNotFound,
+                  NSMaxRange(edit.replacementRange) <= (textView.string as NSString).length else { return false }
+            let originalSelection = textView.selectedRange()
+            let undoManager = textView.undoManager
+            undoManager?.beginUndoGrouping()
+            undoManager?.registerUndo(withTarget: self) { target in
+                MainActor.assumeIsolated {
+                    target.restoreSelection(originalSelection, opposite: edit.resultingSelection)
+                }
+            }
+            applyingLineShiftEdit = true
+            defer { applyingLineShiftEdit = false }
+            textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
+            textView.setSelectedRange(edit.resultingSelection)
+            textView.scrollRangeToVisible(edit.resultingSelection)
+            undoManager?.endUndoGrouping()
+            parent.selection = edit.resultingSelection
+            glyphOverlay?.selectionDidChange()
             return true
         }
 
