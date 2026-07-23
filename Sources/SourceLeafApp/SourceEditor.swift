@@ -577,12 +577,27 @@ private struct LaTeXSourceToolbar: View {
         menuButton(.subscriptText, key: "source.math.subscript")
     }
 
+    private var projectImages: [ProjectFile] {
+        model.projectFiles
+            .filter { $0.kind == .image }
+            .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+    }
+
     @ViewBuilder private var insertItems: some View {
         menuButton(.emphasis, key: "source.format.emphasis")
         menuButton(.itemize, key: "source.insert.itemize")
         menuButton(.enumerate, key: "source.insert.enumerate")
         menuButton(.table, key: "source.insert.table")
         menuButton(.figure, key: "source.insert.figure")
+        if !projectImages.isEmpty {
+            Menu {
+                ForEach(projectImages, id: \.relativePath) { image in
+                    Button(image.relativePath) { model.insertFigureForProjectImage(relativePath: image.relativePath) }
+                }
+            } label: {
+                Text(L10n.text("source.insert.projectImage"))
+            }
+        }
         Divider()
         menuButton(.cite, key: "source.insert.cite")
         menuButton(.reference, key: "source.insert.reference")
@@ -1284,7 +1299,8 @@ struct SourceTextView: NSViewRepresentable {
                 let edit = LaTeXSourceFormatter.edit(
                     command: request.command,
                     source: textView.string,
-                    selection: textView.selectedRange()
+                    selection: textView.selectedRange(),
+                    argument: request.argument
                 )
                 let originalSelection = textView.selectedRange()
                 let undoManager = textView.undoManager

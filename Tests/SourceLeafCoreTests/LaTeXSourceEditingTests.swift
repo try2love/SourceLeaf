@@ -74,3 +74,16 @@ import Testing
     #expect(figure.replacement.contains("\\includegraphics"))
     #expect(figure.replacement.contains("figures/image.png"))
 }
+
+@Test func latexFigureTemplateCanUseAProjectImagePath() {
+    let edit = LaTeXSourceFormatter.edit(
+        command: .figure,
+        source: "",
+        selection: NSRange(location: 0, length: 0),
+        argument: "figures/results/overview.pdf"
+    )
+
+    #expect(edit.replacement.contains("\\includegraphics[width=\\linewidth]{figures/results/overview.pdf}"))
+    #expect(edit.replacement.contains("\\caption{Caption}"))
+    #expect((edit.replacement as NSString).substring(with: edit.resultingSelection) == "Caption")
+}

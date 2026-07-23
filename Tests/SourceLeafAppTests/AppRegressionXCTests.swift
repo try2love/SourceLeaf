@@ -303,6 +303,23 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testFigureCommandCanInsertAProjectImageTemplateAndSelectCaption() async throws {
+        let request = LaTeXEditRequest(command: .figure, argument: "figures/overview.png")
+        let state = SourceTypingState(commandRequest: request)
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(450))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertTrue(textView.string.contains("\\includegraphics[width=\\linewidth]{figures/overview.png}"))
+        XCTAssertTrue(textView.string.contains("\\caption{Caption}"))
+        XCTAssertEqual((textView.string as NSString).substring(with: textView.selectedRange()), "Caption")
+        XCTAssertNil(state.commandRequest)
+    }
+
+    @MainActor
     func testLatexSmartPairsInsertBracesAndSkipDuplicateClosers() async throws {
         let state = SourceTypingState(text: "\\section", selection: NSRange(location: 8, length: 0))
         let host = makeSourceEditorHost(state: state)
@@ -424,10 +441,12 @@ final class AppRegressionXCTests: XCTestCase {
 private final class SourceTypingState: ObservableObject {
     @Published var text: String
     @Published var selection: NSRange
+    @Published var commandRequest: LaTeXEditRequest?
 
-    init(text: String = "", selection: NSRange = NSRange(location: 0, length: 0)) {
+    init(text: String = "", selection: NSRange = NSRange(location: 0, length: 0), commandRequest: LaTeXEditRequest? = nil) {
         self.text = text
         self.selection = selection
+        self.commandRequest = commandRequest
     }
 }
 
@@ -440,11 +459,15 @@ private func makeSourceEditorHost(
         text: Binding(get: { state.text }, set: { state.text = $0 }),
         selection: Binding(get: { state.selection }, set: { state.selection = $0 }),
         completionContext: completionContext,
+        commandRequest: state.commandRequest,
         showSelectionButton: false,
         editorTheme: .light,
         editorFontFamily: "Menlo",
         editorFontSize: 14,
-        onAskAI: {}
+        onAskAI: {},
+        onCommandApplied: { id in
+            if state.commandRequest?.id == id { state.commandRequest = nil }
+        }
     ))
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 720, height: 420),

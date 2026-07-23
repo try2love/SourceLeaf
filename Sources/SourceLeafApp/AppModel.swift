@@ -571,9 +571,13 @@ final class AppModel: ObservableObject {
         hasUnsavedChanges && selectedFile?.relativePath == file.relativePath
     }
 
-    func performLaTeXEdit(_ command: LaTeXEditCommand) {
+    func performLaTeXEdit(_ command: LaTeXEditCommand, argument: String? = nil) {
         guard selectedFile?.kind == .tex else { return }
-        pendingLaTeXEdit = LaTeXEditRequest(command: command)
+        pendingLaTeXEdit = LaTeXEditRequest(command: command, argument: argument)
+    }
+
+    func insertFigureForProjectImage(relativePath: String) {
+        performLaTeXEdit(.figure, argument: relativePath)
     }
 
     func acknowledgeLaTeXEdit(_ id: UUID) {

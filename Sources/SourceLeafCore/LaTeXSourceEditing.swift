@@ -11,10 +11,12 @@ public enum LaTeXEditCommand: String, CaseIterable, Sendable {
 public struct LaTeXEditRequest: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let command: LaTeXEditCommand
+    public let argument: String?
 
-    public init(id: UUID = UUID(), command: LaTeXEditCommand) {
+    public init(id: UUID = UUID(), command: LaTeXEditCommand, argument: String? = nil) {
         self.id = id
         self.command = command
+        self.argument = argument
     }
 }
 
@@ -34,7 +36,8 @@ public enum LaTeXSourceFormatter {
     public static func edit(
         command: LaTeXEditCommand,
         source: String,
-        selection proposedSelection: NSRange
+        selection proposedSelection: NSRange,
+        argument: String? = nil
     ) -> LaTeXSourceEdit {
         let sourceLength = (source as NSString).length
         let selection = validRange(proposedSelection, sourceLength: sourceLength)
@@ -76,8 +79,10 @@ public enum LaTeXSourceFormatter {
         case .enumerate: return list(nsSource, selection, selected, environment: "enumerate")
         case .table: return template(selection, template: "\\begin{table}[htbp]\n  \\centering\n  \\caption{Caption}\n  \\label{tab:label}\n  \\begin{tabular}{ll}\n    \\hline\n    Column 1 & Column 2 \\\\\n    \\hline\n    Value 1 & Value 2 \\\\\n    \\hline\n  \\end{tabular}\n\\end{table}", target: "Caption")
         case .figure:
-            let path = selected.isEmpty ? "figures/image.png" : selected
-            return template(selection, template: "\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=\\linewidth]{\(path)}\n  \\caption{Caption}\n  \\label{fig:label}\n\\end{figure}", target: selected.isEmpty ? path : "Caption")
+            let explicitPath = argument?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let path = explicitPath?.isEmpty == false ? explicitPath! : (selected.isEmpty ? "figures/image.png" : selected)
+            let target = selected.isEmpty && explicitPath == nil ? path : "Caption"
+            return template(selection, template: "\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=\\linewidth]{\(path)}\n  \\caption{Caption}\n  \\label{fig:label}\n\\end{figure}", target: target)
         case .cite: return wrapped(nsSource, selection, selected, prefix: "\\cite{", suffix: "}", placeholder: "citation-key")
         case .reference: return wrapped(nsSource, selection, selected, prefix: "\\ref{", suffix: "}", placeholder: "label")
         case .label: return wrapped(nsSource, selection, selected, prefix: "\\label{", suffix: "}", placeholder: "label")

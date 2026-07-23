@@ -261,6 +261,7 @@
 "source.replaceCurrent" = "替换";
 "source.replaceAll" = "全部替换";
 "source.insert.table" = "插入表格";
+"source.insert.projectImage" = "从项目图片插入图";
 "source.insert.figure" = "插入图片 / 图环境";
 "source.menu.format" = "LaTeX 格式";
 "font.systemMonospaced" = "系统等宽字体";

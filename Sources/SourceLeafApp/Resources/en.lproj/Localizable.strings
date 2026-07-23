@@ -261,6 +261,7 @@
 "source.replaceCurrent" = "Replace";
 "source.replaceAll" = "Replace All";
 "source.insert.table" = "Table";
+"source.insert.projectImage" = "Figure from Project Image";
 "source.insert.figure" = "Image / Figure";
 "source.menu.format" = "LaTeX Format";
 "font.systemMonospaced" = "System Monospaced";
