@@ -217,7 +217,7 @@ struct SourceTextView: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = false
+        textView.isIncrementalSearchingEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -255,17 +255,22 @@ struct SourceTextView: NSViewRepresentable {
         let ruler = LineNumberRulerView(textView: textView)
         ruler.backgroundColor = palette.gutterBackground
         ruler.numberColor = palette.gutterText
-        scrollView.verticalRulerView = ruler
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
+        ruler.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalRuler = false
+        scrollView.rulersVisible = false
 
         let glyphOverlay = SourceGlyphOverlayView(textView: textView, palette: palette)
         container.glyphOverlay = glyphOverlay
 
+        container.addSubview(ruler)
         container.addSubview(scrollView)
         container.addSubview(glyphOverlay, positioned: .above, relativeTo: scrollView)
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            ruler.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            ruler.topAnchor.constraint(equalTo: container.topAnchor),
+            ruler.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ruler.widthAnchor.constraint(equalToConstant: 44),
+            scrollView.leadingAnchor.constraint(equalTo: ruler.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: container.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
@@ -542,18 +547,18 @@ struct SourceTextView: NSViewRepresentable {
             storage.beginEditing()
             storage.setAttributes([
                 .font: editorFont,
-                .foregroundColor: palette.text.withAlphaComponent(0.99)
+                .foregroundColor: palette.text
             ], range: full)
-            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument.withAlphaComponent(0.99), storage: storage, source: textView.string)
-            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command.withAlphaComponent(0.99), storage: storage, source: textView.string)
-            apply(#"\$[^$\n]*\$"#, color: palette.math.withAlphaComponent(0.99), storage: storage, source: textView.string)
-            apply(#"[{}]"#, color: palette.brace.withAlphaComponent(0.99), storage: storage, source: textView.string)
-            apply(#"(?<!\\)%.*$"#, color: palette.comment.withAlphaComponent(0.99), storage: storage, source: textView.string, options: [.anchorsMatchLines])
+            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument, storage: storage, source: textView.string)
+            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command, storage: storage, source: textView.string)
+            apply(#"\$[^$\n]*\$"#, color: palette.math, storage: storage, source: textView.string)
+            apply(#"[{}]"#, color: palette.brace, storage: storage, source: textView.string)
+            apply(#"(?<!\\)%.*$"#, color: palette.comment, storage: storage, source: textView.string, options: [.anchorsMatchLines])
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
                 .font: editorFont,
-                .foregroundColor: palette.text.withAlphaComponent(0.99)
+                .foregroundColor: palette.text
             ]
             textView.insertionPointColor = palette.caret
             textView.selectedTextAttributes = [
@@ -585,7 +590,6 @@ struct SourceTextView: NSViewRepresentable {
 
         func layoutEditor() {
             guard let textView, let scrollView = textView.enclosingScrollView else { return }
-            SourceEditorGeometry.reserveLineNumberGutter(for: textView, in: scrollView)
             let width = max(scrollView.contentSize.width, 1)
             guard width.isFinite else { return }
             if abs(textView.frame.width - width) > 0.5 {
@@ -772,7 +776,6 @@ final class SourceEditorContainerView: NSView {
 
     override func layout() {
         super.layout()
-        SourceEditorGeometry.reserveLineNumberGutter(for: editorTextView, in: editorScrollView)
         let width = max(editorScrollView.contentSize.width, 1)
         guard width.isFinite else { return }
         if abs(editorTextView.frame.width - width) > 0.5 {
@@ -787,22 +790,6 @@ final class SourceEditorContainerView: NSView {
         glyphOverlay?.synchronizeFrame()
         glyphOverlay?.needsDisplay = true
         editorTextView.setNeedsDisplay(editorTextView.visibleRect)
-    }
-}
-
-@MainActor
-enum SourceEditorGeometry {
-    static let baseHorizontalInset: CGFloat = 12
-
-    static func reserveLineNumberGutter(for textView: NSTextView, in scrollView: NSScrollView) {
-        guard let ruler = scrollView.verticalRulerView, !ruler.isHidden else { return }
-        let textOrigin = textView.convert(textView.textContainerOrigin, to: scrollView).x
-        let rulerRightEdge = ruler.convert(ruler.bounds, to: scrollView).maxX
-        let requiredOrigin = rulerRightEdge + baseHorizontalInset
-        guard textOrigin + 0.5 < requiredOrigin else { return }
-        var inset = textView.textContainerInset
-        inset.width += requiredOrigin - textOrigin
-        textView.textContainerInset = inset
     }
 }
 
@@ -868,9 +855,15 @@ final class LineNumberRulerView: NSRulerView {
 
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override var isFlipped: Bool { true }
+
     func scrollPositionDidChange() {
         scrollChangeCount += 1
         needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawHashMarksAndLabels(in: dirtyRect)
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {

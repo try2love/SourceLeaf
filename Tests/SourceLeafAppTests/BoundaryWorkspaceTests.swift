@@ -77,6 +77,44 @@ import Testing
 }
 
 @MainActor
+@Test func authorPhotoSurvivesRepeatedWindowLayoutWithoutCrashing() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let project = URL(fileURLWithPath: projectPath, isDirectory: true)
+    let model = try isolatedModel(named: "author-photo-crash")
+    model.openProject(project)
+    let photo = try #require(model.projectFiles.first { $0.relativePath == "figures/author/LiweiLiu.jpg" })
+    model.openFile(photo)
+    let hostingView = NSHostingView(
+        rootView: WorkspaceView()
+            .environmentObject(model)
+            .frame(width: 1180, height: 760)
+    )
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+
+    for width in stride(from: 1180.0, through: 920.0, by: -20.0) {
+        window.setContentSize(NSSize(width: width, height: 760))
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.02))
+    }
+
+    let preview = try #require(findZoomableImagePreview(in: hostingView))
+    #expect(preview.loadedURL == photo.url)
+    #expect(model.layout.selected[.center] == .image)
+}
+
+@MainActor
 @Test func sourceAndImageTabsSwitchWithoutDiscardingEitherDocument() throws {
     guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
     let project = URL(fileURLWithPath: fixturesPath, isDirectory: true)

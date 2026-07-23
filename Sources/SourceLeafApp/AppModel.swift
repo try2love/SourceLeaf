@@ -102,6 +102,7 @@ final class AppModel: ObservableObject {
     private var compileDebounceTask: Task<Void, Never>?
     private var activeCompileTask: Task<Void, Never>?
     private var activeAITask: Task<Void, Never>?
+    private var restoreGuardTask: Task<Void, Never>?
     private var suppressTextChange = false
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
     private var historyStore: JSONFileStore<[AIEditHistoryEntry]>?
@@ -113,6 +114,7 @@ final class AppModel: ObservableObject {
     private let supportDirectoryOverride: URL?
     private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
+    private static let restoreInProgressKey = "SourceLeaf.restoreInProgress"
     private static let selectedProviderIDKey = "SourceLeaf.selectedProviderID"
     private static let projectOutlineExpandedKey = "SourceLeaf.projectOutlineExpanded"
     private static let editorThemeKey = "SourceLeaf.editorTheme"
@@ -167,7 +169,7 @@ final class AppModel: ObservableObject {
         } catch {
             lastError = L10n.userMessage(for: error)
         }
-        if restoreLastProject { restoreLastProjectIfAvailable() }
+        if restoreLastProject { restoreLastProjectWithCrashProtection() }
     }
 
     func setAppLanguage(_ language: AppLanguage) {
@@ -1112,6 +1114,31 @@ final class AppModel: ObservableObject {
             return
         }
         openProject(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    private func restoreLastProjectWithCrashProtection() {
+        let previousRestoreDidNotFinish = defaults.bool(forKey: Self.restoreInProgressKey)
+        defaults.set(true, forKey: Self.restoreInProgressKey)
+
+        if previousRestoreDidNotFinish,
+           let path = defaults.string(forKey: Self.lastProjectPathKey) {
+            let projectKey = String(SourceTargetService.hash(
+                URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+            ).prefix(16))
+            defaults.removeObject(forKey: "SourceLeaf.lastFile.\(projectKey)")
+        }
+
+        restoreLastProjectIfAvailable()
+        if previousRestoreDidNotFinish, projectRoot != nil {
+            lastError = L10n.text("error.restoreRecovered")
+        }
+
+        let defaults = defaults
+        restoreGuardTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            defaults.set(false, forKey: Self.restoreInProgressKey)
+        }
     }
 
     private func rememberLastOpenedFile(_ file: ProjectFile) {

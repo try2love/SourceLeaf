@@ -85,7 +85,7 @@ import Testing
     try await Task.sleep(for: .milliseconds(400))
     let textView = try #require(findSourceTextView(in: host.view))
     let scrollView = try #require(textView.enclosingScrollView)
-    let ruler = try #require(scrollView.verticalRulerView as? LineNumberRulerView)
+    let ruler = try #require(findLineNumberRuler(in: host.view))
     let overlay = try #require(findGlyphOverlay(in: host.view))
 
     let background = try #require(textView.selectedTextAttributes[.backgroundColor] as? NSColor)
@@ -97,8 +97,9 @@ import Testing
     #expect(scrollView.horizontalScrollElasticity == .none)
     #expect(!textView.isHorizontallyResizable)
     #expect(textView.textContainer?.widthTracksTextView == true)
-    let textOrigin = textView.convert(textView.textContainerOrigin, to: scrollView)
-    let rulerRightEdge = ruler.convert(ruler.bounds, to: scrollView).maxX
+    let coordinateView = try #require(ruler.superview)
+    let textOrigin = textView.convert(textView.textContainerOrigin, to: coordinateView)
+    let rulerRightEdge = ruler.convert(ruler.bounds, to: coordinateView).maxX
     #expect(textOrigin.x >= rulerRightEdge + 6)
 
     textView.setSelectedRange(NSRange(location: 10, length: 18))
@@ -349,11 +350,20 @@ private func closeEditorHost(_ host: (window: NSWindow, view: NSHostingView<Sour
 @MainActor
 private func findSourceTextView(in view: NSView) -> NSTextView? {
     if let textView = view as? NSTextView,
-       textView.enclosingScrollView?.verticalRulerView is LineNumberRulerView {
+       textView.delegate is SourceTextView.Coordinator {
         return textView
     }
     for child in view.subviews {
         if let match = findSourceTextView(in: child) { return match }
+    }
+    return nil
+}
+
+@MainActor
+private func findLineNumberRuler(in view: NSView) -> LineNumberRulerView? {
+    if let ruler = view as? LineNumberRulerView { return ruler }
+    for child in view.subviews {
+        if let match = findLineNumberRuler(in: child) { return match }
     }
     return nil
 }

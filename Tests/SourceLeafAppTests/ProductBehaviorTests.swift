@@ -41,6 +41,28 @@ import Testing
 }
 
 @MainActor
+@Test func applicationRecoversToSourceAfterThePreviousRestoreCrashedOnAnImage() throws {
+    guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
+    let state = try productTestState(named: "restore-crash-recovery")
+    defer { state.cleanup() }
+    let project = URL(fileURLWithPath: projectPath, isDirectory: true)
+    let first = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    first.openProject(project)
+    let photo = try #require(first.projectFiles.first { $0.relativePath == "figures/author/LiweiLiu.jpg" })
+    first.openFile(photo)
+    #expect(first.selectedImageFile?.relativePath == photo.relativePath)
+    state.defaults.set(true, forKey: "SourceLeaf.restoreInProgress")
+
+    let recovered = AppModel(restoreLastProject: true, supportDirectory: state.support, defaults: state.defaults)
+    let projectKey = String(SourceTargetService.hash(project.standardizedFileURL.path).prefix(16))
+
+    #expect(recovered.projectRoot?.standardizedFileURL == project.standardizedFileURL)
+    #expect(recovered.selectedFile?.kind == .tex)
+    #expect(recovered.layout.selected[.center] == .source)
+    #expect(state.defaults.string(forKey: "SourceLeaf.lastFile.\(projectKey)") != photo.relativePath)
+}
+
+@MainActor
 @Test func detachedPanelReturnsToTheMainWorkspaceWhenItsWindowCloses() throws {
     let state = try productTestState(named: "floating")
     defer { state.cleanup() }

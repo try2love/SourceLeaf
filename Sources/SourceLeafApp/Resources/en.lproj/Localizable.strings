@@ -188,6 +188,7 @@
 "error.candidateCompilationFailed" = "The candidate did not compile. The original source was not changed; inspect the build log or use Force Accept.";
 "error.deletedHistoryRange" = "A deleted range cannot be located safely from history alone.";
 "error.ambiguousHistoryRange" = "The historical replacement occurs more than once, so SourceLeaf cannot identify a safe restore target.";
+"error.restoreRecovered" = "SourceLeaf detected that the previous workspace restore ended unexpectedly and safely returned to the project source.";
 "error.customCLIUnavailable" = "Custom CLI profiles remain disabled until their command passes the local safety check.";
 "error.rootDocumentMissing" = "Choose a root LaTeX document before compiling.";
 "error.engineUnavailable" = "No LaTeX engine is available. Reinstall SourceLeaf or configure an external toolchain.";

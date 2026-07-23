@@ -188,6 +188,7 @@
 "error.candidateCompilationFailed" = "候选修改未能通过编译，真实源码保持不变；请检查编译日志，或明确选择强制接受。";
 "error.deletedHistoryRange" = "历史记录中的纯删除范围无法安全地重新定位。";
 "error.ambiguousHistoryRange" = "历史修改后的文本出现了多次，SourceLeaf 无法安全确定恢复位置。";
+"error.restoreRecovered" = "SourceLeaf 检测到上次恢复工作区时意外退出，已安全回退到项目源码。";
 "error.customCLIUnavailable" = "自定义 CLI 命令通过本机安全检查前保持禁用。";
 "error.rootDocumentMissing" = "编译前请先选择 LaTeX 主文档。";
 "error.engineUnavailable" = "未找到 LaTeX 引擎。请重新安装 SourceLeaf，或配置外部工具链。";

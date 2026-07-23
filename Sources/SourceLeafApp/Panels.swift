@@ -238,6 +238,7 @@ final class ZoomableImageScrollView: NSScrollView {
     private let imageView = PannableImageView()
     private(set) var loadedURL: URL?
     var onScaleChanged: ((Double) -> Void)?
+    private var centeringUpdateScheduled = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -292,19 +293,35 @@ final class ZoomableImageScrollView: NSScrollView {
 
     override func layout() {
         super.layout()
-        updateCenteringInsets()
+        scheduleCenteringInsetsUpdate()
+    }
+
+    private func scheduleCenteringInsetsUpdate() {
+        guard !centeringUpdateScheduled else { return }
+        centeringUpdateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            centeringUpdateScheduled = false
+            updateCenteringInsets()
+        }
     }
 
     private func updateCenteringInsets() {
         guard let documentView else { return }
         let scaledWidth = documentView.bounds.width * magnification
         let scaledHeight = documentView.bounds.height * magnification
-        contentInsets = NSEdgeInsets(
+        let desired = NSEdgeInsets(
             top: max(0, (contentSize.height - scaledHeight) / 2),
             left: max(0, (contentSize.width - scaledWidth) / 2),
             bottom: max(0, (contentSize.height - scaledHeight) / 2),
             right: max(0, (contentSize.width - scaledWidth) / 2)
         )
+        guard desired.top.isFinite,
+              desired.left.isFinite,
+              desired.bottom.isFinite,
+              desired.right.isFinite,
+              !contentInsets.isApproximatelyEqual(to: desired) else { return }
+        contentInsets = desired
     }
 
     static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
@@ -339,6 +356,15 @@ private final class PannableImageView: NSImageView {
 
 private extension NSRect {
     var center: NSPoint { NSPoint(x: midX, y: midY) }
+}
+
+private extension NSEdgeInsets {
+    func isApproximatelyEqual(to other: NSEdgeInsets, tolerance: CGFloat = 0.5) -> Bool {
+        abs(top - other.top) <= tolerance
+            && abs(left - other.left) <= tolerance
+            && abs(bottom - other.bottom) <= tolerance
+            && abs(right - other.right) <= tolerance
+    }
 }
 
 struct PDFPanel: View {

@@ -192,8 +192,7 @@ import Testing
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
 
     let textView = try #require(findSourceTextView(in: hostingView))
-    let scrollView = try #require(textView.enclosingScrollView)
-    let ruler = try #require(scrollView.verticalRulerView as? LineNumberRulerView)
+    let ruler = try #require(findLineNumberRuler(in: hostingView))
     textView.scrollRangeToVisible(NSRange(location: (source as NSString).length - 1, length: 0))
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
     let bottomScrollChangeCount = ruler.scrollChangeCount
@@ -665,11 +664,20 @@ private func findTextView(in view: NSView) -> NSTextView? {
 @MainActor
 private func findSourceTextView(in view: NSView) -> NSTextView? {
     if let textView = view as? NSTextView,
-       textView.enclosingScrollView?.verticalRulerView is LineNumberRulerView {
+       textView.delegate is SourceTextView.Coordinator {
         return textView
     }
     for child in view.subviews {
         if let result = findSourceTextView(in: child) { return result }
+    }
+    return nil
+}
+
+@MainActor
+private func findLineNumberRuler(in view: NSView) -> LineNumberRulerView? {
+    if let ruler = view as? LineNumberRulerView { return ruler }
+    for child in view.subviews {
+        if let result = findLineNumberRuler(in: child) { return result }
     }
     return nil
 }
