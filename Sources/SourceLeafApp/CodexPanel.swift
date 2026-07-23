@@ -37,7 +37,7 @@ struct CodexPanel: View {
                         }
                         if !model.streamingAssistantText.isEmpty {
                             HStack {
-                                RenderedChatText(text: model.streamingAssistantText)
+                                Text(model.streamingAssistantText)
                                     .textSelection(.enabled)
                                     .padding(9)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -701,7 +701,7 @@ final class ComposerNSTextView: NSTextView {
         super.keyDown(with: event)
     }
 
-    static func shouldTreatReturnAsSend(
+    nonisolated static func shouldTreatReturnAsSend(
         characters: String?,
         modifierFlags: NSEvent.ModifierFlags,
         sendBehavior: ChatSendBehavior,
@@ -720,6 +720,10 @@ final class ComposerNSTextView: NSTextView {
     }
 
     static func currentInputSourcePrefersReturnCommit() -> Bool {
+        if let current = NSTextInputContext.current?.selectedKeyboardInputSource,
+           inputSourcePrefersReturnCommit(sourceID: current) {
+            return true
+        }
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
               let rawID = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
         let id = unsafeBitCast(rawID, to: CFString.self) as String
@@ -731,7 +735,7 @@ final class ComposerNSTextView: NSTextView {
         return inputSourcePrefersReturnCommit(sourceID: id, localizedName: localizedName, languages: languages)
     }
 
-    static func inputSourcePrefersReturnCommit(
+    nonisolated static func inputSourcePrefersReturnCommit(
         sourceID id: String,
         localizedName: String = "",
         languages: [String] = []
@@ -748,6 +752,14 @@ final class ComposerNSTextView: NSTextView {
             || lowered.contains("拼音")
             || lowered.contains("双拼")
             || lowered.contains("五笔") {
+            return true
+        }
+        if lowered.contains("简体")
+            || lowered.contains("繁体")
+            || lowered.contains("中文")
+            || lowered.contains("japanese")
+            || lowered.contains("korean")
+            || lowered.contains("chinese") {
             return true
         }
         if languages.contains(where: { language in
@@ -803,9 +815,13 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        styledBubble
-            .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
-            .fixedSize(horizontal: false, vertical: true)
+        ViewThatFits(in: .horizontal) {
+            styledBubble
+                .fixedSize(horizontal: true, vertical: true)
+            styledBubble
+                .frame(maxWidth: 720, alignment: message.role == .user ? .trailing : .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         .layoutPriority(1)
     }
 
@@ -834,10 +850,56 @@ private struct RenderedChatText: View {
     let text: String
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(ChatMarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
+                switch block.kind {
+                case let .heading(level, content):
+                    InlineMarkdownText(content)
+                        .sourceLeafFont(level == 1 ? .headline : .subheadline, weight: .semibold)
+                case let .paragraph(content):
+                    InlineMarkdownText(content)
+                case let .bullet(content):
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("•")
+                        InlineMarkdownText(content)
+                    }
+                case let .numbered(number, content):
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(number).")
+                        InlineMarkdownText(content)
+                    }
+                case let .quote(content):
+                    HStack(alignment: .top, spacing: 7) {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.secondary.opacity(0.45))
+                            .frame(width: 3)
+                        InlineMarkdownText(content)
+                            .foregroundStyle(.secondary)
+                    }
+                case let .code(content):
+                    Text(content)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(7)
+                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+        }
+    }
+}
+
+private struct InlineMarkdownText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
         if let rendered = try? AttributedString(
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .full,
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
         ) {
@@ -845,6 +907,99 @@ private struct RenderedChatText: View {
         } else {
             Text(text)
         }
+    }
+}
+
+private struct ChatMarkdownBlock {
+    enum Kind {
+        case heading(level: Int, content: String)
+        case paragraph(String)
+        case bullet(String)
+        case numbered(number: Int, content: String)
+        case quote(String)
+        case code(String)
+    }
+
+    let kind: Kind
+
+    static func parse(_ text: String) -> [ChatMarkdownBlock] {
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var blocks: [ChatMarkdownBlock] = []
+        var paragraph: [String] = []
+        var codeLines: [String] = []
+        var inCode = false
+
+        func flushParagraph() {
+            let content = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            paragraph.removeAll()
+            guard !content.isEmpty else { return }
+            blocks.append(ChatMarkdownBlock(kind: .paragraph(content)))
+        }
+
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                if inCode {
+                    blocks.append(ChatMarkdownBlock(kind: .code(codeLines.joined(separator: "\n"))))
+                    codeLines.removeAll()
+                    inCode = false
+                } else {
+                    flushParagraph()
+                    inCode = true
+                }
+                continue
+            }
+            if inCode {
+                codeLines.append(line)
+                continue
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                flushParagraph()
+                continue
+            }
+            if let heading = heading(in: trimmed) {
+                flushParagraph()
+                blocks.append(ChatMarkdownBlock(kind: .heading(level: heading.level, content: heading.content)))
+            } else if let bullet = bullet(in: trimmed) {
+                flushParagraph()
+                blocks.append(ChatMarkdownBlock(kind: .bullet(bullet)))
+            } else if let numbered = numbered(in: trimmed) {
+                flushParagraph()
+                blocks.append(ChatMarkdownBlock(kind: .numbered(number: numbered.number, content: numbered.content)))
+            } else if trimmed.hasPrefix(">") {
+                flushParagraph()
+                blocks.append(ChatMarkdownBlock(kind: .quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))))
+            } else {
+                paragraph.append(line)
+            }
+        }
+        if inCode {
+            blocks.append(ChatMarkdownBlock(kind: .code(codeLines.joined(separator: "\n"))))
+        }
+        flushParagraph()
+        return blocks.isEmpty ? [ChatMarkdownBlock(kind: .paragraph(text))] : blocks
+    }
+
+    private static func heading(in line: String) -> (level: Int, content: String)? {
+        let marks = line.prefix { $0 == "#" }
+        guard !marks.isEmpty, marks.count <= 3, line.dropFirst(marks.count).first == " " else { return nil }
+        return (marks.count, String(line.dropFirst(marks.count + 1)))
+    }
+
+    private static func bullet(in line: String) -> String? {
+        guard line.hasPrefix("- ") || line.hasPrefix("* ") else { return nil }
+        return String(line.dropFirst(2))
+    }
+
+    private static func numbered(in line: String) -> (number: Int, content: String)? {
+        var digits = ""
+        for character in line {
+            if character.isNumber { digits.append(character) } else { break }
+        }
+        guard !digits.isEmpty,
+              line.dropFirst(digits.count).hasPrefix(". "),
+              let number = Int(digits) else { return nil }
+        return (number, String(line.dropFirst(digits.count + 2)))
     }
 }
 

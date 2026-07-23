@@ -34,6 +34,13 @@ final class AppRegressionXCTests: XCTestCase {
             hasMarkedText: false,
             compositionInputSourceActive: true
         ))
+        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
+            characters: "\r",
+            modifierFlags: [],
+            sendBehavior: .enter,
+            hasMarkedText: false,
+            recentlyTypedWithCompositionInputSource: true
+        ))
         XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
             characters: "\r",
             modifierFlags: [.shift],
@@ -41,6 +48,13 @@ final class AppRegressionXCTests: XCTestCase {
             hasMarkedText: false,
             compositionInputSourceActive: true
         ))
+    }
+
+    func testChineseInputSourceNamesPreferReturnCommit() {
+        XCTAssertTrue(ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: "com.apple.inputmethod.SCIM.ITABC"))
+        XCTAssertTrue(ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: "com.apple.inputmethod.Pinyin"))
+        XCTAssertTrue(ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: "com.apple.keylayout.ABC", localizedName: "ABC - 简体拼音"))
+        XCTAssertFalse(ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: "com.apple.keylayout.US", languages: ["en"]))
     }
 
     func testFindMatchesReturnEveryOccurrenceForPersistentHighlighting() {
@@ -150,6 +164,41 @@ final class AppRegressionXCTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(textView.string, "\\frac{x}{y}")
         XCTAssertEqual(state.selection, NSRange(location: 10, length: 0))
+    }
+
+    @MainActor
+    func testOptionalArgumentCompletionStartsInOptionalPlaceholderAndTabsToRequiredPlaceholder() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [("\\", 42), ("i", 34), ("n", 45), ("c", 8)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.first?.insertion, "\\includegraphics[]{}")
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(textView.string, "\\includegraphics[]{}")
+        let optionalRange = (textView.string as NSString).range(of: "[]")
+        XCTAssertNotEqual(optionalRange.location, NSNotFound)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: optionalRange.location + 1, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "w", keyCode: 13, window: host.window)))
+        try await Task.sleep(for: .milliseconds(20))
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\includegraphics[w]{}")
+        let requiredRange = (textView.string as NSString).range(of: "{}")
+        XCTAssertNotEqual(requiredRange.location, NSNotFound)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: requiredRange.location + 1, length: 0))
     }
 
     @MainActor

@@ -304,7 +304,7 @@ struct SourcePanel: View {
                     onNext: { moveFindSelection(delta: 1) },
                     onReplaceCurrent: replaceCurrentFindMatch,
                     onReplaceAll: replaceAllFindMatches,
-                    onDone: { focusActiveFindMatch() },
+                    onDone: finishFindEditing,
                     onClose: closeFindBar
                 )
             }
@@ -345,6 +345,10 @@ struct SourcePanel: View {
         findBarVisible = false
         findQuery = ""
         activeFindIndex = 0
+    }
+
+    private func finishFindEditing() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     private func normalizeActiveFindIndexAndFocus(scroll: Bool = true) {
@@ -1072,7 +1076,7 @@ struct SourceTextView: NSViewRepresentable {
             guard selection.length == 0 else { return false }
             let source = textView.string as NSString
             guard selection.location <= source.length,
-                  let currentClose = Self.currentArgumentClosingBraceLocation(in: source, cursorLocation: selection.location),
+                  let currentClose = Self.currentPlaceholderClosingLocation(in: source, cursorLocation: selection.location),
                   let nextPlaceholder = Self.nextEmptyPlaceholder(in: source, searchFrom: currentClose + 1) else {
                 return false
             }
@@ -1083,25 +1087,28 @@ struct SourceTextView: NSViewRepresentable {
             return true
         }
 
-        private static func currentArgumentClosingBraceLocation(in source: NSString, cursorLocation: Int) -> Int? {
+        private static func currentPlaceholderClosingLocation(in source: NSString, cursorLocation: Int) -> Int? {
             guard cursorLocation <= source.length else { return nil }
             var openLocation: Int?
+            var openingDelimiter: unichar?
             var index = cursorLocation - 1
             while index >= 0 {
                 let character = source.character(at: index)
-                if character == 125 { return nil }
-                if character == 123 {
+                if character == 125 || character == 93 { return nil }
+                if character == 123 || character == 91 {
                     openLocation = index
+                    openingDelimiter = character
                     break
                 }
                 index -= 1
             }
-            guard let openLocation else { return nil }
+            guard let openLocation, let openingDelimiter else { return nil }
+            let closingDelimiter: unichar = openingDelimiter == 123 ? 125 : 93
             var close = max(cursorLocation, openLocation + 1)
             while close < source.length {
                 let character = source.character(at: close)
-                if character == 123 { return nil }
-                if character == 125 { return close }
+                if character == openingDelimiter { return nil }
+                if character == closingDelimiter { return close }
                 close += 1
             }
             return nil
@@ -1265,10 +1272,11 @@ struct SourceTextView: NSViewRepresentable {
 
         private static func caretOffset(afterInserting insertion: String) -> Int {
             let ns = insertion as NSString
-            let preferredPatterns = ["{}", "[]"]
-            for pattern in preferredPatterns {
-                let range = ns.range(of: pattern)
-                if range.location != NSNotFound { return range.location + 1 }
+            let placeholderRanges = ["{}", "[]"]
+                .map { ns.range(of: $0) }
+                .filter { $0.location != NSNotFound }
+            if let first = placeholderRanges.min(by: { $0.location < $1.location }) {
+                return first.location + 1
             }
             return ns.length
         }

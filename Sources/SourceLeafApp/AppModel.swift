@@ -1254,9 +1254,14 @@ final class AppModel: ObservableObject {
 
     private func refreshCompletionIndexForActiveSource() {
         guard let selectedFile, selectedFile.kind == .tex else { return }
+        let updatedLabels = ProjectIndexer.labels(in: sourceText)
+        let previousLabels = Set(completionIndex.labels.compactMap { label, owner in
+            owner == selectedFile.relativePath ? label : nil
+        })
+        guard previousLabels != Set(updatedLabels) else { return }
         var next = completionIndex
         next.labels = next.labels.filter { $0.value != selectedFile.relativePath }
-        for label in ProjectIndexer.labels(in: sourceText) {
+        for label in updatedLabels {
             next.labels[label] = selectedFile.relativePath
         }
         next.generatedAt = Date()
@@ -1449,13 +1454,13 @@ final class AppModel: ObservableObject {
     private func bufferStreamingAssistantText(_ text: String) {
         pendingStreamingAssistantText += text
         let now = Date()
-        if pendingStreamingAssistantText.count >= 80 || now.timeIntervalSince(lastStreamingFlush) >= 0.05 {
+        if pendingStreamingAssistantText.count >= 160 || now.timeIntervalSince(lastStreamingFlush) >= 0.12 {
             flushStreamingAssistantText()
             return
         }
         guard streamingFlushTask == nil else { return }
         streamingFlushTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(90))
             guard let self else { return }
             self.flushStreamingAssistantText()
         }
