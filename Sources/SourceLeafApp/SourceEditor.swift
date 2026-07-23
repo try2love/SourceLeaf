@@ -341,7 +341,15 @@ struct SourceTextView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
+        if textView.hasMarkedText() {
+            context.coordinator.applyPendingCommand(commandRequest)
+            return
+        }
         var requiresFullRefresh = false
+        let staleLocalSelectionEcho =
+            context.coordinator.lastLocallyEmittedText == textView.string
+            && textView.string == text
+            && context.coordinator.lastLocallyEmittedSelection == textView.selectedRange()
         if textView.string == text {
             context.coordinator.lastLocallyEmittedText = nil
         } else if SourceTextSynchronization.shouldApplyExternalText(
@@ -362,8 +370,9 @@ struct SourceTextView: NSViewRepresentable {
         }
         if textView.selectedRange() == selection {
             context.coordinator.lastLocallyEmittedSelection = nil
-        } else if context.coordinator.lastLocallyEmittedSelection != textView.selectedRange(),
-                  NSMaxRange(selection) <= (textView.string as NSString).length {
+        } else if staleLocalSelectionEcho {
+            context.coordinator.lastLocallyEmittedSelection = nil
+        } else if NSMaxRange(selection) <= (textView.string as NSString).length {
             textView.setSelectedRange(selection)
             textView.scrollRangeToVisible(selection)
             context.coordinator.lastLocallyEmittedSelection = nil
@@ -467,6 +476,12 @@ struct SourceTextView: NSViewRepresentable {
             lastLocallyEmittedText = textView.string
             lastLocallyEmittedSelection = textView.selectedRange()
             parent.text = textView.string
+            guard !textView.hasMarkedText() else {
+                ruler?.needsDisplay = true
+                glyphOverlay?.restartCaretBlink()
+                glyphOverlay?.needsDisplay = true
+                return
+            }
             highlightTimer?.invalidate()
             let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(applyDeferredHighlighting), userInfo: nil, repeats: false)
             highlightTimer = timer
@@ -483,6 +498,10 @@ struct SourceTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView else { return }
             lastLocallyEmittedSelection = textView.selectedRange()
+            guard !textView.hasMarkedText() else {
+                glyphOverlay?.selectionDidChange()
+                return
+            }
             // Keep AppKit's native interaction immediate, but coalesce the
             // higher-level SwiftUI binding while a pointer drag is in flight.
             selectionSyncTimer?.invalidate()
@@ -589,6 +608,7 @@ struct SourceTextView: NSViewRepresentable {
 
         func applyHighlighting() {
             guard let textView, let storage = textView.textStorage else { return }
+            guard !textView.hasMarkedText() else { return }
             highlighting = true
             let appearance = textView.effectiveAppearance
             let palette = SourceEditorPalette(theme: parent.editorTheme, appearance: appearance)

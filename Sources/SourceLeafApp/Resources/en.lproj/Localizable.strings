@@ -264,6 +264,7 @@
 "ai.receivingResponse" = "Receiving the provider response";
 "ai.validatingResponse" = "Validating the response";
 "ai.activity" = "AI activity";
+"ai.configurationSummary" = "AI: %@ · Model: %@ · Reasoning: %@ · Context: %@";
 "ai.cancelled" = "Response stopped";
 "ai.stop" = "Stop response";
 "ai.send" = "Send";
@@ -285,12 +286,16 @@
 "action.quit" = "Quit SourceLeaf";
 "build.autoCompileOn" = "Automatic compilation: On";
 "build.autoCompileOff" = "Automatic compilation: Off";
+"build.autoCompileRequiresAutoSave" = "Automatic compilation requires automatic save.";
 "save.quitTitle" = "Save changes before quitting?";
 "save.quitMessage" = "This source file contains changes that have not been saved.";
 "save.saveAndQuit" = "Save and Quit";
 "save.dontSave" = "Don't Save";
+"save.switchTitle" = "Save changes before switching files?";
+"save.switchMessage" = "The current source file contains changes that have not been saved.";
 "preview.zoomIn" = "Zoom in";
 "preview.zoomOut" = "Zoom out";
+"preview.center" = "Center image";
 "workspace.resizePanels" = "Drag to resize adjacent panels";
 "project.openFile" = "Open %@";
 "chat.currentSession" = "Conversation: %@";

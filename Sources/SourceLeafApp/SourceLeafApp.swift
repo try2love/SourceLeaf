@@ -88,11 +88,9 @@ private struct SourceLeafCommands: Commands {
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Toggle(L10n.autoCompile, isOn: Binding(
                 get: { model.configuration.build.autoBuild },
-                set: {
-                    model.configuration.build.autoBuild = $0
-                    model.persistConfiguration()
-                }
+                set: { model.setAutoBuild($0) }
             ))
+            .disabled(!model.canEnableAutoBuild)
         }
         CommandMenu(L10n.text("source.menu.format")) {
             Button(L10n.text("source.format.bold")) { model.performLaTeXEdit(.bold) }

@@ -21,11 +21,8 @@ struct CodexPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(model.messages) { message in
-                            ChatBubble(
-                                message: message,
-                                onEdit: { model.editMessage(message) },
-                                onRegenerate: { model.regenerateResponse(after: message.id) }
-                            ).id(message.id)
+                            chatMessageView(message)
+                                .id(message.id)
                         }
                         ForEach(acceptedEdits) { entry in
                             AcceptedDiffCard(entry: entry)
@@ -34,6 +31,9 @@ struct CodexPanel: View {
                             ForEach(proposal.replacements) { replacement in
                                 ProposalCard(replacement: replacement)
                             }
+                        }
+                        if !model.generationEvents.isEmpty {
+                            AIActivityView(events: model.generationEvents)
                         }
                         if !model.streamingAssistantText.isEmpty {
                             HStack {
@@ -66,25 +66,6 @@ struct CodexPanel: View {
                                 }
                             }
                             .foregroundStyle(.secondary)
-                        }
-                        if !model.generationEvents.isEmpty {
-                            DisclosureGroup(
-                                isExpanded: $showingActivity,
-                                content: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        ForEach(Array(model.generationEvents.enumerated()), id: \.offset) { _, event in
-                                            Label(event, systemImage: "circle.fill")
-                                                .sourceLeafFont(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .padding(.top, 5)
-                                },
-                                label: {
-                                    Text(L10n.text("ai.activity"))
-                                        .sourceLeafFont(.caption, weight: .semibold)
-                                }
-                            )
                         }
                     }
                     .padding(12)
@@ -131,9 +112,10 @@ struct CodexPanel: View {
                         Button {
                             model.selectChatSession(session.id)
                         } label: {
+                            let title = sessionDisplayTitle(session)
                             if session.id == model.selectedChatSessionID {
-                                Label(session.title, systemImage: "checkmark")
-                            } else { Text(session.title) }
+                                Label(title, systemImage: "checkmark")
+                            } else { Text(title) }
                         }
                     }
                 } label: {
@@ -235,7 +217,7 @@ struct CodexPanel: View {
                 Menu {
                     ForEach(ContextScope.allCases) { scope in
                         Button {
-                            model.contextScope = scope
+                            model.setContextScope(scope)
                         } label: {
                             if scope == model.contextScope {
                                 Label(L10n.context(scope), systemImage: "checkmark")
@@ -327,31 +309,69 @@ struct CodexPanel: View {
                     }
                 }
                 Section(L10n.text("provider.model")) {
-                    Button(L10n.text("provider.modelDefault")) { model.selectedProviderModel = "" }
+                    Button {
+                        model.selectedProviderModel = ""
+                    } label: {
+                        if model.selectedProviderModel.isEmpty {
+                            Label(L10n.text("provider.modelDefault"), systemImage: "checkmark")
+                        } else {
+                            Text(L10n.text("provider.modelDefault"))
+                        }
+                    }
                     ForEach(modelPresets, id: \.self) { candidate in
-                        Button(candidate) { model.selectedProviderModel = candidate }
+                        Button {
+                            model.selectedProviderModel = candidate
+                        } label: {
+                            if model.selectedProviderModel == candidate {
+                                Label(candidate, systemImage: "checkmark")
+                            } else {
+                                Text(candidate)
+                            }
+                        }
                     }
                     Button(L10n.text("provider.customModel")) { presentCustomModelEditor() }
                 }
                 if [.localCodex, .openAI, .openAICompatible].contains(model.selectedProviderKind) {
                     Section(L10n.text("provider.reasoning")) {
-                        Button(L10n.text("provider.reasoningDefault")) { model.selectedReasoningEffort = nil }
+                        Button {
+                            model.selectedReasoningEffort = nil
+                        } label: {
+                            if model.selectedReasoningEffort == nil {
+                                Label(L10n.text("provider.reasoningDefault"), systemImage: "checkmark")
+                            } else {
+                                Text(L10n.text("provider.reasoningDefault"))
+                            }
+                        }
                         ForEach([ModelReasoningEffort.low, .medium, .high, .xhigh]) { effort in
-                            Button(L10n.text("reasoning.\(effort.rawValue)")) {
+                            Button {
                                 model.selectedReasoningEffort = effort
+                            } label: {
+                                if model.selectedReasoningEffort == effort {
+                                    Label(L10n.text("reasoning.\(effort.rawValue)"), systemImage: "checkmark")
+                                } else {
+                                    Text(L10n.text("reasoning.\(effort.rawValue)"))
+                                }
                             }
                         }
                     }
                 }
                 Section(L10n.text("ai.context")) {
                     ForEach(ContextScope.allCases) { scope in
-                        Button(L10n.context(scope)) { model.contextScope = scope }
+                        Button {
+                            model.setContextScope(scope)
+                        } label: {
+                            if scope == model.contextScope {
+                                Label(L10n.context(scope), systemImage: "checkmark")
+                            } else {
+                                Text(L10n.context(scope))
+                            }
+                        }
                     }
                 }
             } label: {
-                Label(L10n.text("ai.settings"), systemImage: "slider.horizontal.3")
+                Label(compactAISettingsLabel, systemImage: "slider.horizontal.3")
             }
-            .help(L10n.text("ai.settings"))
+            .help(model.currentAIConfigurationSummary)
 
             Spacer(minLength: 0)
         }
@@ -479,7 +499,10 @@ struct CodexPanel: View {
     }
 
     private var selectedSessionTitle: String {
-        model.chatSessions.first(where: { $0.id == model.selectedChatSessionID })?.title ?? L10n.text("chat.new")
+        guard let session = model.chatSessions.first(where: { $0.id == model.selectedChatSessionID }) else {
+            return L10n.text("chat.new")
+        }
+        return sessionDisplayTitle(session)
     }
 
     private var acceptedEdits: [AIEditHistoryEntry] {
@@ -498,6 +521,35 @@ struct CodexPanel: View {
             ["gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-5-codex", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4", "gpt-5.2"]
         default:
             model.selectedProviderModel.isEmpty ? [] : [model.selectedProviderModel]
+        }
+    }
+
+    private var compactAISettingsLabel: String {
+        let modelLabel = model.selectedProviderModel.isEmpty
+            ? L10n.text("provider.modelDefaultShort")
+            : model.selectedProviderModel
+        return "\(selectedProviderName) · \(modelLabel) · \(reasoningLabel)"
+    }
+
+    private func sessionDisplayTitle(_ session: ChatSession) -> String {
+        guard let index = model.chatSessions.firstIndex(where: { $0.id == session.id }) else {
+            return session.title
+        }
+        return "#\(model.chatSessions.count - index) \(session.title)"
+    }
+
+    @ViewBuilder
+    private func chatMessageView(_ message: ChatMessage) -> some View {
+        if message.text.hasPrefix(AppModel.aiActivityPrefix) {
+            AIActivityView(events: message.text.removingPrefix(AppModel.aiActivityPrefix).split(separator: "\n").map(String.init))
+        } else if message.text.hasPrefix(AppModel.aiConfigurationPrefix) {
+            AIConfigurationNotice(summary: message.text.removingPrefix(AppModel.aiConfigurationPrefix))
+        } else {
+            ChatBubble(
+                message: message,
+                onEdit: { model.editMessage(message) },
+                onRegenerate: { model.regenerateResponse(after: message.id) }
+            )
         }
     }
 
@@ -555,6 +607,46 @@ private struct ChatBubble: View {
     private func copyMessage() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(message.text, forType: .string)
+    }
+}
+
+private struct AIConfigurationNotice: View {
+    let summary: String
+
+    var body: some View {
+        Label(summary, systemImage: "slider.horizontal.3")
+            .sourceLeafFont(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .help(summary)
+    }
+}
+
+private struct AIActivityView: View {
+    let events: [String]
+    @State private var expanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                    Label(event, systemImage: "circle.fill")
+                        .sourceLeafFont(.caption2)
+                        .foregroundStyle(.secondary)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.green, .secondary)
+                }
+            }
+            .padding(.top, 5)
+        } label: {
+            Label(L10n.text("ai.activity"), systemImage: "circle.fill")
+                .sourceLeafFont(.caption, weight: .semibold)
+                .foregroundStyle(.green)
+        }
+        .help(L10n.text("ai.activity"))
     }
 }
 
@@ -627,6 +719,12 @@ private struct ProposalCard: View {
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25)))
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String {
+        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : self
     }
 }
 

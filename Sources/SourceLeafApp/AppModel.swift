@@ -97,6 +97,10 @@ final class AppModel: ObservableObject {
         configuration.build.autoBuild && (configuration.autoSave || !hasUnsavedChanges)
     }
 
+    var canEnableAutoBuild: Bool {
+        configuration.autoSave
+    }
+
     private let compiler: CompilerService
     private let keychain = KeychainStore()
     private var saveTask: Task<Void, Never>?
@@ -104,6 +108,7 @@ final class AppModel: ObservableObject {
     private var compileDebounceTask: Task<Void, Never>?
     private var activeCompileTask: Task<Void, Never>?
     private var activeAITask: Task<Void, Never>?
+    private var aiCancellationRequested = false
     private var restoreGuardTask: Task<Void, Never>?
     private var suppressTextChange = false
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
@@ -188,7 +193,17 @@ final class AppModel: ObservableObject {
 
     func setAutoSave(_ enabled: Bool) {
         configuration.autoSave = enabled
-        if !enabled { saveTask?.cancel() }
+        if !enabled {
+            saveTask?.cancel()
+            compileDebounceTask?.cancel()
+            configuration.build.autoBuild = false
+        }
+        persistConfiguration()
+    }
+
+    func setAutoBuild(_ enabled: Bool) {
+        configuration.build.autoBuild = enabled && canEnableAutoBuild
+        if !configuration.build.autoBuild { compileDebounceTask?.cancel() }
         persistConfiguration()
     }
 
@@ -239,6 +254,7 @@ final class AppModel: ObservableObject {
         selectedProviderID = id
         if let id { defaults.set(id.uuidString, forKey: Self.selectedProviderIDKey) }
         else { defaults.removeObject(forKey: Self.selectedProviderIDKey) }
+        recordAIConfigurationChanged()
     }
 
     func checkSelectedProviderAvailability() {
@@ -277,6 +293,13 @@ final class AppModel: ObservableObject {
         defaults.set(editorFontSize, forKey: Self.editorFontSizeKey)
     }
 
+    func setContextScope(_ scope: ContextScope) {
+        contextScope = scope
+        configuration.defaultContextScope = scope
+        persistConfiguration()
+        recordAIConfigurationChanged()
+    }
+
     func presentOpenProjectPanel() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -289,7 +312,7 @@ final class AppModel: ObservableObject {
 
     func openProject(_ root: URL) {
         do {
-            try saveCurrentFileIfNeeded()
+            guard try prepareToLeaveCurrentSource() else { return }
             selectedFile = nil
             selectedImageFile = nil
             sourceText = ""
@@ -395,7 +418,7 @@ final class AppModel: ObservableObject {
             return
         }
         do {
-            try saveCurrentFileIfNeeded()
+            guard try prepareToLeaveCurrentSource() else { return }
             let text = try String(contentsOf: file.url, encoding: .utf8)
             suppressTextChange = true
             selectedFile = file
@@ -417,7 +440,7 @@ final class AppModel: ObservableObject {
 
     func openImage(_ file: ProjectFile) {
         do {
-            try saveCurrentFileIfNeeded()
+            guard try prepareToLeaveCurrentSource() else { return }
             selectedImageFile = file
             updateLayout { layout in
                 layout.show(.image, in: .center)
@@ -429,7 +452,7 @@ final class AppModel: ObservableObject {
 
     func openPDF(_ file: ProjectFile) {
         do {
-            try saveCurrentFileIfNeeded()
+            guard try prepareToLeaveCurrentSource() else { return }
             pdfURL = file.url
             pdfPageIndex = 0
             pdfSelection = ""
@@ -469,11 +492,40 @@ final class AppModel: ObservableObject {
         hasUnsavedChanges = false
     }
 
+    private func prepareToLeaveCurrentSource() throws -> Bool {
+        guard hasUnsavedChanges, canSaveCurrentFile else { return true }
+        guard !configuration.autoSave else {
+            try saveCurrentFileIfNeeded()
+            return true
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.text("save.switchTitle")
+        alert.informativeText = L10n.text("save.switchMessage")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.text("action.save"))
+        alert.addButton(withTitle: L10n.text("save.dontSave"))
+        alert.addButton(withTitle: L10n.text("action.cancel"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            try saveCurrentFileIfNeeded()
+            return true
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
+        }
+    }
+
     func saveNow() {
         do {
             try saveCurrentFileIfNeeded()
             statusText = L10n.text("status.saved")
         } catch { report(error) }
+    }
+
+    func fileHasUnsavedMarker(_ file: ProjectFile) -> Bool {
+        hasUnsavedChanges && selectedFile?.relativePath == file.relativePath
     }
 
     func performLaTeXEdit(_ command: LaTeXEditCommand) {
@@ -656,9 +708,11 @@ final class AppModel: ObservableObject {
         persistConfiguration()
         let userInstruction = instruction
         let targets = editTargets
+        appendAIConfigurationNoticeIfNeeded(force: messages.isEmpty)
         messages.append(ChatMessage(role: .user, text: userInstruction))
         persistMessages()
         generating = true
+        aiCancellationRequested = false
         generationEvents = [L10n.text("ai.preparingContext")]
         streamingAssistantText = ""
         pendingProposal = nil
@@ -700,19 +754,20 @@ final class AppModel: ObservableObject {
                         )
                     }
                 }
+                appendAIActivityMessage()
                 messages.append(ChatMessage(role: .assistant, text: proposal.summary))
                 streamingAssistantText = ""
+                generationEvents = []
                 persistMessages()
             } catch {
-                if error is CancellationError {
-                    generationStatus = L10n.text("ai.cancelled")
-                    appendGenerationEvent(generationStatus)
-                    streamingAssistantText = ""
-                    generating = false
+                if aiCancellationRequested || error is CancellationError {
+                    finishCancelledAIResponse()
                     return
                 }
                 report(error)
+                appendAIActivityMessage()
                 messages.append(ChatMessage(role: .assistant, text: L10n.userMessage(for: error)))
+                generationEvents = []
                 persistMessages()
             }
             generating = false
@@ -721,12 +776,10 @@ final class AppModel: ObservableObject {
     }
 
     func cancelAIResponse() {
+        aiCancellationRequested = true
         activeAITask?.cancel()
         activeAITask = nil
-        generating = false
-        generationStatus = L10n.text("ai.cancelled")
-        appendGenerationEvent(generationStatus)
-        streamingAssistantText = ""
+        finishCancelledAIResponse()
     }
 
     func newChatSession() {
@@ -737,6 +790,7 @@ final class AppModel: ObservableObject {
         selectedChatSessionID = session.id
         persistSelectedChatSession()
         messages = []
+        appendAIConfigurationNoticeIfNeeded(force: true)
         editTargets = []
         pendingProposal = nil
         persistMessages()
@@ -789,7 +843,7 @@ final class AppModel: ObservableObject {
         sendToAI()
     }
 
-    func accept(_ replacement: ProposedReplacement) {
+    func accept(_ replacement: ProposedReplacement, compileAfterAccept: Bool = true) {
         guard let root = projectRoot,
               let proposal = pendingProposal,
               let target = editTargets.first(where: { $0.id == replacement.targetID }) else { return }
@@ -828,7 +882,7 @@ final class AppModel: ObservableObject {
             editTargets.removeAll { $0.id == target.id }
             pendingProposal?.replacements.removeAll { $0.id == replacement.id }
             if pendingProposal?.replacements.isEmpty == true { pendingProposal = nil }
-            if configuration.build.autoBuild { compile() }
+            if compileAfterAccept { scheduleCompileAfterAcceptedEdit() }
         } catch { report(error) }
     }
 
@@ -872,10 +926,15 @@ final class AppModel: ObservableObject {
                     layout.show(.buildLog, in: .bottom)
                     throw AppPresentationError.candidateCompilationFailed
                 }
-                accept(replacement)
+                accept(replacement, compileAfterAccept: false)
             } catch { report(error) }
             validatingReplacementID = nil
         }
+    }
+
+    private func scheduleCompileAfterAcceptedEdit() {
+        guard configuration.build.autoBuild else { return }
+        compile()
     }
 
     func reject(_ replacement: ProposedReplacement) {
@@ -1246,7 +1305,10 @@ final class AppModel: ObservableObject {
 
     private func baseConversationContext() -> [String: String] {
         var result: [String: String] = [:]
-        let prior = messages.dropLast().map { "\($0.role.rawValue): \($0.text)" }.joined(separator: "\n\n")
+        let prior = messages.dropLast()
+            .filter { !Self.isInternalChatNotice($0) }
+            .map { "\($0.role.rawValue): \($0.text)" }
+            .joined(separator: "\n\n")
         if !prior.isEmpty { result["conversation-history"] = prior }
         return result
     }
@@ -1316,6 +1378,64 @@ final class AppModel: ObservableObject {
         generationEvents.append(event)
     }
 
+    private func finishCancelledAIResponse() {
+        generationStatus = L10n.text("ai.cancelled")
+        appendGenerationEvent(generationStatus)
+        appendAIActivityMessage()
+        let partial = streamingAssistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !partial.isEmpty {
+            messages.append(ChatMessage(role: .assistant, text: partial))
+        }
+        streamingAssistantText = ""
+        generationEvents = []
+        generating = false
+        generationStatus = ""
+        persistMessages()
+    }
+
+    private func recordAIConfigurationChanged() {
+        guard projectRoot != nil, selectedChatSessionID != nil, !messages.isEmpty else { return }
+        appendAIConfigurationNoticeIfNeeded(force: false)
+        persistMessages()
+    }
+
+    private func appendAIConfigurationNoticeIfNeeded(force: Bool = false) {
+        let notice = Self.aiConfigurationPrefix + currentAIConfigurationSummary
+        guard force || messages.last?.text != notice else { return }
+        messages.append(ChatMessage(role: .system, text: notice))
+    }
+
+    private func appendAIActivityMessage() {
+        guard !generationEvents.isEmpty else { return }
+        let notice = Self.aiActivityPrefix + generationEvents.joined(separator: "\n")
+        guard messages.last?.text != notice else { return }
+        messages.append(ChatMessage(role: .system, text: notice))
+    }
+
+    var currentAIConfigurationSummary: String {
+        let profile = selectedProviderProfile
+        let provider = profile?.name ?? L10n.text("ai.provider")
+        let model = (profile?.model.isEmpty == false) ? (profile?.model ?? "") : L10n.text("provider.modelDefaultShort")
+        let reasoning = profile?.reasoningEffort
+            .map { L10n.text("reasoning.\($0.rawValue)") }
+            ?? L10n.text("provider.reasoningDefault")
+        return String(
+            format: L10n.text("ai.configurationSummary"),
+            provider,
+            model,
+            reasoning,
+            L10n.context(contextScope)
+        )
+    }
+
+    static let aiActivityPrefix = "SourceLeaf::AIActivity\n"
+    static let aiConfigurationPrefix = "SourceLeaf::AIConfiguration\n"
+
+    static func isInternalChatNotice(_ message: ChatMessage) -> Bool {
+        message.role == .system
+            && (message.text.hasPrefix(aiActivityPrefix) || message.text.hasPrefix(aiConfigurationPrefix))
+    }
+
     private var selectedProviderProfile: ProviderProfile? {
         providerProfiles.first { $0.id == selectedProviderID }
             ?? providerProfiles.first(where: { $0.enabled })
@@ -1327,6 +1447,7 @@ final class AppModel: ObservableObject {
         update(&providerProfiles[index])
         setProviderHealth(.unknown, for: id)
         saveProviderProfiles()
+        recordAIConfigurationChanged()
     }
 
     func setProviderHealth(_ status: ProviderHealthStatus, for id: UUID) {

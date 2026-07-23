@@ -148,6 +148,49 @@ import Testing
 }
 
 @MainActor
+@Test func imageZoomUpdatesCenteringBeforeTheNextRunLoopFrame() throws {
+    guard let fixturesPath = ProcessInfo.processInfo.environment["SOURCELEAF_BOUNDARY_PROJECTS"] else { return }
+    let fixtures = URL(fileURLWithPath: fixturesPath, isDirectory: true)
+    let model = try isolatedModel(named: "image-zoom-no-intermediate-corner")
+    model.openProject(fixtures.appendingPathComponent("图片格式", isDirectory: true))
+    let image = try #require(model.projectFiles.first { $0.relativePath == "portrait.jpg" })
+    model.openFile(image)
+
+    let hostingView = NSHostingView(
+        rootView: ImagePanel()
+            .environmentObject(model)
+            .frame(width: 900, height: 700)
+    )
+    hostingView.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+    let window = NSWindow(
+        contentRect: hostingView.frame,
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    window.makeKeyAndOrderFront(nil)
+    defer {
+        window.contentView = nil
+        window.close()
+    }
+
+    hostingView.layoutSubtreeIfNeeded()
+    window.layoutIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    let preview = try #require(findZoomableImagePreview(in: hostingView))
+
+    preview.setZoomScale(0.4)
+    let immediateInsets = preview.contentInsets
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    let settledInsets = preview.contentInsets
+
+    #expect(edgeInsetsApproximatelyEqual(immediateInsets, settledInsets, tolerance: 0.1))
+    #expect(immediateInsets.left > 0 || immediateInsets.top > 0)
+}
+
+@MainActor
 @Test func authorPhotoSurvivesRepeatedWindowLayoutWithoutCrashing() throws {
     guard let projectPath = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { return }
     let project = URL(fileURLWithPath: projectPath, isDirectory: true)
@@ -272,4 +315,11 @@ private func findZoomableImagePreview(in view: NSView) -> ZoomableImageScrollVie
         if let result = findZoomableImagePreview(in: child) { return result }
     }
     return nil
+}
+
+private func edgeInsetsApproximatelyEqual(_ lhs: NSEdgeInsets, _ rhs: NSEdgeInsets, tolerance: CGFloat) -> Bool {
+    abs(lhs.top - rhs.top) <= tolerance
+        && abs(lhs.left - rhs.left) <= tolerance
+        && abs(lhs.bottom - rhs.bottom) <= tolerance
+        && abs(lhs.right - rhs.right) <= tolerance
 }

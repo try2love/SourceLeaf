@@ -1,6 +1,7 @@
 import AppKit
 import PDFKit
 import QuickLookUI
+import QuartzCore
 import SwiftUI
 import SourceLeafCore
 
@@ -43,13 +44,21 @@ struct ProjectPanel: View {
         } else {
             List(filteredFiles) { file in
                 Button { model.openFile(file) } label: {
-                    Label(file.relativePath, systemImage: file.symbolName)
-                        .font(.system(
-                            size: 11 * model.interfaceFontScale,
-                            design: file.kind == .tex ? .monospaced : .default
-                        ))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 5) {
+                        Label(file.relativePath, systemImage: file.symbolName)
+                        if model.fileHasUnsavedMarker(file) {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 6, height: 6)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(
+                        size: 11 * model.interfaceFontScale,
+                        design: file.kind == .tex ? .monospaced : .default
+                    ))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -153,13 +162,21 @@ private struct ProjectTreeRow: View {
     var body: some View {
         if let file = node.file {
             Button { model.openFile(file) } label: {
-                Label(node.name, systemImage: file.symbolName)
-                    .font(.system(
-                        size: 11 * model.interfaceFontScale,
-                        design: file.kind == .tex ? .monospaced : .default
-                    ))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 5) {
+                    Label(node.name, systemImage: file.symbolName)
+                    if model.fileHasUnsavedMarker(file) {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.system(
+                    size: 11 * model.interfaceFontScale,
+                    design: file.kind == .tex ? .monospaced : .default
+                ))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(String(format: L10n.text("project.openFile"), file.relativePath))
@@ -181,6 +198,7 @@ private struct ProjectTreeRow: View {
 struct ImagePanel: View {
     @EnvironmentObject private var model: AppModel
     @State private var zoomScale = 1.0
+    @State private var centerRequest = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -199,8 +217,13 @@ struct ImagePanel: View {
                 Button { zoomScale = min(8, zoomScale * 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
                     .disabled(zoomScale >= 8)
                     .help(L10n.text("preview.zoomIn"))
-                Button { zoomScale = 1 } label: { Image(systemName: "arrow.counterclockwise") }
+                Button {
+                    zoomScale = 1
+                    centerRequest = UUID()
+                } label: { Image(systemName: "arrow.counterclockwise") }
                     .help(L10n.text("preview.actualSize"))
+                Button { centerRequest = UUID() } label: { Image(systemName: "scope") }
+                    .help(L10n.text("preview.center"))
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 10)
@@ -208,7 +231,7 @@ struct ImagePanel: View {
             .background(.bar)
 
             if let url = model.selectedImageFile?.url {
-                ZoomableImagePreview(url: url, zoomScale: $zoomScale)
+                ZoomableImagePreview(url: url, zoomScale: $zoomScale, centerRequest: centerRequest)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(L10n.text("image.none"), systemImage: "photo")
@@ -220,6 +243,7 @@ struct ImagePanel: View {
 struct ZoomableImagePreview: NSViewRepresentable {
     let url: URL
     @Binding var zoomScale: Double
+    var centerRequest: UUID
 
     func makeNSView(context: Context) -> ZoomableImageScrollView {
         let view = ZoomableImageScrollView()
@@ -231,6 +255,19 @@ struct ZoomableImagePreview: NSViewRepresentable {
     func updateNSView(_ view: ZoomableImageScrollView, context: Context) {
         if view.loadedURL != url { view.load(url: url) }
         view.setZoomScale(zoomScale)
+        if context.coordinator.lastCenterRequest != centerRequest {
+            context.coordinator.lastCenterRequest = centerRequest
+            view.centerImage()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(centerRequest: centerRequest) }
+
+    final class Coordinator {
+        var lastCenterRequest: UUID
+        init(centerRequest: UUID) {
+            self.lastCenterRequest = centerRequest
+        }
     }
 
     static func dismantleNSView(_ view: ZoomableImageScrollView, coordinator: Void) {
@@ -242,8 +279,9 @@ final class ZoomableImageScrollView: NSScrollView {
     private let imageView = PannableImageView()
     private(set) var loadedURL: URL?
     var onScaleChanged: ((Double) -> Void)?
-    private var centeringUpdateScheduled = false
     private var isActive = true
+    private var isUpdatingInsets = false
+    private var lastDragPoint: NSPoint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -271,6 +309,7 @@ final class ZoomableImageScrollView: NSScrollView {
         imageView.frame = NSRect(origin: .zero, size: size)
         magnification = 1
         updateCenteringInsets()
+        centerImage()
         onScaleChanged?(1)
     }
 
@@ -279,13 +318,18 @@ final class ZoomableImageScrollView: NSScrollView {
         if abs(magnification - bounded) > 0.005 {
             let visibleDocument = documentVisibleRect
             let documentAnchor = NSPoint(x: visibleDocument.midX, y: visibleDocument.midY)
-            setMagnification(bounded, centeredAt: documentAnchor)
+            performWithoutImplicitAnimations {
+                contentInsets = centeringInsets(for: bounded)
+                setMagnification(bounded, centeredAt: documentAnchor)
+            }
         }
         updateCenteringInsets()
     }
 
     override func magnify(with event: NSEvent) {
-        super.magnify(with: event)
+        performWithoutImplicitAnimations {
+            super.magnify(with: event)
+        }
         updateCenteringInsets()
         onScaleChanged?(magnification)
     }
@@ -302,53 +346,98 @@ final class ZoomableImageScrollView: NSScrollView {
                 x: documentVisibleRect.midX,
                 y: documentVisibleRect.midY
             )
-        setMagnification(next, centeredAt: documentAnchor)
+        performWithoutImplicitAnimations {
+            contentInsets = centeringInsets(for: next)
+            setMagnification(next, centeredAt: documentAnchor)
+        }
         updateCenteringInsets()
         onScaleChanged?(next)
     }
 
     override func layout() {
         super.layout()
-        scheduleCenteringInsetsUpdate()
-    }
-
-    private func scheduleCenteringInsetsUpdate() {
-        guard isActive, !centeringUpdateScheduled else { return }
-        centeringUpdateScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.isActive else { return }
-            centeringUpdateScheduled = false
-            updateCenteringInsets()
-        }
+        updateCenteringInsets()
     }
 
     private func updateCenteringInsets() {
-        guard isActive, let documentView else { return }
-        let scaledWidth = documentView.bounds.width * magnification
-        let scaledHeight = documentView.bounds.height * magnification
-        let desired = NSEdgeInsets(
-            top: max(0, (contentSize.height - scaledHeight) / 2),
-            left: max(0, (contentSize.width - scaledWidth) / 2),
-            bottom: max(0, (contentSize.height - scaledHeight) / 2),
-            right: max(0, (contentSize.width - scaledWidth) / 2)
-        )
+        guard isActive, documentView != nil else { return }
+        let desired = centeringInsets(for: magnification)
         guard desired.top.isFinite,
               desired.left.isFinite,
               desired.bottom.isFinite,
               desired.right.isFinite,
               !contentInsets.isApproximatelyEqual(to: desired) else { return }
-        contentInsets = desired
+        guard !isUpdatingInsets else { return }
+        isUpdatingInsets = true
+        performWithoutImplicitAnimations {
+            contentInsets = desired
+        }
+        isUpdatingInsets = false
+    }
+
+    private func centeringInsets(for scale: CGFloat) -> NSEdgeInsets {
+        guard let documentView else { return .init() }
+        let scaledWidth = documentView.bounds.width * scale
+        let scaledHeight = documentView.bounds.height * scale
+        return NSEdgeInsets(
+            top: max(0, (contentSize.height - scaledHeight) / 2),
+            left: max(0, (contentSize.width - scaledWidth) / 2),
+            bottom: max(0, (contentSize.height - scaledHeight) / 2),
+            right: max(0, (contentSize.width - scaledWidth) / 2)
+        )
+    }
+
+    func centerImage() {
+        updateCenteringInsets()
+        guard let documentView else { return }
+        let documentBounds = documentView.bounds
+        let target = NSPoint(
+            x: max(0, documentBounds.midX - documentVisibleRect.width / 2),
+            y: max(0, documentBounds.midY - documentVisibleRect.height / 2)
+        )
+        contentView.scroll(to: target)
+        reflectScrolledClipView(contentView)
     }
 
     func prepareForDismantle() {
         isActive = false
-        centeringUpdateScheduled = false
         onScaleChanged = nil
         imageView.owner = nil
     }
 
     static func zoomedScale(from scale: Double, scrollingDeltaY: Double) -> Double {
         min(8, max(0.1, scale * pow(1.12, scrollingDeltaY)))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        lastDragPoint = event.locationInWindow
+        NSCursor.closedHand.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let lastDragPoint else { return }
+        let point = event.locationInWindow
+        let delta = NSPoint(x: point.x - lastDragPoint.x, y: point.y - lastDragPoint.y)
+        let clip = contentView
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x - delta.x, y: clip.bounds.origin.y + delta.y))
+        reflectScrolledClipView(clip)
+        self.lastDragPoint = point
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        lastDragPoint = nil
+        NSCursor.pop()
+    }
+
+    private func performWithoutImplicitAnimations(_ updates: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            updates()
+        }
+        CATransaction.commit()
     }
 }
 
@@ -521,10 +610,7 @@ struct PDFPanel: View {
     private var autoBuildBinding: Binding<Bool> {
         Binding(
             get: { model.configuration.build.autoBuild },
-            set: {
-                model.configuration.build.autoBuild = $0
-                model.persistConfiguration()
-            }
+            set: { model.setAutoBuild($0) }
         )
     }
 
@@ -535,7 +621,8 @@ struct PDFPanel: View {
         .toggleStyle(.button)
         .help(model.configuration.build.autoBuild
             ? L10n.text("build.autoCompileOn")
-            : L10n.text("build.autoCompileOff"))
+            : (model.canEnableAutoBuild ? L10n.text("build.autoCompileOff") : L10n.text("build.autoCompileRequiresAutoSave")))
+        .disabled(!model.canEnableAutoBuild)
     }
 
     @ViewBuilder

@@ -106,7 +106,12 @@ private struct GeneralSettingsView: View {
                 Picker(L10n.text("settings.engine"), selection: $model.configuration.build.engine) {
                     ForEach(BuildEngine.allCases) { engine in Text(L10n.engine(engine)).tag(engine) }
                 }
-                Toggle(L10n.autoCompile, isOn: $model.configuration.build.autoBuild)
+                Toggle(L10n.autoCompile, isOn: Binding(
+                    get: { model.configuration.build.autoBuild },
+                    set: { model.setAutoBuild($0) }
+                ))
+                .disabled(!model.canEnableAutoBuild)
+                .help(model.canEnableAutoBuild ? L10n.autoCompile : L10n.text("build.autoCompileRequiresAutoSave"))
                 LabeledContent(L10n.text("settings.compileDelay")) {
                     Stepper(value: $model.configuration.build.debounceSeconds, in: 0.5...5, step: 0.5) {
                         Text(model.configuration.build.debounceSeconds, format: .number.precision(.fractionLength(1))) + Text(" s")

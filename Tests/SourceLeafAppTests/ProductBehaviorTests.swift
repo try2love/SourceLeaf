@@ -134,13 +134,45 @@ import Testing
     let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
     model.openProject(project)
     model.setAutoSave(false)
-    model.configuration.build.autoBuild = true
+    #expect(!model.configuration.build.autoBuild)
+    model.setAutoBuild(true)
+    #expect(!model.configuration.build.autoBuild)
     model.sourceChanged(model.sourceText + "more")
 
     #expect(model.hasUnsavedChanges)
     #expect(!model.canAutoCompileCurrentSource)
     model.saveNow()
-    #expect(model.canAutoCompileCurrentSource)
+    #expect(!model.canAutoCompileCurrentSource)
+}
+
+@MainActor
+@Test func chatSessionsRecordAIConfigurationBeforeConversationContent() throws {
+    let state = try productTestState(named: "chat-configuration-notice")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    let appSupport = state.support.appendingPathComponent("应用状态", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("\\documentclass{article}".utf8).write(to: project.appendingPathComponent("main.tex"))
+
+    let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: state.defaults)
+    model.openProject(project)
+    model.newChatSession()
+
+    let first = try #require(model.messages.first)
+    #expect(first.role == .system)
+    #expect(first.text.hasPrefix(AppModel.aiConfigurationPrefix))
+    #expect(first.text.contains("Local Codex"))
+}
+
+@MainActor
+@Test func internalChatNoticesAreIdentifiedForContextFiltering() throws {
+    let activity = ChatMessage(role: .system, text: AppModel.aiActivityPrefix + "Started")
+    let config = ChatMessage(role: .system, text: AppModel.aiConfigurationPrefix + "AI: Local Codex")
+    let userVisibleSystem = ChatMessage(role: .system, text: "System text from user history")
+
+    #expect(AppModel.isInternalChatNotice(activity))
+    #expect(AppModel.isInternalChatNotice(config))
+    #expect(!AppModel.isInternalChatNotice(userVisibleSystem))
 }
 
 @MainActor

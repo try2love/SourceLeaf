@@ -264,6 +264,7 @@
 "ai.receivingResponse" = "正在接收 AI 服务响应";
 "ai.validatingResponse" = "正在校验响应";
 "ai.activity" = "AI 活动";
+"ai.configurationSummary" = "AI：%@ · 模型：%@ · 思考：%@ · 上下文：%@";
 "ai.cancelled" = "已终止回答";
 "ai.stop" = "终止回答";
 "ai.send" = "发送";
@@ -285,12 +286,16 @@
 "action.quit" = "退出 SourceLeaf";
 "build.autoCompileOn" = "自动编译：开";
 "build.autoCompileOff" = "自动编译：关";
+"build.autoCompileRequiresAutoSave" = "自动编译需要开启自动保存。";
 "save.quitTitle" = "退出前保存修改吗？";
 "save.quitMessage" = "当前源码包含尚未保存的修改。";
 "save.saveAndQuit" = "保存并退出";
 "save.dontSave" = "不保存";
+"save.switchTitle" = "切换文件前保存修改吗？";
+"save.switchMessage" = "当前源码包含尚未保存的修改。";
 "preview.zoomIn" = "放大";
 "preview.zoomOut" = "缩小";
+"preview.center" = "居中图片";
 "workspace.resizePanels" = "拖动调整相邻面板宽度";
 "project.openFile" = "打开 %@";
 "chat.currentSession" = "当前会话：%@";

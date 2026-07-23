@@ -69,17 +69,15 @@ struct WorkspaceView: View {
 
             Toggle(isOn: Binding(
                 get: { model.configuration.build.autoBuild },
-                set: {
-                    model.configuration.build.autoBuild = $0
-                    model.persistConfiguration()
-                }
+                set: { model.setAutoBuild($0) }
             )) {
                 Label(L10n.autoCompile, systemImage: "bolt")
             }
             .toggleStyle(.button)
             .help(model.configuration.build.autoBuild
                 ? L10n.text("build.autoCompileOn")
-                : L10n.text("build.autoCompileOff"))
+                : (model.canEnableAutoBuild ? L10n.text("build.autoCompileOff") : L10n.text("build.autoCompileRequiresAutoSave")))
+            .disabled(!model.canEnableAutoBuild)
 
             Button {
                 if model.buildRunning { model.cancelCompile() }
