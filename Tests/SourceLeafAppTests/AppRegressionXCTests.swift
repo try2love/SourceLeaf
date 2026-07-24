@@ -91,6 +91,67 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertTrue(suggestions.contains("\\footnote{}"))
         XCTAssertTrue(suggestions.contains("\\mathbb{}"))
         XCTAssertTrue(suggestions.contains("\\rightarrow"))
+        XCTAssertTrue(suggestions.contains("\\chapter{}"))
+        XCTAssertTrue(suggestions.contains("\\appendix"))
+        XCTAssertTrue(suggestions.contains("\\begin{theorem}"))
+        XCTAssertTrue(suggestions.contains("\\begin{proof}"))
+        XCTAssertTrue(suggestions.contains("\\begin{algorithm}"))
+        XCTAssertTrue(suggestions.contains("\\begin{cases}"))
+        XCTAssertTrue(suggestions.contains("\\begin{pmatrix}"))
+        XCTAssertTrue(suggestions.contains("\\mathbf{}"))
+        XCTAssertTrue(suggestions.contains("\\mathsf{}"))
+        XCTAssertTrue(suggestions.contains("\\operatorname{}"))
+        XCTAssertTrue(suggestions.contains("\\leftarrow"))
+        XCTAssertTrue(suggestions.contains("\\Leftrightarrow"))
+        XCTAssertTrue(suggestions.contains("\\subseteq"))
+        XCTAssertTrue(suggestions.contains("\\forall"))
+        XCTAssertTrue(suggestions.contains("\\exists"))
+        XCTAssertTrue(suggestions.contains("\\nabla"))
+    }
+
+    func testLatexArgumentCompletionSuggestsCommonPackagesClassesAndBibStyles() throws {
+        let packageSource = "\\usepackage{am" as NSString
+        let packageContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: packageSource,
+            cursorLocation: packageSource.length
+        ))
+        XCTAssertEqual(packageContext.command, "usepackage")
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: packageContext.command,
+                prefix: packageContext.prefix,
+                context: LaTeXCompletionContext()
+            ).map(\.insertion),
+            ["amsmath", "amssymb", "amsfonts", "amsthm"]
+        )
+
+        let classSource = "\\documentclass{acm" as NSString
+        let classContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: classSource,
+            cursorLocation: classSource.length
+        ))
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: classContext.command,
+                prefix: classContext.prefix,
+                context: LaTeXCompletionContext()
+            ).map(\.insertion),
+            ["acmart"]
+        )
+
+        let bibStyleSource = "\\bibliographystyle{ACM" as NSString
+        let bibStyleContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: bibStyleSource,
+            cursorLocation: bibStyleSource.length
+        ))
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: bibStyleContext.command,
+                prefix: bibStyleContext.prefix,
+                context: LaTeXCompletionContext()
+            ).map(\.insertion),
+            ["ACM-Reference-Format"]
+        )
     }
 
     func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {

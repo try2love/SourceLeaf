@@ -195,7 +195,8 @@ import Testing
     let textView = try #require(findSourceTextView(in: view))
     window.makeFirstResponder(textView)
 
-    for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+    for (offset, key) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)].enumerated() {
+        let (character, keyCode) = key
         let event = try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -210,6 +211,9 @@ import Testing
         ))
         textView.keyDown(with: event)
         await Task.yield()
+        let expectedCaret = NSRange(location: offset + 1, length: 0)
+        #expect(textView.selectedRange() == expectedCaret)
+        #expect(state.selection == expectedCaret)
     }
     try await Task.sleep(for: .milliseconds(160))
     #expect(textView.string == "test")
@@ -231,7 +235,8 @@ import Testing
     window.makeFirstResponder(textView)
     textView.setSelectedRange(NSRange(location: 6, length: 0))
 
-    for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)] {
+    for (offset, key) in [("t", 17), ("e", 14), ("s", 1), ("t", 17)].enumerated() {
+        let (character, keyCode) = key
         let event = try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -245,7 +250,10 @@ import Testing
             keyCode: UInt16(keyCode)
         ))
         textView.keyDown(with: event)
-        try await Task.sleep(for: .milliseconds(15))
+        await Task.yield()
+        let expectedCaret = NSRange(location: 7 + offset, length: 0)
+        #expect(textView.selectedRange() == expectedCaret)
+        #expect(state.selection == expectedCaret)
     }
 
     #expect(textView.string == "alpha testomega")

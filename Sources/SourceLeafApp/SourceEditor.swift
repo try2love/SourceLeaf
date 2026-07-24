@@ -51,35 +51,59 @@ enum LaTeXCompletionEngine {
         .init(insertion: #"\end{}"#, category: "env", detail: "End an environment"),
         .init(insertion: #"\begin{document}"#, category: "env", detail: "Begin document body"),
         .init(insertion: #"\begin{abstract}"#, category: "env", detail: "Begin abstract"),
+        .init(insertion: #"\begin{theorem}"#, category: "env", detail: "Begin theorem"),
+        .init(insertion: #"\begin{lemma}"#, category: "env", detail: "Begin lemma"),
+        .init(insertion: #"\begin{proof}"#, category: "env", detail: "Begin proof"),
+        .init(insertion: #"\begin{definition}"#, category: "env", detail: "Begin definition"),
+        .init(insertion: #"\begin{algorithm}"#, category: "env", detail: "Begin algorithm"),
+        .init(insertion: #"\begin{algorithmic}"#, category: "env", detail: "Begin algorithmic body"),
         .init(insertion: #"\begin{figure}"#, category: "env", detail: "Begin a figure environment"),
         .init(insertion: #"\begin{figure*}"#, category: "env", detail: "Begin a two-column figure"),
+        .init(insertion: #"\begin{subfigure}"#, category: "env", detail: "Begin a subfigure"),
         .init(insertion: #"\begin{table}"#, category: "env", detail: "Begin a table environment"),
         .init(insertion: #"\begin{table*}"#, category: "env", detail: "Begin a two-column table"),
         .init(insertion: #"\begin{equation}"#, category: "env", detail: "Begin an equation environment"),
         .init(insertion: #"\begin{equation*}"#, category: "env", detail: "Begin an unnumbered equation"),
         .init(insertion: #"\begin{align}"#, category: "env", detail: "Begin aligned equations"),
         .init(insertion: #"\begin{align*}"#, category: "env", detail: "Begin unnumbered aligned equations"),
+        .init(insertion: #"\begin{gather}"#, category: "env", detail: "Begin gathered equations"),
+        .init(insertion: #"\begin{split}"#, category: "env", detail: "Begin split equation"),
+        .init(insertion: #"\begin{cases}"#, category: "env", detail: "Begin cases"),
+        .init(insertion: #"\begin{matrix}"#, category: "env", detail: "Begin matrix"),
+        .init(insertion: #"\begin{pmatrix}"#, category: "env", detail: "Begin parenthesized matrix"),
+        .init(insertion: #"\begin{bmatrix}"#, category: "env", detail: "Begin bracketed matrix"),
         .init(insertion: #"\begin{tabular}{}"#, category: "env", detail: "Begin tabular data"),
+        .init(insertion: #"\begin{verbatim}"#, category: "env", detail: "Begin verbatim"),
+        .init(insertion: #"\begin{lstlisting}"#, category: "env", detail: "Begin code listing"),
         .init(insertion: #"\begin{minipage}{}"#, category: "env", detail: "Begin a minipage"),
         .init(insertion: #"\begin{itemize}"#, category: "env", detail: "Begin an itemized list"),
         .init(insertion: #"\begin{enumerate}"#, category: "env", detail: "Begin an enumerated list"),
         .init(insertion: #"\begin{description}"#, category: "env", detail: "Begin a description list"),
         .init(insertion: #"\item"#, category: "cmd", detail: "Add a list item"),
         .init(insertion: #"\item[]"#, category: "cmd", detail: "Add a labeled list item"),
+        .init(insertion: #"\part{}"#, category: "sec", detail: "Part heading"),
+        .init(insertion: #"\chapter{}"#, category: "sec", detail: "Chapter heading"),
         .init(insertion: #"\section{}"#, category: "sec", detail: "Section heading"),
         .init(insertion: #"\subsection{}"#, category: "sec", detail: "Subsection heading"),
         .init(insertion: #"\subsubsection{}"#, category: "sec", detail: "Subsubsection heading"),
         .init(insertion: #"\paragraph{}"#, category: "sec", detail: "Paragraph heading"),
+        .init(insertion: #"\subparagraph{}"#, category: "sec", detail: "Subparagraph heading"),
+        .init(insertion: #"\appendix"#, category: "sec", detail: "Start appendices"),
         .init(insertion: #"\textbf{}"#, category: "fmt", detail: "Bold text"),
         .init(insertion: #"\textit{}"#, category: "fmt", detail: "Italic text"),
         .init(insertion: #"\emph{}"#, category: "fmt", detail: "Emphasized text"),
         .init(insertion: #"\underline{}"#, category: "fmt", detail: "Underline text"),
         .init(insertion: #"\texttt{}"#, category: "fmt", detail: "Monospace text"),
         .init(insertion: #"\textsc{}"#, category: "fmt", detail: "Small caps text"),
+        .init(insertion: #"\textcolor{}{}"#, category: "fmt", detail: "Colored text"),
+        .init(insertion: #"\color{}"#, category: "fmt", detail: "Set text color"),
         .init(insertion: #"\footnote{}"#, category: "fmt", detail: "Footnote"),
+        .init(insertion: #"\scriptsize"#, category: "fmt", detail: "Script font size"),
         .init(insertion: #"\small"#, category: "fmt", detail: "Small font size"),
         .init(insertion: #"\normalsize"#, category: "fmt", detail: "Normal font size"),
         .init(insertion: #"\large"#, category: "fmt", detail: "Large font size"),
+        .init(insertion: #"\Large"#, category: "fmt", detail: "Larger font size"),
+        .init(insertion: #"\huge"#, category: "fmt", detail: "Huge font size"),
         .init(insertion: #"\cite{}"#, category: "ref", detail: "Citation"),
         .init(insertion: #"\citep{}"#, category: "ref", detail: "Parenthetical citation"),
         .init(insertion: #"\citet{}"#, category: "ref", detail: "Textual citation"),
@@ -97,38 +121,80 @@ enum LaTeXCompletionEngine {
         .init(insertion: #"\caption{}"#, category: "fig", detail: "Caption"),
         .init(insertion: #"\subcaption{}"#, category: "fig", detail: "Subcaption"),
         .init(insertion: #"\centering"#, category: "cmd", detail: "Center content"),
+        .init(insertion: #"\hfill"#, category: "cmd", detail: "Horizontal fill"),
+        .init(insertion: #"\vspace{}"#, category: "cmd", detail: "Vertical space"),
+        .init(insertion: #"\hspace{}"#, category: "cmd", detail: "Horizontal space"),
+        .init(insertion: #"\noindent"#, category: "cmd", detail: "Suppress paragraph indent"),
         .init(insertion: #"\frac{}{}"#, category: "math", detail: "Fraction"),
         .init(insertion: #"\sqrt{}"#, category: "math", detail: "Square root"),
         .init(insertion: #"\sum"#, category: "math", detail: "Summation"),
         .init(insertion: #"\prod"#, category: "math", detail: "Product"),
         .init(insertion: #"\int"#, category: "math", detail: "Integral"),
         .init(insertion: #"\lim"#, category: "math", detail: "Limit"),
+        .init(insertion: #"\min"#, category: "math", detail: "Minimum"),
+        .init(insertion: #"\max"#, category: "math", detail: "Maximum"),
+        .init(insertion: #"\argmax"#, category: "math", detail: "Argument maximum"),
+        .init(insertion: #"\argmin"#, category: "math", detail: "Argument minimum"),
+        .init(insertion: #"\operatorname{}"#, category: "math", detail: "Named operator"),
         .init(insertion: #"\infty"#, category: "math", detail: "Infinity"),
         .init(insertion: #"\rightarrow"#, category: "math", detail: "Right arrow"),
+        .init(insertion: #"\leftarrow"#, category: "math", detail: "Left arrow"),
+        .init(insertion: #"\Rightarrow"#, category: "math", detail: "Right implication"),
+        .init(insertion: #"\Leftarrow"#, category: "math", detail: "Left implication"),
+        .init(insertion: #"\Leftrightarrow"#, category: "math", detail: "Logical equivalence"),
         .init(insertion: #"\left"#, category: "math", detail: "Left delimiter"),
         .init(insertion: #"\right"#, category: "math", detail: "Right delimiter"),
         .init(insertion: #"\mathbf{}"#, category: "math", detail: "Math bold"),
         .init(insertion: #"\mathrm{}"#, category: "math", detail: "Math roman"),
+        .init(insertion: #"\mathsf{}"#, category: "math", detail: "Math sans-serif"),
+        .init(insertion: #"\mathtt{}"#, category: "math", detail: "Math monospace"),
         .init(insertion: #"\mathcal{}"#, category: "math", detail: "Math calligraphic"),
         .init(insertion: #"\mathbb{}"#, category: "math", detail: "Blackboard bold"),
+        .init(insertion: #"\hat{}"#, category: "math", detail: "Hat accent"),
+        .init(insertion: #"\bar{}"#, category: "math", detail: "Bar accent"),
+        .init(insertion: #"\tilde{}"#, category: "math", detail: "Tilde accent"),
+        .init(insertion: #"\vec{}"#, category: "math", detail: "Vector accent"),
         .init(insertion: #"\alpha"#, category: "math", detail: "Greek alpha"),
         .init(insertion: #"\beta"#, category: "math", detail: "Greek beta"),
         .init(insertion: #"\gamma"#, category: "math", detail: "Greek gamma"),
+        .init(insertion: #"\Gamma"#, category: "math", detail: "Greek Gamma"),
         .init(insertion: #"\delta"#, category: "math", detail: "Greek delta"),
+        .init(insertion: #"\Delta"#, category: "math", detail: "Greek Delta"),
         .init(insertion: #"\epsilon"#, category: "math", detail: "Greek epsilon"),
+        .init(insertion: #"\varepsilon"#, category: "math", detail: "Greek epsilon variant"),
         .init(insertion: #"\theta"#, category: "math", detail: "Greek theta"),
+        .init(insertion: #"\Theta"#, category: "math", detail: "Greek Theta"),
         .init(insertion: #"\lambda"#, category: "math", detail: "Greek lambda"),
+        .init(insertion: #"\Lambda"#, category: "math", detail: "Greek Lambda"),
         .init(insertion: #"\mu"#, category: "math", detail: "Greek mu"),
+        .init(insertion: #"\nu"#, category: "math", detail: "Greek nu"),
         .init(insertion: #"\pi"#, category: "math", detail: "Greek pi"),
+        .init(insertion: #"\Pi"#, category: "math", detail: "Greek Pi"),
+        .init(insertion: #"\rho"#, category: "math", detail: "Greek rho"),
         .init(insertion: #"\sigma"#, category: "math", detail: "Greek sigma"),
+        .init(insertion: #"\Sigma"#, category: "math", detail: "Greek Sigma"),
+        .init(insertion: #"\tau"#, category: "math", detail: "Greek tau"),
         .init(insertion: #"\phi"#, category: "math", detail: "Greek phi"),
+        .init(insertion: #"\varphi"#, category: "math", detail: "Greek phi variant"),
         .init(insertion: #"\omega"#, category: "math", detail: "Greek omega"),
+        .init(insertion: #"\Omega"#, category: "math", detail: "Greek Omega"),
         .init(insertion: #"\times"#, category: "math", detail: "Multiplication symbol"),
         .init(insertion: #"\cdot"#, category: "math", detail: "Centered dot"),
         .init(insertion: #"\approx"#, category: "math", detail: "Approximately equal"),
         .init(insertion: #"\neq"#, category: "math", detail: "Not equal"),
         .init(insertion: #"\leq"#, category: "math", detail: "Less-than or equal"),
-        .init(insertion: #"\geq"#, category: "math", detail: "Greater-than or equal")
+        .init(insertion: #"\geq"#, category: "math", detail: "Greater-than or equal"),
+        .init(insertion: #"\subset"#, category: "math", detail: "Subset"),
+        .init(insertion: #"\subseteq"#, category: "math", detail: "Subset or equal"),
+        .init(insertion: #"\supset"#, category: "math", detail: "Superset"),
+        .init(insertion: #"\supseteq"#, category: "math", detail: "Superset or equal"),
+        .init(insertion: #"\in"#, category: "math", detail: "Element of"),
+        .init(insertion: #"\notin"#, category: "math", detail: "Not an element of"),
+        .init(insertion: #"\forall"#, category: "math", detail: "For all"),
+        .init(insertion: #"\exists"#, category: "math", detail: "Exists"),
+        .init(insertion: #"\nabla"#, category: "math", detail: "Nabla"),
+        .init(insertion: #"\partial"#, category: "math", detail: "Partial derivative"),
+        .init(insertion: #"\emptyset"#, category: "math", detail: "Empty set")
     ]
 
     static func suggestions(prefix: String, source: String) -> [LaTeXCompletionCandidate] {
@@ -222,6 +288,12 @@ enum LaTeXCompletionEngine {
             values = context.projectFiles.map { ($0, "file", "Project file") }
         case "begin", "end":
             values = commonEnvironmentNames.map { ($0, "env", "LaTeX environment") }
+        case "usepackage", "RequirePackage":
+            values = commonPackages.map { ($0, "pkg", "Common package") }
+        case "documentclass":
+            values = commonDocumentClasses.map { ($0, "cls", "Document class") }
+        case "bibliographystyle":
+            values = commonBibliographyStyles.map { ($0, "bib", "Bibliography style") }
         default:
             return []
         }
@@ -236,7 +308,13 @@ enum LaTeXCompletionEngine {
               selection.location <= source.length else { return false }
         if let argument = argumentContext(in: source, cursorLocation: selection.location) {
             return argument.prefix.isEmpty
-                && ["cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite", "ref", "eqref", "autoref", "cref", "Cref", "pageref", "includegraphics", "input", "include"].contains(argument.command)
+                && [
+                    "cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite",
+                    "ref", "eqref", "autoref", "cref", "Cref", "pageref",
+                    "includegraphics", "input", "include",
+                    "usepackage", "RequirePackage", "documentclass", "bibliographystyle",
+                    "begin", "end"
+                ].contains(argument.command)
         }
         guard let command = commandPrefix(in: source, cursorLocation: selection.location) else { return false }
         return command.prefix == "\\"
@@ -300,8 +378,26 @@ enum LaTeXCompletionEngine {
     }
 
     private static let commonEnvironmentNames = [
-        "document", "figure", "table", "equation", "align", "itemize", "enumerate",
-        "abstract", "theorem", "proof", "algorithm", "tabular", "center", "minipage"
+        "document", "abstract", "theorem", "lemma", "proof", "definition", "algorithm", "algorithmic",
+        "figure", "figure*", "subfigure", "table", "table*", "tabular", "center", "minipage",
+        "equation", "equation*", "align", "align*", "gather", "split", "cases", "matrix", "pmatrix", "bmatrix",
+        "itemize", "enumerate", "description", "verbatim", "lstlisting"
+    ]
+
+    private static let commonPackages = [
+        "amsmath", "amssymb", "amsfonts", "amsthm",
+        "algorithm", "algorithmic", "algorithm2e",
+        "array", "booktabs", "caption", "cite", "cleveref", "color", "enumitem", "float",
+        "geometry", "graphicx", "hyperref", "listings", "microtype", "multirow", "natbib",
+        "subcaption", "subfig", "stfloats", "url", "verbatim", "xcolor"
+    ]
+
+    private static let commonDocumentClasses = [
+        "article", "acmart", "IEEEtran", "llncs", "report", "book", "beamer", "revtex4-2", "elsarticle"
+    ]
+
+    private static let commonBibliographyStyles = [
+        "ACM-Reference-Format", "IEEEtran", "plain", "plainnat", "abbrv", "unsrt", "alpha", "apalike"
     ]
 
     private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
@@ -1037,7 +1133,6 @@ struct SourceTextView: NSViewRepresentable {
             parent.text = textView.string
             scheduleDeferredHighlighting()
             commitSelectionToBinding()
-            scheduleSelectionCommit(after: 0.016)
             updateCompletionOverlayIfNeeded()
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
@@ -1091,9 +1186,11 @@ struct SourceTextView: NSViewRepresentable {
                 return
             }
             updateCompletionOverlayIfNeeded()
-            // Keep AppKit's native interaction immediate, but coalesce the
-            // higher-level SwiftUI binding while a pointer drag is in flight.
-            scheduleSelectionCommit()
+            if textView.selectedRange().length == 0 {
+                commitSelectionToBinding()
+            } else {
+                scheduleSelectionCommit(after: 0.016)
+            }
             glyphOverlay?.selectionDidChange()
         }
 
@@ -1356,13 +1453,6 @@ struct SourceTextView: NSViewRepresentable {
             return nil
         }
 
-        private func scheduleSelectionCommit(after delay: TimeInterval = 0.05) {
-            selectionSyncTimer?.invalidate()
-            let timer = Timer(timeInterval: delay, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
-            selectionSyncTimer = timer
-            RunLoop.main.add(timer, forMode: .common)
-        }
-
         @objc private func commitSelectionToBinding() {
             guard let textView else { return }
             let range = textView.selectedRange()
@@ -1375,6 +1465,13 @@ struct SourceTextView: NSViewRepresentable {
             selectionSyncTimer?.invalidate()
             selectionSyncTimer = nil
             commitSelectionToBinding()
+        }
+
+        private func scheduleSelectionCommit(after delay: TimeInterval) {
+            selectionSyncTimer?.invalidate()
+            let timer = Timer(timeInterval: delay, target: self, selector: #selector(commitSelectionToBinding), userInfo: nil, repeats: false)
+            selectionSyncTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
         }
 
         func shouldIgnoreProtectedSelectionEcho(_ range: NSRange) -> Bool {
@@ -1639,6 +1736,7 @@ struct SourceTextView: NSViewRepresentable {
 
         @objc func askAI() {
             selectionSyncTimer?.invalidate()
+            selectionSyncTimer = nil
             commitSelectionToBinding()
             parent.onAskAI()
         }
