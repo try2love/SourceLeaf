@@ -17,68 +17,20 @@ struct CodexPanel: View {
         VStack(spacing: 0) {
             controls
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(model.messages) { message in
-                            chatMessageView(message)
-                                .id(message.id)
-                        }
-                        ForEach(acceptedEdits) { entry in
-                            AcceptedDiffCard(entry: entry)
-                        }
-                        if let proposal = model.pendingProposal {
-                            ForEach(proposal.replacements) { replacement in
-                                ProposalCard(replacement: replacement)
-                            }
-                        }
-                        if !model.generationEvents.isEmpty {
-                            AIActivityView(events: model.generationEvents)
-                        }
-                        if !model.streamingAssistantText.isEmpty {
-                            HStack {
-                                ChatBubble.adaptiveBubble(
-                                    text: model.streamingAssistantText,
-                                    role: .assistant,
-                                    colorScheme: colorScheme,
-                                    alignment: .leading
-                                )
-                                Spacer(minLength: 24)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        if model.generating || !model.generationStatus.isEmpty {
-                            HStack {
-                                if model.generating {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "stop.circle")
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    if model.generating {
-                                        Text(L10n.text("ai.thinking"))
-                                    }
-                                    if !model.generationStatus.isEmpty {
-                                        Text(model.generationStatus).sourceLeafFont(.caption2)
-                                    }
-                                }
-                                Spacer()
-                                if model.generating {
-                                    Button(L10n.text("ai.stop")) { model.cancelAIResponse() }
-                                        .buttonStyle(.bordered)
-                                }
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(12)
-                }
-                .onChange(of: model.messages.count) { _, _ in
-                    if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    chatHistory
+                        .frame(height: max(0, geometry.size.height - reservedComposerHeight))
+                        .clipped()
+                        .layoutPriority(0)
+                        .zIndex(0)
+                    Divider()
+                        .zIndex(1)
+                    composer
+                        .layoutPriority(1)
+                        .zIndex(2)
                 }
             }
-            Divider()
-            composer
         }
         .background(colorScheme == .dark ? Color(red: 0.055, green: 0.055, blue: 0.06) : Color.white)
         .popover(isPresented: $showingCustomModel) {
@@ -95,6 +47,73 @@ struct CodexPanel: View {
                 }
             }
             .padding(14)
+        }
+    }
+
+    private var reservedComposerHeight: CGFloat {
+        CGFloat(composerHeight) + (model.editTargets.isEmpty ? 70 : 102)
+    }
+
+    private var chatHistory: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(model.messages) { message in
+                        chatMessageView(message)
+                            .id(message.id)
+                    }
+                    ForEach(acceptedEdits) { entry in
+                        AcceptedDiffCard(entry: entry)
+                    }
+                    if let proposal = model.pendingProposal {
+                        ForEach(proposal.replacements) { replacement in
+                            ProposalCard(replacement: replacement)
+                        }
+                    }
+                    if !model.generationEvents.isEmpty {
+                        AIActivityView(events: model.generationEvents)
+                    }
+                    if !model.streamingAssistantText.isEmpty {
+                        HStack {
+                            ChatBubble.adaptiveBubble(
+                                text: model.streamingAssistantText,
+                                role: .assistant,
+                                colorScheme: colorScheme,
+                                alignment: .leading
+                            )
+                            Spacer(minLength: 24)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    if model.generating || !model.generationStatus.isEmpty {
+                        HStack {
+                            if model.generating {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "stop.circle")
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                if model.generating {
+                                    Text(L10n.text("ai.thinking"))
+                                }
+                                if !model.generationStatus.isEmpty {
+                                    Text(model.generationStatus).sourceLeafFont(.caption2)
+                                }
+                            }
+                            Spacer()
+                            if model.generating {
+                                Button(L10n.text("ai.stop")) { model.cancelAIResponse() }
+                                    .buttonStyle(.bordered)
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+            }
+            .onChange(of: model.messages.count) { _, _ in
+                if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 
@@ -602,24 +621,46 @@ struct ChatComposerTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
+        let scrollView = ComposerScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
-        guard let textView = scrollView.documentView as? ComposerNSTextView else {
-            let replacement = ComposerNSTextView()
-            scrollView.documentView = replacement
-            configure(replacement, context: context)
-            return scrollView
-        }
+        scrollView.hasHorizontalScroller = false
+        scrollView.horizontalScrollElasticity = .none
+
+        let initialSize = NSSize(
+            width: max(scrollView.contentSize.width, 240),
+            height: max(scrollView.contentSize.height, 96)
+        )
+        let textStorage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: initialSize.width, height: .greatestFiniteMagnitude)
+        )
+        textContainer.widthTracksTextView = true
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+
+        let textView = ComposerNSTextView(frame: NSRect(origin: .zero, size: initialSize), textContainer: textContainer)
+        textView.minSize = NSSize(width: 0, height: initialSize.height)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+
+        scrollView.documentView = textView
         configure(textView, context: context)
+        scrollView.syncDocumentGeometry()
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
+        (scrollView as? ComposerScrollView)?.syncDocumentGeometry()
         textView.sendBehavior = sendBehavior
         textView.isGenerating = isGenerating
         textView.onSend = {
@@ -637,9 +678,17 @@ struct ChatComposerTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.importsGraphics = false
         textView.drawsBackground = false
         textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: textView.bounds.width,
+            height: .greatestFiniteMagnitude
+        )
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -669,6 +718,43 @@ struct ChatComposerTextView: NSViewRepresentable {
     }
 }
 
+final class ComposerScrollView: NSScrollView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hitView = super.hitTest(point)
+        guard hitView === contentView,
+              let textView = documentView as? ComposerNSTextView else { return hitView }
+        let contentPoint = contentView.convert(point, from: self)
+        guard contentView.bounds.contains(contentPoint) else { return hitView }
+        let textPoint = textView.convert(point, from: self)
+        guard textView.bounds.contains(textPoint) else { return hitView }
+        return textView.hitTest(textPoint) ?? textView
+    }
+
+    override func layout() {
+        super.layout()
+        syncDocumentGeometry()
+    }
+
+    func syncDocumentGeometry() {
+        guard let textView = documentView as? ComposerNSTextView else { return }
+        let contentBounds = contentView.bounds
+        let width = max(contentBounds.width, 1)
+        let minimumHeight = max(contentBounds.height, 64)
+        textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        let usedHeight = textView.layoutManager
+            .flatMap { layoutManager -> CGFloat? in
+                guard let textContainer = textView.textContainer else { return nil }
+                layoutManager.ensureLayout(for: textContainer)
+                return layoutManager.usedRect(for: textContainer).height
+            } ?? 0
+        let desiredHeight = max(minimumHeight, ceil(usedHeight + textView.textContainerInset.height * 2 + 8))
+        if abs(textView.frame.width - width) > 0.5 || abs(textView.frame.height - desiredHeight) > 0.5 {
+            textView.frame = NSRect(x: 0, y: 0, width: width, height: desiredHeight)
+        }
+    }
+}
+
 final class ComposerNSTextView: NSTextView {
     var sendBehavior: ChatSendBehavior = .enter
     var isGenerating = false
@@ -676,6 +762,15 @@ final class ComposerNSTextView: NSTextView {
     var inputSourcePrefersReturnCommitOverride: Bool?
     private var lastMarkedTextCommitDate = Date.distantPast
     private var lastCompositionLikeKeyDate = Date.distantPast
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        return super.hitTest(point) ?? self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 
     override func unmarkText() {
         super.unmarkText()

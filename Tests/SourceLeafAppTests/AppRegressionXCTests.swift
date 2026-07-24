@@ -60,6 +60,54 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testChatComposerCanBeClickedFocusedAndTypedInto() throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-xctest-chat-composer-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let appSupport = support.appendingPathComponent("应用状态", isDirectory: true)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SourceLeaf.xctest-chat-composer.\(UUID().uuidString)"))
+        let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: defaults)
+
+        let size = NSSize(width: 420, height: 560)
+        let hostingView = NSHostingView(
+            rootView: CodexPanel()
+                .environmentObject(model)
+                .frame(width: size.width, height: size.height)
+        )
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: hostingView.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+
+        let textView = try XCTUnwrap(findComposerTextView(in: hostingView))
+        XCTAssertGreaterThan(textView.bounds.width, 80)
+        XCTAssertGreaterThan(textView.bounds.height, 40)
+
+        let pointInTextView = NSPoint(x: textView.bounds.midX, y: textView.bounds.midY)
+        let enclosingScrollView = try XCTUnwrap(textView.enclosingScrollView)
+        let pointInScrollView = textView.convert(pointInTextView, to: enclosingScrollView)
+        let hitView = try XCTUnwrap(enclosingScrollView.hitTest(pointInScrollView))
+        XCTAssertTrue(
+            hitView === textView || hitView.isDescendant(of: textView) || textView.isDescendant(of: hitView),
+            "Composer scroll view should route content clicks to the text view hierarchy, got \(type(of: hitView)); textView frame=\(textView.frame), bounds=\(textView.bounds), visibleRect=\(textView.visibleRect), superview=\(String(describing: textView.superview?.frame))"
+        )
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        textView.insertText("hello", replacementRange: textView.selectedRange())
+        XCTAssertEqual(textView.string, "hello")
+        XCTAssertEqual(model.instruction, "hello")
+    }
+
+    @MainActor
     func testComposerSendsOnlyAfterTextInputSystemProducesANewlineCommand() {
         let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         textView.inputSourcePrefersReturnCommitOverride = false
@@ -2482,6 +2530,17 @@ private func findSourceTextView(in view: NSView) -> NSTextView? {
     }
     for child in view.subviews {
         if let match = findSourceTextView(in: child) { return match }
+    }
+    return nil
+}
+
+@MainActor
+private func findComposerTextView(in view: NSView) -> ComposerNSTextView? {
+    if let textView = view as? ComposerNSTextView {
+        return textView
+    }
+    for child in view.subviews {
+        if let match = findComposerTextView(in: child) { return match }
     }
     return nil
 }
