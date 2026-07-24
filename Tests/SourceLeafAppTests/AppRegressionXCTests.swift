@@ -308,6 +308,32 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertFalse(suggestions.contains("\\subsection{}"))
     }
 
+    func testLatexCompletionIgnoresCommandsInsideLineComments() {
+        let source = "% \\sec" as NSString
+
+        XCTAssertNil(LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: source.length))
+        XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
+            afterChangeIn: source,
+            selection: NSRange(location: source.length, length: 0)
+        ))
+    }
+
+    func testLatexArgumentCompletionIgnoresCommandsInsideLineComments() {
+        let source = "% \\cite{sm" as NSString
+
+        XCTAssertNil(LaTeXCompletionEngine.argumentContext(in: source, cursorLocation: source.length))
+    }
+
+    func testLatexCompletionIgnoresEscapedBackslashSequences() {
+        let source = "\\\\" as NSString
+
+        XCTAssertNil(LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: source.length))
+        XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
+            afterChangeIn: source,
+            selection: NSRange(location: source.length, length: 0)
+        ))
+    }
+
     func testLatexArgumentCompletionUsesLocalWindowAndKeepsAbsoluteRange() throws {
         let prefix = String(repeating: "The paper discusses retrieval augmented generation. ", count: 40)
         let source = (prefix + "\\cite{smi") as NSString
@@ -668,6 +694,30 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandSlashCommentsLineAndClosesBackslashCompletionOverlay() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "% \\")
+        XCTAssertEqual(state.text, "% \\")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 3, length: 0))
+        XCTAssertFalse(overlay.isShowing)
+    }
+
+    @MainActor
     func testCommandSlashTogglesLatexLineCommentsInFocusedEditor() async throws {
         let source = "alpha\n  beta\n"
         let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
@@ -711,6 +761,36 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.string, "% alpha")
         XCTAssertEqual(state.text, "% alpha")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: ("% alpha" as NSString).length))
+    }
+
+    @MainActor
+    func testSourceEditorContainerHandlesCommandSlashKeyEquivalent() async throws {
+        let source = "alpha"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        XCTAssertTrue(host.view.performKeyEquivalent(with: try XCTUnwrap(
+            keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)
+        )))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "% alpha")
+        XCTAssertEqual(state.text, "% alpha")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: ("% alpha" as NSString).length))
+
+        XCTAssertTrue(host.view.performKeyEquivalent(with: try XCTUnwrap(
+            keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)
+        )))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, source)
+        XCTAssertEqual(state.text, source)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (source as NSString).length))
     }
 
     @MainActor
@@ -1011,6 +1091,31 @@ final class AppRegressionXCTests: XCTestCase {
         let movedIndex = overlay.selectedIndex
         overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: 27, window: host.window)))
         XCTAssertLessThan(overlay.selectedIndex, movedIndex)
+    }
+
+    @MainActor
+    func testBackslashCompletionDoesNotAcceptWhenClickingOverlayPadding() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        let paddingPoint = overlay.convert(NSPoint(x: overlay.bounds.midX, y: 1), to: nil)
+        overlay.mouseDown(with: try XCTUnwrap(mouseEvent(
+            location: paddingPoint,
+            window: host.window
+        )))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\")
+        XCTAssertTrue(overlay.isShowing)
     }
 
     @MainActor
@@ -2106,6 +2211,21 @@ private func keyCode(for character: String) -> UInt16 {
     case "\\": 42
     default: 0
     }
+}
+
+@MainActor
+private func mouseEvent(location: NSPoint, window: NSWindow) -> NSEvent? {
+    NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: location,
+        modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1
+    )
 }
 
 @MainActor

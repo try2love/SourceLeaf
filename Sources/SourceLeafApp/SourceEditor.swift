@@ -456,6 +456,8 @@ enum LaTeXCompletionEngine {
         }
         guard start < cursorLocation || (start == cursorLocation && start > 0),
               source.character(at: start) == 92 else { return nil }
+        guard !isEscapedCharacter(at: start, in: source),
+              !isInsideLineComment(location: start, in: source) else { return nil }
         let range = NSRange(location: start, length: cursorLocation - start)
         return (source.substring(with: range), range)
     }
@@ -492,6 +494,9 @@ enum LaTeXCompletionEngine {
         let nsBefore = before as NSString
         guard let match = regex.matches(in: before, range: NSRange(location: 0, length: nsBefore.length)).last,
               match.numberOfRanges >= 3 else { return nil }
+        let commandLocation = windowStart + match.range.location
+        guard !isEscapedCharacter(at: commandLocation, in: source),
+              !isInsideLineComment(location: commandLocation, in: source) else { return nil }
         let command = nsBefore.substring(with: match.range(at: 1))
         let prefix = nsBefore.substring(with: match.range(at: 2))
         return (command, prefix, NSRange(location: windowStart + match.range(at: 2).location, length: (prefix as NSString).length))
@@ -1098,6 +1103,9 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.ruler = ruler
         context.coordinator.glyphOverlay = glyphOverlay
         context.coordinator.completionOverlay = completionOverlay
+        container.keyEquivalentHandler = { [weak coordinator = context.coordinator] event in
+            coordinator?.handleEditorKeyEquivalent(event) ?? false
+        }
         context.coordinator.installKeyEventMonitor()
         completionOverlay.onPick = { [weak coordinator = context.coordinator] index in
             coordinator?.acceptCompletionFromOverlay(at: index)
@@ -1114,6 +1122,9 @@ struct SourceTextView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
+        (nsView as? SourceEditorContainerView)?.keyEquivalentHandler = { [weak coordinator = context.coordinator] event in
+            coordinator?.handleEditorKeyEquivalent(event) ?? false
+        }
         context.coordinator.updateFindHighlights(findRanges, activeRange: activeFindRange)
         if textView.hasMarkedText() {
             context.coordinator.hideCompletionOverlay()
@@ -2269,7 +2280,15 @@ final class LaTeXCompletionOverlayView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         let visibleCandidates = visibleCandidateSlice()
         guard !visibleCandidates.isEmpty else { return }
-        let row = Int(max(0, min(CGFloat(visibleCandidates.count - 1), floor((point.y - 5) / rowHeight))))
+        let listRect = NSRect(
+            x: 5,
+            y: 5,
+            width: max(0, bounds.width - 10),
+            height: CGFloat(visibleCandidates.count) * rowHeight
+        )
+        guard listRect.contains(point) else { return }
+        let row = Int(floor((point.y - listRect.minY) / rowHeight))
+        guard row >= 0, row < visibleCandidates.count else { return }
         let absoluteIndex = firstVisibleIndex + row
         selectedIndex = min(max(0, absoluteIndex), candidates.count - 1)
         ensureSelectionVisible()
@@ -2595,6 +2614,7 @@ final class SourceEditorContainerView: NSView {
     private let editorTextView: NSTextView
     weak var glyphOverlay: SourceGlyphOverlayView?
     weak var completionOverlay: LaTeXCompletionOverlayView?
+    var keyEquivalentHandler: ((NSEvent) -> Bool)?
     var backgroundColor: NSColor {
         didSet {
             layer?.backgroundColor = backgroundColor.cgColor
@@ -2613,6 +2633,11 @@ final class SourceEditorContainerView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if keyEquivalentHandler?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func layout() {
         super.layout()
