@@ -334,6 +334,16 @@ final class AppRegressionXCTests: XCTestCase {
         ))
     }
 
+    func testLatexCompletionIgnoresNonBMPCharactersInsteadOfCrashing() {
+        let source = "\\😀" as NSString
+
+        XCTAssertNil(LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: source.length))
+        XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
+            afterChangeIn: source,
+            selection: NSRange(location: source.length, length: 0)
+        ))
+    }
+
     func testLatexArgumentCompletionUsesLocalWindowAndKeepsAbsoluteRange() throws {
         let prefix = String(repeating: "The paper discusses retrieval augmented generation. ", count: 40)
         let source = (prefix + "\\cite{smi") as NSString
@@ -954,6 +964,42 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 1, length: 0))
         XCTAssertEqual(state.text, "中test")
         XCTAssertEqual(state.selection, NSRange(location: 1, length: 0))
+    }
+
+    @MainActor
+    func testSourceEditorDoesNotAcceptLatexCompletionWhileInputMethodIsComposing() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.insertText("\\", replacementRange: textView.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+
+        textView.setMarkedText(
+            "zhong",
+            selectedRange: NSRange(location: 5, length: 0),
+            replacementRange: textView.selectedRange()
+        )
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(textView.hasMarkedText())
+        XCTAssertFalse(overlay.isShowing)
+
+        let handled = textView.delegate?.textView?(
+            textView,
+            doCommandBy: #selector(NSResponder.insertNewline(_:))
+        ) ?? false
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertFalse(handled)
+        XCTAssertEqual(textView.string, "\\zhong")
+        XCTAssertTrue(textView.hasMarkedText())
+        XCTAssertNotEqual(textView.string, "\\usepackage{}")
     }
 
     @MainActor
@@ -1997,6 +2043,32 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.string, "")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 0))
         XCTAssertEqual(state.text, "")
+    }
+
+    @MainActor
+    func testDollarSmartPairWrapsSelectionAndUndoRestoresTheOriginalSelection() async throws {
+        let source = "E=mc^2"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "$", keyCode: 21, window: host.window)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "$E=mc^2$")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 7, length: 0))
+        XCTAssertEqual(state.text, "$E=mc^2$")
+
+        textView.undoManager?.undo()
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, source)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (source as NSString).length))
+        XCTAssertEqual(state.text, source)
     }
 
     func testRealMutedRAGProjectBuildsUsableFileAndCompletionIndexesWhenProvided() throws {

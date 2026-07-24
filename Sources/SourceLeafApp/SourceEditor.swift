@@ -449,7 +449,8 @@ enum LaTeXCompletionEngine {
                 start -= 1
                 break
             }
-            guard CharacterSet.alphanumerics.contains(UnicodeScalar(previous)!) || previous == 64 || previous == 42 else {
+            guard let scalar = UnicodeScalar(previous),
+                  CharacterSet.alphanumerics.contains(scalar) || previous == 64 || previous == 42 else {
                 return nil
             }
             start -= 1
