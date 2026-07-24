@@ -99,6 +99,49 @@ import Testing
 }
 
 @MainActor
+@Test func askingAIWithDetachedChatFocusesTheFloatingChatInsteadOfReopeningItInTheDock() throws {
+    let state = try productTestState(named: "floating-chat-selection")
+    defer { state.cleanup() }
+    let project = state.support.appendingPathComponent("项目", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try Data("First sentence.\nSecond sentence.".utf8).write(to: project.appendingPathComponent("main.tex"))
+
+    let model = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+    model.openProject(project)
+    model.revealPanel(.codex, in: .trailing)
+    model.detachPanel(.codex)
+    let selected = "First sentence." as NSString
+    model.selectedRange = NSRange(location: 0, length: selected.length)
+
+    model.attachCurrentSelection()
+
+    #expect(model.floatingPanels.contains(.codex))
+    #expect(!model.layout.contains(.codex))
+    #expect(model.floatingPanelFocusRequest?.panel == .codex)
+    #expect(model.editTargets.count == 1)
+}
+
+@MainActor
+@Test func revealingAnyDetachedPanelRequestsItsFloatingWindowWithoutChangingTheDockLayout() throws {
+    let state = try productTestState(named: "floating-panel-routing")
+    defer { state.cleanup() }
+
+    for panel in WorkspacePanel.allCases {
+        let model = AppModel(restoreLastProject: false, supportDirectory: state.support, defaults: state.defaults)
+        model.revealPanel(panel)
+        model.detachPanel(panel)
+        let detachedLayout = model.layout
+
+        model.revealPanel(panel)
+
+        #expect(model.floatingPanels.contains(panel))
+        #expect(!model.layout.contains(panel))
+        #expect(model.layout == detachedLayout)
+        #expect(model.floatingPanelFocusRequest?.panel == panel)
+    }
+}
+
+@MainActor
 @Test func selectedConversationProviderPersistsAcrossLaunches() throws {
     let state = try productTestState(named: "selected-provider")
     defer { state.cleanup() }

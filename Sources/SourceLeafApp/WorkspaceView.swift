@@ -22,6 +22,7 @@ struct WorkspaceView: View {
         }
         .toolbar { workspaceToolbar }
         .background(MainWindowCloseGuard(model: model).frame(width: 0, height: 0))
+        .background(FloatingPanelFocusRelay().frame(width: 0, height: 0))
         .alert("SourceLeaf", isPresented: Binding(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
@@ -414,7 +415,22 @@ struct FloatingPanelView: View {
 
     var body: some View {
         PanelContentView(panel: panel)
+            .background(FloatingPanelFocusRelay().frame(width: 0, height: 0))
             .onDisappear { model.restoreFloatingPanel(panel) }
+    }
+}
+
+private struct FloatingPanelFocusRelay: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.floatingPanelFocusRequest) { _, request in
+                guard let request else { return }
+                openWindow(value: request.panel)
+                model.acknowledgeFloatingPanelFocusRequest(request)
+            }
     }
 }
 

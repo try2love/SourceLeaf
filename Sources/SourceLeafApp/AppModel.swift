@@ -19,6 +19,12 @@ enum ProviderHealthStatus: Equatable {
 }
 
 @MainActor
+struct FloatingPanelFocusRequest: Equatable, Identifiable {
+    let id = UUID()
+    var panel: WorkspacePanel
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     @Published var projectRoot: URL?
     @Published var projectFiles: [ProjectFile] = []
@@ -78,6 +84,7 @@ final class AppModel: ObservableObject {
     @Published var editorFontSize: Double = 13
     @Published var interfaceFontScale: Double = 1
     @Published private(set) var floatingPanels: Set<WorkspacePanel> = []
+    @Published private(set) var floatingPanelFocusRequest: FloatingPanelFocusRequest?
 
     var selectedProviderModel: String {
         get { selectedProviderProfile?.model ?? "" }
@@ -467,10 +474,7 @@ final class AppModel: ObservableObject {
             refreshActiveFileOutline()
             scheduleCompletionIndexRefresh()
             suppressTextChange = false
-            updateLayout { layout in
-                layout.show(.source, in: .center)
-                if let zone = layout.zone(containing: .source) { layout.selected[zone] = .source }
-            }
+            revealPanel(.source, in: .center)
             rememberLastOpenedFile(file)
         } catch {
             suppressTextChange = false
@@ -482,10 +486,7 @@ final class AppModel: ObservableObject {
         do {
             guard try prepareToLeaveCurrentSource() else { return }
             selectedImageFile = file
-            updateLayout { layout in
-                layout.show(.image, in: .center)
-                if let zone = layout.zone(containing: .image) { layout.selected[zone] = .image }
-            }
+            revealPanel(.image, in: .center)
             rememberLastOpenedFile(file)
         } catch { report(error) }
     }
@@ -497,10 +498,7 @@ final class AppModel: ObservableObject {
             pdfPageIndex = 0
             pdfSelection = ""
             syncTeXDocument = nil
-            updateLayout { layout in
-                layout.show(.pdf, in: .trailing)
-                if let zone = layout.zone(containing: .pdf) { layout.selected[zone] = .pdf }
-            }
+            revealPanel(.pdf, in: .trailing)
             rememberLastOpenedFile(file)
         } catch { report(error) }
     }
@@ -604,14 +602,20 @@ final class AppModel: ObservableObject {
     }
 
     func togglePanel(_ panel: WorkspacePanel) {
-        if floatingPanels.contains(panel) { return }
+        if floatingPanels.contains(panel) {
+            requestFloatingPanelFocus(panel)
+            return
+        }
         if layout.contains(panel) { layout.close(panel) } else { layout.show(panel) }
         configuration.layout = layout
         persistConfiguration()
     }
 
     func activatePanel(_ panel: WorkspacePanel) {
-        guard !floatingPanels.contains(panel) else { return }
+        guard !floatingPanels.contains(panel) else {
+            requestFloatingPanelFocus(panel)
+            return
+        }
         if let zone = layout.zone(containing: panel) {
             if layout.selected[zone] == panel { layout.close(panel) }
             else { layout.selected[zone] = panel }
@@ -623,7 +627,10 @@ final class AppModel: ObservableObject {
     }
 
     func revealPanel(_ panel: WorkspacePanel, in preferredZone: DockZone? = nil) {
-        guard !floatingPanels.contains(panel) else { return }
+        guard !floatingPanels.contains(panel) else {
+            requestFloatingPanelFocus(panel)
+            return
+        }
         updateLayout { layout in
             if let zone = layout.zone(containing: panel) { layout.selected[zone] = panel }
             else { layout.show(panel, in: preferredZone) }
@@ -640,9 +647,21 @@ final class AppModel: ObservableObject {
 
     func restoreFloatingPanel(_ panel: WorkspacePanel) {
         guard floatingPanels.remove(panel) != nil else { return }
+        if floatingPanelFocusRequest?.panel == panel {
+            floatingPanelFocusRequest = nil
+        }
         layout.restore(panel, to: floatingOrigins.removeValue(forKey: panel))
         configuration.layout = layout
         persistConfiguration()
+    }
+
+    func acknowledgeFloatingPanelFocusRequest(_ request: FloatingPanelFocusRequest) {
+        guard floatingPanelFocusRequest == request else { return }
+        floatingPanelFocusRequest = nil
+    }
+
+    private func requestFloatingPanelFocus(_ panel: WorkspacePanel) {
+        floatingPanelFocusRequest = FloatingPanelFocusRequest(panel: panel)
     }
 
     func jumpToOutline(_ item: DocumentOutlineItem) {
@@ -726,8 +745,7 @@ final class AppModel: ObservableObject {
             if !editTargets.contains(where: { $0.contentHash == target.contentHash && $0.relativePath == target.relativePath }) {
                 editTargets.append(target)
             }
-            layout.show(.codex, in: .trailing)
-            configuration.layout = layout
+            revealPanel(.codex, in: .trailing)
         } catch { report(error) }
     }
 
@@ -995,7 +1013,7 @@ final class AppModel: ObservableObject {
                 buildLog = result.log
                 guard result.status == .succeeded else {
                     buildSucceeded = false
-                    layout.show(.buildLog, in: .bottom)
+                    revealPanel(.buildLog, in: .bottom)
                     throw AppPresentationError.candidateCompilationFailed
                 }
                 accept(replacement, compileAfterAccept: false)
@@ -1026,7 +1044,7 @@ final class AppModel: ObservableObject {
         buildSucceeded = nil
         buildLog = ""
         buildPhase = .idle
-        layout.show(.pdf, in: .trailing)
+        revealPanel(.pdf, in: .trailing)
         activeCompileTask = Task {
             defer { buildRunning = false }
             do {
