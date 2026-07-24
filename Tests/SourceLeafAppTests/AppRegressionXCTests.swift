@@ -212,6 +212,14 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 0))
         XCTAssertEqual(state.text, "\\sec")
         XCTAssertEqual(state.selection, NSRange(location: 4, length: 0))
+
+        textView.undoManager?.redo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+        XCTAssertEqual(state.text, "\\section{}")
+        XCTAssertEqual(state.selection, NSRange(location: 9, length: 0))
     }
 
     @MainActor
@@ -379,6 +387,14 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
         XCTAssertEqual(state.text, "\\begin{fig}")
         XCTAssertEqual(state.selection, NSRange(location: 10, length: 0))
+
+        textView.undoManager?.redo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\begin{figure}\n\n\\end{figure}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
+        XCTAssertEqual(state.text, "\\begin{figure}\n\n\\end{figure}")
+        XCTAssertEqual(state.selection, NSRange(location: 15, length: 0))
     }
 
     @MainActor

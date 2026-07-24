@@ -1599,11 +1599,7 @@ struct SourceTextView: NSViewRepresentable {
 
         private func restoreSelection(_ requested: NSRange, opposite: NSRange) {
             guard let textView else { return }
-            let length = (textView.string as NSString).length
-            let range = NSRange(
-                location: min(max(0, requested.location), length),
-                length: min(max(0, requested.length), max(0, length - min(max(0, requested.location), length)))
-            )
+            let range = clampedSelection(requested, in: textView)
             textView.setSelectedRange(range)
             parent.selection = range
             textView.scrollRangeToVisible(range)
@@ -1612,7 +1608,29 @@ struct SourceTextView: NSViewRepresentable {
                     target.restoreSelection(opposite, opposite: requested)
                 }
             }
+            scheduleSelectionRestore(requested)
             glyphOverlay?.selectionDidChange()
+        }
+
+        private func scheduleSelectionRestore(_ requested: NSRange) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let textView = self.textView else { return }
+                let range = self.clampedSelection(requested, in: textView)
+                guard textView.selectedRange() != range else { return }
+                textView.setSelectedRange(range)
+                self.parent.selection = range
+                textView.scrollRangeToVisible(range)
+                self.glyphOverlay?.selectionDidChange()
+            }
+        }
+
+        private func clampedSelection(_ requested: NSRange, in textView: NSTextView) -> NSRange {
+            let length = (textView.string as NSString).length
+            let location = min(max(0, requested.location), length)
+            return NSRange(
+                location: location,
+                length: min(max(0, requested.length), max(0, length - location))
+            )
         }
 
         func scheduleInitialHighlighting(attempt: Int = 0) {
