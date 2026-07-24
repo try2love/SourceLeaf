@@ -38,6 +38,24 @@ import Testing
     #expect(outline.first?.line == 1)
 }
 
+@Test func largeDocumentOutlineComputesLineNumbersInLinearTime() {
+    let sectionCount = 2_500
+    let source = (1...sectionCount)
+        .map { "\\section{Heading \($0)}\nBody line \($0)" }
+        .joined(separator: "\n")
+    let clock = ContinuousClock()
+    let start = clock.now
+
+    let outline = ProjectIndexer.outline(for: source)
+    let elapsed = start.duration(to: clock.now)
+
+    #expect(outline.count == sectionCount)
+    #expect(outline.first?.line == 1)
+    #expect(outline[999].line == 1_999)
+    #expect(outline.last?.line == 4_999)
+    #expect(elapsed < .seconds(2), "Outline indexing took \(elapsed)")
+}
+
 @Test func completionIndexExtractsLabelsCitationsAndImageFiles() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("sourceleaf-completion-index-\(UUID().uuidString)", isDirectory: true)

@@ -1957,7 +1957,6 @@ struct SourceTextView: NSViewRepresentable {
             if let textContainer = textView.textContainer {
                 textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
                 textContainer.widthTracksTextView = true
-                textView.layoutManager?.ensureLayout(for: textContainer)
             }
             textView.setNeedsDisplay(textView.visibleRect)
             glyphOverlay?.synchronizeFrame()

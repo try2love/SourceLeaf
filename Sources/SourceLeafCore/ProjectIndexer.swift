@@ -132,14 +132,16 @@ public enum ProjectIndexer {
         let pattern = #"\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*\{([^}]*)\}"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsSource = source as NSString
+        var line = 1
+        var scannedLocation = 0
         return expression.matches(in: source, range: NSRange(location: 0, length: nsSource.length)).compactMap { match in
             guard match.numberOfRanges == 3 else { return nil }
+            if match.range.location > scannedLocation {
+                line += newlineCount(in: nsSource, from: scannedLocation, to: match.range.location)
+                scannedLocation = match.range.location
+            }
             let command = nsSource.substring(with: match.range(at: 1))
             let title = nsSource.substring(with: match.range(at: 2))
-            let prefix = nsSource.substring(to: match.range.location)
-            let line = prefix.reduce(into: 1) { count, character in
-                if character == "\n" { count += 1 }
-            }
             let levels = ["part": 0, "chapter": 1, "section": 2, "subsection": 3, "subsubsection": 4, "paragraph": 5]
             return DocumentOutlineItem(
                 level: levels[command] ?? 2,
@@ -148,6 +150,15 @@ public enum ProjectIndexer {
                 relativePath: relativePath
             )
         }
+    }
+
+    private static func newlineCount(in source: NSString, from start: Int, to end: Int) -> Int {
+        guard end > start else { return 0 }
+        var count = 0
+        for index in start..<end where source.character(at: index) == 10 {
+            count += 1
+        }
+        return count
     }
 
     public static func outlineTree(from items: [DocumentOutlineItem]) -> [DocumentOutlineNode] {
