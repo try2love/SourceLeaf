@@ -12,6 +12,7 @@ import Testing
     )
     let prompt = AIEditPromptBuilder.build(request)
     #expect(prompt.contains("Answer the user's request directly in plain text"))
+    #expect(prompt.contains("Keep ordinary conversation fast"))
     #expect(!prompt.contains("Be concise"))
     #expect(!prompt.contains("target_id"))
     #expect(AIEditPromptBuilder.buildForCLI(request).contains("System instructions:\nBe concise"))
@@ -69,6 +70,21 @@ import Testing
     #expect(configIndex.map { arguments[$0 + 1] } == "model_reasoning_effort=\"high\"")
     #expect(sandboxIndex.map { arguments[$0 + 1] } == "read-only")
     #expect(arguments.contains("--ephemeral"))
+}
+
+@Test func localCodexChatFastPathUsesLowReasoningAndSkipsUserConfigOnlyForPlainChat() {
+    let defaultReasoning = ProviderProfile(name: "Local Codex", kind: .localCodex)
+    let chatArguments = CodexCLIProvider.invocationArguments(for: defaultReasoning, chatFastPath: true)
+    let editArguments = CodexCLIProvider.invocationArguments(for: defaultReasoning, chatFastPath: false)
+
+    #expect(chatArguments.contains("--ignore-user-config"))
+    #expect(chatArguments.contains("model_reasoning_effort=\"low\""))
+    #expect(!editArguments.contains("--ignore-user-config"))
+    #expect(!editArguments.contains { $0.contains("model_reasoning_effort") })
+
+    let explicitReasoning = ProviderProfile(name: "Local Codex", kind: .localCodex, reasoningEffort: .high)
+    let explicitChatArguments = CodexCLIProvider.invocationArguments(for: explicitReasoning, chatFastPath: true)
+    #expect(explicitChatArguments.contains("model_reasoning_effort=\"high\""))
 }
 
 @Test func codeBuddyInvocationIsHeadlessModelAwareAndToolRestricted() throws {

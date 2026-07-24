@@ -198,6 +198,7 @@ public enum AIChatPromptBuilder {
         return """
         You are the conversation assistant inside SourceLeaf, a LaTeX editor.
         Answer the user's request directly in plain text. Do not return JSON.
+        Keep ordinary conversation fast: answer directly, do not plan source edits, and do not inspect project files unless explicit context is provided below.
 
         User message:
         \(request.instruction)
@@ -244,7 +245,7 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
         let output = try await runner.run(
             executableURL: executableURL,
-            arguments: Self.invocationArguments(for: profile),
+            arguments: Self.invocationArguments(for: profile, chatFastPath: request.targets.isEmpty),
             currentDirectoryURL: sandboxDirectory,
             onOutput: { chunk in
                 for event in Self.providerEvents(in: chunk) { onEvent(event) }
@@ -264,7 +265,7 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
         let output = try await runner.run(
             executableURL: executableURL,
-            arguments: Self.invocationArguments(for: profile),
+            arguments: Self.invocationArguments(for: profile, chatFastPath: true),
             currentDirectoryURL: sandboxDirectory,
             input: Data(AIProviderHealthCheck.prompt.utf8)
         )
@@ -279,13 +280,16 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
             .appendingPathComponent(key, isDirectory: true)
     }
 
-    public static func invocationArguments(for profile: ProviderProfile) -> [String] {
+    public static func invocationArguments(for profile: ProviderProfile, chatFastPath: Bool = false) -> [String] {
         var arguments = ["exec"]
         let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
         if !model.isEmpty {
             arguments += ["--model", model]
         }
-        if let effort = profile.reasoningEffort {
+        if chatFastPath {
+            arguments.append("--ignore-user-config")
+        }
+        if let effort = profile.reasoningEffort ?? (chatFastPath ? .low : nil) {
             arguments += ["--config", "model_reasoning_effort=\"\(effort.rawValue)\""]
         }
         arguments += [
