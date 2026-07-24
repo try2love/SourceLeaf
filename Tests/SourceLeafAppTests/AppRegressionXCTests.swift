@@ -1471,6 +1471,29 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testTableCommandConvertsSelectedDelimitedTextInsideTheRealEditor() async throws {
+        let source = "Metric,ASR,Refusal\nMutedRAG,12.3,4.5"
+        let request = LaTeXEditRequest(command: .table)
+        let state = SourceTypingState(
+            text: source,
+            selection: NSRange(location: 0, length: (source as NSString).length),
+            commandRequest: request
+        )
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(450))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertTrue(textView.string.contains("\\begin{tabular}{lll}"))
+        XCTAssertTrue(textView.string.contains("Metric & ASR & Refusal \\\\\n"))
+        XCTAssertTrue(textView.string.contains("MutedRAG & 12.3 & 4.5 \\\\\n"))
+        XCTAssertEqual((textView.string as NSString).substring(with: textView.selectedRange()), "Caption")
+        XCTAssertNil(state.commandRequest)
+    }
+
+    @MainActor
     func testLatexSmartPairsInsertBracesAndSkipDuplicateClosers() async throws {
         let state = SourceTypingState(text: "\\section", selection: NSRange(location: 8, length: 0))
         let host = makeSourceEditorHost(state: state)

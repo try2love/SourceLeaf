@@ -75,6 +75,21 @@ import Testing
     #expect(figure.replacement.contains("figures/image.png"))
 }
 
+@Test func latexTableTemplateConvertsSelectedDelimitedRowsIntoTabularContent() {
+    let source = "Metric,ASR,Refusal\nMutedRAG,12.3,4.5\nBaseline,20.0,7.1"
+    let edit = LaTeXSourceFormatter.edit(
+        command: .table,
+        source: source,
+        selection: NSRange(location: 0, length: (source as NSString).length)
+    )
+
+    #expect(edit.replacement.contains("\\begin{tabular}{lll}"))
+    #expect(edit.replacement.contains("Metric & ASR & Refusal \\\\\n"))
+    #expect(edit.replacement.contains("MutedRAG & 12.3 & 4.5 \\\\\n"))
+    #expect(edit.replacement.contains("Baseline & 20.0 & 7.1 \\\\\n"))
+    #expect((edit.replacement as NSString).substring(with: edit.resultingSelection) == "Caption")
+}
+
 @Test func latexFigureTemplateCanUseAProjectImagePath() {
     let edit = LaTeXSourceFormatter.edit(
         command: .figure,

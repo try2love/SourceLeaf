@@ -97,7 +97,7 @@ public enum LaTeXSourceFormatter {
         case .subscriptText: return wrapped(nsSource, selection, selected, prefix: "_{", suffix: "}", placeholder: "index")
         case .itemize: return list(nsSource, selection, selected, environment: "itemize")
         case .enumerate: return list(nsSource, selection, selected, environment: "enumerate")
-        case .table: return template(selection, template: "\\begin{table}[htbp]\n  \\centering\n  \\caption{Caption}\n  \\label{tab:label}\n  \\begin{tabular}{ll}\n    \\hline\n    Column 1 & Column 2 \\\\\n    \\hline\n    Value 1 & Value 2 \\\\\n    \\hline\n  \\end{tabular}\n\\end{table}", target: "Caption")
+        case .table: return table(selection, selected: selected)
         case .figure:
             let explicitPath = argument?.trimmingCharacters(in: .whitespacesAndNewlines)
             let path = explicitPath?.isEmpty == false ? explicitPath! : (selected.isEmpty ? "figures/image.png" : selected)
@@ -181,6 +181,56 @@ public enum LaTeXSourceFormatter {
             replacement: template,
             resultingSelection: NSRange(location: selection.location + targetRange.location, length: targetRange.length)
         )
+    }
+
+    private static func table(_ selection: NSRange, selected: String) -> LaTeXSourceEdit {
+        let rows = parsedTableRows(from: selected)
+        let columnCount = max(2, rows.map(\.count).max() ?? 2)
+        let tableRows = rows.isEmpty
+            ? [["Column 1", "Column 2"], ["Value 1", "Value 2"]]
+            : rows.map { row in row + Array(repeating: "", count: columnCount - row.count) }
+        let body = tableRows.enumerated().map { index, row in
+            let line = "    " + row.joined(separator: " & ") + " \\\\"
+            return index == 0
+                ? line + "\n    \\hline"
+                : line
+        }.joined(separator: "\n")
+        let columns = String(repeating: "l", count: columnCount)
+        return template(
+            selection,
+            template: "\\begin{table}[htbp]\n  \\centering\n  \\caption{Caption}\n  \\label{tab:label}\n  \\begin{tabular}{\(columns)}\n    \\hline\n\(body)\n    \\hline\n  \\end{tabular}\n\\end{table}",
+            target: "Caption"
+        )
+    }
+
+    private static func parsedTableRows(from selected: String) -> [[String]] {
+        let lines = selected
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return [] }
+        let delimiter = preferredTableDelimiter(for: lines)
+        return lines.map { line in
+            sanitizedTableLine(line)
+                .split(separator: delimiter, omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+    }
+
+    private static func sanitizedTableLine(_ line: String) -> String {
+        line.replacingOccurrences(of: #"\\\\\s*$"#, with: "", options: .regularExpression)
+    }
+
+    private static func preferredTableDelimiter(for lines: [String]) -> Character {
+        let candidates: [Character] = ["\t", "&", ","]
+        return candidates.max { lhs, rhs in
+            delimiterScore(lhs, in: lines) < delimiterScore(rhs, in: lines)
+        } ?? ","
+    }
+
+    private static func delimiterScore(_ delimiter: Character, in lines: [String]) -> Int {
+        lines.reduce(0) { total, line in total + line.filter { $0 == delimiter }.count }
     }
 
     private static func newlineInsertion(in source: NSString, cursorLocation: Int) -> String {
