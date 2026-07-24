@@ -1550,7 +1550,7 @@ struct SourceTextView: NSViewRepresentable {
             glyphOverlay?.needsDisplay = true
         }
 
-        private func scheduleDeferredHighlighting(after delay: TimeInterval = 0.45) {
+        private func scheduleDeferredHighlighting(after delay: TimeInterval = 0.18) {
             highlightTimer?.invalidate()
             let timer = Timer(
                 timeInterval: delay,
@@ -2298,7 +2298,7 @@ struct SourceTextView: NSViewRepresentable {
 
         func scheduleInitialHighlighting(attempt: Int = 0) {
             guard !completedWindowHighlight else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
                 guard let self, !self.completedWindowHighlight else { return }
                 guard let textView = self.textView, let window = textView.window else {
                     if attempt < 40 { self.scheduleInitialHighlighting(attempt: attempt + 1) }
@@ -2308,7 +2308,7 @@ struct SourceTextView: NSViewRepresentable {
                 // after the view first acquires a window. Commit TextStorage
                 // attributes after that transaction so the window compositor
                 // keeps the glyph layer.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak window] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak window] in
                     guard let self, let window, window === self.textView?.window else { return }
                     self.applyHighlighting()
                     self.completedWindowHighlight = true
@@ -2335,8 +2335,9 @@ struct SourceTextView: NSViewRepresentable {
                 size: parent.editorFontSize
             )
             let selectedRange = textView.selectedRange()
-            let source = textView.string as NSString
-            let targetRange = highlightingRange(for: source, in: textView)
+            let sourceString = textView.string
+            let source = sourceString as NSString
+            let targetRange = NSRange(location: 0, length: source.length)
             textView.textColor = palette.text
             textView.backgroundColor = palette.background
             textView.font = editorFont
@@ -2354,11 +2355,11 @@ struct SourceTextView: NSViewRepresentable {
                 .font: editorFont,
                 .foregroundColor: palette.text
             ], range: targetRange)
-            apply(#"\[[^\]\n]*\]"#, color: palette.optionalArgument, storage: storage, source: textView.string, range: targetRange)
-            apply(#"\\[A-Za-z@]+\*?"#, color: palette.command, storage: storage, source: textView.string, range: targetRange)
-            apply(#"\$[^$\n]*\$"#, color: palette.math, storage: storage, source: textView.string, range: targetRange)
-            apply(#"[{}]"#, color: palette.brace, storage: storage, source: textView.string, range: targetRange)
-            apply(#"(?<!\\)%.*$"#, color: palette.comment, storage: storage, source: textView.string, range: targetRange, options: [.anchorsMatchLines])
+            apply(SourceSyntaxHighlightPattern.optionalArgument, color: palette.optionalArgument, storage: storage, source: sourceString, range: targetRange)
+            apply(SourceSyntaxHighlightPattern.command, color: palette.command, storage: storage, source: sourceString, range: targetRange)
+            apply(SourceSyntaxHighlightPattern.math, color: palette.math, storage: storage, source: sourceString, range: targetRange)
+            apply(SourceSyntaxHighlightPattern.brace, color: palette.brace, storage: storage, source: sourceString, range: targetRange)
+            apply(SourceSyntaxHighlightPattern.comment, color: palette.comment, storage: storage, source: sourceString, range: targetRange)
             storage.endEditing()
             if NSMaxRange(selectedRange) <= source.length { textView.setSelectedRange(selectedRange) }
             textView.typingAttributes = [
@@ -2373,7 +2374,7 @@ struct SourceTextView: NSViewRepresentable {
             appliedStyleSignature = currentStyleSignature
             glyphOverlay?.palette = palette
             if completionOverlay?.isShowing == true { completionOverlay?.palette = palette }
-            textView.layoutManager?.invalidateDisplay(forCharacterRange: targetRange)
+            invalidateVisibleTextStorageDisplay(in: textView)
             textView.needsDisplay = true
             glyphOverlay?.synchronizeFrame()
             glyphOverlay?.needsDisplay = true
@@ -2417,33 +2418,43 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         private func apply(
-            _ pattern: String,
+            _ expression: NSRegularExpression,
             color: NSColor,
             storage: NSTextStorage,
             source: String,
-            range: NSRange,
-            options: NSRegularExpression.Options = []
+            range: NSRange
         ) {
-            guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
             for match in expression.matches(in: source, range: range) {
                 storage.addAttribute(.foregroundColor, value: color, range: match.range)
             }
         }
 
-        private func highlightingRange(for source: NSString, in textView: NSTextView) -> NSRange {
-            let full = NSRange(location: 0, length: source.length)
-            guard source.length > 80_000,
-                  let layoutManager = textView.layoutManager,
+        private func invalidateVisibleTextStorageDisplay(in textView: NSTextView) {
+            guard let layoutManager = textView.layoutManager,
                   let textContainer = textView.textContainer,
-                  let scrollView = textView.enclosingScrollView else { return full }
-            let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: scrollView.contentView.bounds, in: textContainer)
-            let visibleCharacterRange = layoutManager.characterRange(forGlyphRange: visibleGlyphRange, actualGlyphRange: nil)
-            let start = max(0, visibleCharacterRange.location - 2_000)
-            let end = min(source.length, NSMaxRange(visibleCharacterRange) + 2_000)
-            guard end > start else { return full }
-            return NSRange(location: start, length: end - start)
+                  let scrollView = textView.enclosingScrollView else {
+                textView.setNeedsDisplay(textView.visibleRect)
+                return
+            }
+            let visibleGlyphRange = layoutManager.glyphRange(
+                forBoundingRect: scrollView.contentView.bounds,
+                in: textContainer
+            )
+            let visibleCharacterRange = layoutManager.characterRange(
+                forGlyphRange: visibleGlyphRange,
+                actualGlyphRange: nil
+            )
+            layoutManager.invalidateDisplay(forCharacterRange: visibleCharacterRange)
         }
     }
+}
+
+private enum SourceSyntaxHighlightPattern {
+    static let optionalArgument = try! NSRegularExpression(pattern: #"\[[^\]\n]*\]"#)
+    static let command = try! NSRegularExpression(pattern: #"\\[A-Za-z@]+\*?"#)
+    static let math = try! NSRegularExpression(pattern: #"\$[^$\n]*\$"#)
+    static let brace = try! NSRegularExpression(pattern: #"[{}]"#)
+    static let comment = try! NSRegularExpression(pattern: #"(?<!\\)%.*$"#, options: [.anchorsMatchLines])
 }
 
 

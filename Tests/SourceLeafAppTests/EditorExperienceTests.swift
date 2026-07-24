@@ -423,6 +423,34 @@ import Testing
 }
 
 @MainActor
+@Test func syntaxHighlightingCoversTheWholeLargeDocumentBeforeScrolling() async throws {
+    let fillerLine = "Plain paragraph text that keeps the visible editor at the top of the file.\n"
+    let filler = String(repeating: fillerLine, count: 1_500)
+    let tail = "\\section{Late document section}\n% Tail comment should already be colored\n$E=mc^2$\n"
+    let source = filler + tail
+    let host = makeEditorHost(source: source, theme: .light, fontFamily: "Menlo", fontSize: 15)
+    defer { closeEditorHost(host) }
+    try await Task.sleep(for: .milliseconds(250))
+    let textView = try #require(findSourceTextView(in: host.view))
+    let coordinator = try #require(textView.delegate as? SourceTextView.Coordinator)
+    coordinator.applyHighlighting()
+    let storage = try #require(textView.textStorage)
+    let nsSource = source as NSString
+
+    let tailCommand = nsSource.range(of: "\\section", options: .backwards).location
+    let tailBody = nsSource.range(of: "Late document section").location
+    let tailComment = nsSource.range(of: "% Tail comment", options: .backwards).location
+    let tailMath = nsSource.range(of: "E=mc^2", options: .backwards).location
+
+    #expect(tailCommand > 80_000)
+    let commandColor = try foregroundColor(storage, at: tailCommand)
+    let bodyColor = try foregroundColor(storage, at: tailBody)
+    #expect(!colorsMatch(commandColor, bodyColor))
+    #expect(!colorsMatch(try foregroundColor(storage, at: tailComment), bodyColor))
+    #expect(!colorsMatch(try foregroundColor(storage, at: tailMath), bodyColor))
+}
+
+@MainActor
 @Test func editorSelectionCaretAndHorizontalGeometryRemainReadable() async throws {
     let source = "\\section{A very long heading that should wrap instead of moving beneath the line number gutter}"
     let host = makeEditorHost(source: source, theme: .light, fontFamily: "Menlo", fontSize: 16)
