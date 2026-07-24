@@ -27,7 +27,7 @@ final class AppRegressionXCTests: XCTestCase {
             sendBehavior: .enter,
             hasMarkedText: false
         ))
-        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
+        XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
             characters: "\r",
             modifierFlags: [],
             sendBehavior: .enter,
@@ -49,6 +49,18 @@ final class AppRegressionXCTests: XCTestCase {
             sendBehavior: .shiftEnter,
             hasMarkedText: false,
             compositionInputSourceActive: true
+        ))
+        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
+            characters: "\r",
+            modifierFlags: [.shift],
+            sendBehavior: .enter,
+            hasMarkedText: false
+        ))
+        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
+            characters: "\r",
+            modifierFlags: [],
+            sendBehavior: .shiftEnter,
+            hasMarkedText: false
         ))
     }
 
@@ -133,7 +145,7 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
-    func testComposerReturnDoesNotSendWhenTheCurrentInputSourceUsesReturnToCommitCandidates() {
+    func testComposerReturnRespectsEnterToSendWhenInputSourceIsIdle() {
         let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         textView.inputSourcePrefersReturnCommitOverride = true
         textView.sendBehavior = .enter
@@ -146,7 +158,7 @@ final class AppRegressionXCTests: XCTestCase {
 
         textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
 
-        XCTAssertFalse(didSend)
+        XCTAssertTrue(didSend)
     }
 
     func testFindMatchesReturnEveryOccurrenceForPersistentHighlighting() {

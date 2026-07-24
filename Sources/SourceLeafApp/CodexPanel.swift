@@ -850,7 +850,6 @@ final class ComposerNSTextView: NSTextView {
         guard !hasMarkedText else { return false }
         guard !recentlyCommittedMarkedText else { return false }
         let shift = modifierFlags.contains(.shift)
-        if compositionInputSourceActive && !shift { return false }
         if recentlyTypedWithCompositionInputSource && !shift { return false }
         return sendBehavior == .enter ? !shift : shift
     }

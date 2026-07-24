@@ -18,7 +18,7 @@ import Testing
 }
 
 @MainActor
-@Test func composerReturnDoesNotSendWhileInputMethodHasMarkedText() {
+@Test func composerReturnRespectsSendBehaviorUnlessInputMethodIsComposing() {
     #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
         characters: "\r",
         modifierFlags: [],
@@ -32,7 +32,7 @@ import Testing
         hasMarkedText: false,
         recentlyCommittedMarkedText: true
     ))
-    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
+    #expect(ComposerNSTextView.shouldTreatReturnAsSend(
         characters: "\r",
         modifierFlags: [],
         sendBehavior: .enter,
