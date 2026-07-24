@@ -1217,6 +1217,7 @@ struct SourceTextView: NSViewRepresentable {
         private var applyingSmartPairEdit = false
         private var applyingLineShiftEdit = false
         private var keyEventMonitor: Any?
+        private var lastCompositionLikeEditDate = Date.distantPast
         private var lastFindHighlightRanges: [NSRange] = []
         private var lastActiveFindHighlightRange: NSRange?
         var lastLocallyEmittedText: String?
@@ -1325,10 +1326,15 @@ struct SourceTextView: NSViewRepresentable {
                 protectedSelectionEcho = parent.selection
             }
             guard !textView.hasMarkedText() else {
+                lastCompositionLikeEditDate = Date()
+                hideCompletionOverlay()
                 ruler?.needsDisplay = true
                 glyphOverlay?.restartCaretBlink()
                 glyphOverlay?.needsDisplay = true
                 return
+            }
+            if inputSourcePrefersReturnCommit(in: textView) {
+                lastCompositionLikeEditDate = Date()
             }
             lastLocallyEmittedText = textView.string
             parent.text = textView.string
@@ -1382,6 +1388,7 @@ struct SourceTextView: NSViewRepresentable {
             normalizeCompletionPlaceholderSelectionIfNeeded()
             lastLocallyEmittedSelection = textView.selectedRange()
             guard !textView.hasMarkedText() else {
+                lastCompositionLikeEditDate = Date()
                 hideCompletionOverlay()
                 glyphOverlay?.selectionDidChange()
                 return
@@ -1404,6 +1411,10 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if shouldLetInputMethodHandleCompletionCommand(commandSelector, in: textView) {
+                hideCompletionOverlay()
+                return false
+            }
             if handleCompletionCommand(commandSelector, in: textView) { return true }
             switch commandSelector {
             case #selector(NSResponder.complete(_:)):
@@ -1774,6 +1785,15 @@ struct SourceTextView: NSViewRepresentable {
 
         private func handleCompletionCommand(_ commandSelector: Selector, in textView: NSTextView) -> Bool {
             guard let state = activeCompletionState, completionOverlay?.isShowing == true else { return false }
+            guard SourceCompletionCommandPolicy.shouldHandle(
+                commandSelector,
+                hasMarkedText: textView.hasMarkedText(),
+                inputSourcePrefersReturnCommit: inputSourcePrefersReturnCommit(in: textView),
+                recentlyTypedWithCompositionInputSource: recentlyTypedWithCompositionInputSource
+            ) else {
+                hideCompletionOverlay()
+                return false
+            }
             switch commandSelector {
             case #selector(NSResponder.moveDown(_:)):
                 completionOverlay?.moveSelection(delta: 1)
@@ -1794,6 +1814,32 @@ struct SourceTextView: NSViewRepresentable {
             default:
                 return false
             }
+        }
+
+        private func shouldLetInputMethodHandleCompletionCommand(_ commandSelector: Selector, in textView: NSTextView) -> Bool {
+            guard activeCompletionState != nil,
+                  completionOverlay?.isShowing == true else { return false }
+            return !SourceCompletionCommandPolicy.shouldHandle(
+                commandSelector,
+                hasMarkedText: textView.hasMarkedText(),
+                inputSourcePrefersReturnCommit: inputSourcePrefersReturnCommit(in: textView),
+                recentlyTypedWithCompositionInputSource: recentlyTypedWithCompositionInputSource
+            )
+        }
+
+        private var recentlyTypedWithCompositionInputSource: Bool {
+            Date().timeIntervalSince(lastCompositionLikeEditDate) < SourceCompletionCommandPolicy.compositionTypingProtectionInterval
+        }
+
+        private func inputSourcePrefersReturnCommit(in textView: NSTextView) -> Bool {
+            if ComposerNSTextView.currentInputSourcePrefersReturnCommit() {
+                return true
+            }
+            if let sources = textView.inputContext?.keyboardInputSources,
+               sources.contains(where: { ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: $0) }) {
+                return true
+            }
+            return false
         }
 
         func acceptCompletionFromOverlay(at index: Int) {
@@ -2195,6 +2241,37 @@ struct SourceTextView: NSViewRepresentable {
     }
 }
 
+
+enum SourceCompletionCommandPolicy {
+    nonisolated static let compositionTypingProtectionInterval: TimeInterval = 5.0
+
+    nonisolated static func shouldHandle(
+        _ commandSelector: Selector,
+        hasMarkedText: Bool,
+        inputSourcePrefersReturnCommit: Bool,
+        recentlyTypedWithCompositionInputSource: Bool
+    ) -> Bool {
+        guard !hasMarkedText else { return false }
+        if isNewlineCommand(commandSelector),
+           inputSourcePrefersReturnCommit || recentlyTypedWithCompositionInputSource {
+            return false
+        }
+        return isCompletionNavigationOrAcceptCommand(commandSelector)
+    }
+
+    nonisolated static func isNewlineCommand(_ commandSelector: Selector) -> Bool {
+        commandSelector == #selector(NSResponder.insertNewline(_:))
+            || commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))
+    }
+
+    private nonisolated static func isCompletionNavigationOrAcceptCommand(_ commandSelector: Selector) -> Bool {
+        commandSelector == #selector(NSResponder.moveDown(_:))
+            || commandSelector == #selector(NSResponder.moveUp(_:))
+            || commandSelector == #selector(NSResponder.insertTab(_:))
+            || isNewlineCommand(commandSelector)
+            || commandSelector == #selector(NSResponder.cancelOperation(_:))
+    }
+}
 
 struct LaTeXCompletionState: Equatable {
     var replacementRange: NSRange

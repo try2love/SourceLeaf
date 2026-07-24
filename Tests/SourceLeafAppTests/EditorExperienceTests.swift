@@ -189,6 +189,39 @@ import Testing
     #expect(!suggestions.map(\.insertion).contains("\\begin{}"))
 }
 
+@Test func latexCompletionEnterDoesNotStealInputMethodCandidateConfirmation() {
+    #expect(!SourceCompletionCommandPolicy.shouldHandle(
+        #selector(NSResponder.insertNewline(_:)),
+        hasMarkedText: true,
+        inputSourcePrefersReturnCommit: false,
+        recentlyTypedWithCompositionInputSource: false
+    ))
+    #expect(!SourceCompletionCommandPolicy.shouldHandle(
+        #selector(NSResponder.insertNewline(_:)),
+        hasMarkedText: false,
+        inputSourcePrefersReturnCommit: true,
+        recentlyTypedWithCompositionInputSource: false
+    ))
+    #expect(!SourceCompletionCommandPolicy.shouldHandle(
+        #selector(NSResponder.insertNewline(_:)),
+        hasMarkedText: false,
+        inputSourcePrefersReturnCommit: false,
+        recentlyTypedWithCompositionInputSource: true
+    ))
+    #expect(SourceCompletionCommandPolicy.shouldHandle(
+        #selector(NSResponder.insertTab(_:)),
+        hasMarkedText: false,
+        inputSourcePrefersReturnCommit: true,
+        recentlyTypedWithCompositionInputSource: true
+    ))
+    #expect(SourceCompletionCommandPolicy.shouldHandle(
+        #selector(NSResponder.insertNewline(_:)),
+        hasMarkedText: false,
+        inputSourcePrefersReturnCommit: false,
+        recentlyTypedWithCompositionInputSource: false
+    ))
+}
+
 @Test func latexCompletionSuggestsCitationsLabelsAndGraphicsInArguments() throws {
     let context = LaTeXCompletionContext(
         index: ProjectIndex(
