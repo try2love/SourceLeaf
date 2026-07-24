@@ -1800,6 +1800,63 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBareBackslashCompletionDoesNotBlockLargeProjectEditor() async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-xctest-backslash-latency-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let project = support.appendingPathComponent("项目", isDirectory: true)
+        let appSupport = support.appendingPathComponent("应用状态", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let body = Array(
+            repeating: "\\section{Backslash Stress} Some source with \\cite{paper} and \\label{sec:stress}.",
+            count: 8_000
+        ).joined(separator: "\n")
+        try Data("\\documentclass{article}\n\\begin{document}\n\(body)\n\\end{document}\n".utf8)
+            .write(to: project.appendingPathComponent("main.tex"), options: .atomic)
+        try Data("@article{paper,title={Stress}}\n".utf8)
+            .write(to: project.appendingPathComponent("refs.bib"), options: .atomic)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SourceLeaf.xctest-backslash-latency.\(UUID().uuidString)"))
+        let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: defaults)
+        model.openProject(project)
+        model.configuration.build.autoBuild = false
+        model.configuration.autoSave = false
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        let view = NSHostingView(rootView: SourcePanel().environmentObject(model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(450))
+
+        let textView = try XCTUnwrap(findSourceTextView(in: view))
+        window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: window)))
+        let keyDownElapsed = started.duration(to: clock.now)
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual((textView.string as NSString).substring(with: NSRange(location: 0, length: 1)), "\\")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 1, length: 0))
+        XCTAssertEqual(model.selectedRange, NSRange(location: 1, length: 0))
+        XCTAssertLessThan(keyDownElapsed, .milliseconds(500), "Bare backslash keyDown blocked for \(keyDownElapsed)")
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+    }
+
+    @MainActor
     func testApplicationKeyEventsKeepCaretMovingInsideLargeProject() async throws {
         let support = FileManager.default.temporaryDirectory
             .appendingPathComponent("SourceLeaf-xctest-app-event-caret-\(UUID().uuidString)", isDirectory: true)

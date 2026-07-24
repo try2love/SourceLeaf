@@ -1333,9 +1333,6 @@ struct SourceTextView: NSViewRepresentable {
                 glyphOverlay?.needsDisplay = true
                 return
             }
-            if inputSourcePrefersReturnCommit(in: textView) {
-                lastCompositionLikeEditDate = Date()
-            }
             lastLocallyEmittedText = textView.string
             parent.text = textView.string
             scheduleDeferredHighlighting()
@@ -1788,7 +1785,6 @@ struct SourceTextView: NSViewRepresentable {
             guard SourceCompletionCommandPolicy.shouldHandle(
                 commandSelector,
                 hasMarkedText: textView.hasMarkedText(),
-                inputSourcePrefersReturnCommit: inputSourcePrefersReturnCommit(in: textView),
                 recentlyTypedWithCompositionInputSource: recentlyTypedWithCompositionInputSource
             ) else {
                 hideCompletionOverlay()
@@ -1822,24 +1818,12 @@ struct SourceTextView: NSViewRepresentable {
             return !SourceCompletionCommandPolicy.shouldHandle(
                 commandSelector,
                 hasMarkedText: textView.hasMarkedText(),
-                inputSourcePrefersReturnCommit: inputSourcePrefersReturnCommit(in: textView),
                 recentlyTypedWithCompositionInputSource: recentlyTypedWithCompositionInputSource
             )
         }
 
         private var recentlyTypedWithCompositionInputSource: Bool {
             Date().timeIntervalSince(lastCompositionLikeEditDate) < SourceCompletionCommandPolicy.compositionTypingProtectionInterval
-        }
-
-        private func inputSourcePrefersReturnCommit(in textView: NSTextView) -> Bool {
-            if ComposerNSTextView.currentInputSourcePrefersReturnCommit() {
-                return true
-            }
-            if let sources = textView.inputContext?.keyboardInputSources,
-               sources.contains(where: { ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: $0) }) {
-                return true
-            }
-            return false
         }
 
         func acceptCompletionFromOverlay(at index: Int) {
@@ -2248,12 +2232,11 @@ enum SourceCompletionCommandPolicy {
     nonisolated static func shouldHandle(
         _ commandSelector: Selector,
         hasMarkedText: Bool,
-        inputSourcePrefersReturnCommit: Bool,
         recentlyTypedWithCompositionInputSource: Bool
     ) -> Bool {
         guard !hasMarkedText else { return false }
         if isNewlineCommand(commandSelector),
-           inputSourcePrefersReturnCommit || recentlyTypedWithCompositionInputSource {
+           recentlyTypedWithCompositionInputSource {
             return false
         }
         return isCompletionNavigationOrAcceptCommand(commandSelector)
