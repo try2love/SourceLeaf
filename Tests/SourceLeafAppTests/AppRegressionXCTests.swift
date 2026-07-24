@@ -187,6 +187,34 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testUndoAfterAcceptingLatexCompletionRestoresTypedPrefixAndCaret() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [("\\", 42), ("s", 1), ("e", 14), ("c", 8)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+
+        textView.undoManager?.undo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\sec")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 0))
+        XCTAssertEqual(state.text, "\\sec")
+        XCTAssertEqual(state.selection, NSRange(location: 4, length: 0))
+    }
+
+    @MainActor
     func testTabJumpsBetweenLatexCompletionPlaceholders() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
@@ -319,6 +347,38 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.string, "\\begin{figure}\n\n\\end{figure}")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
         XCTAssertFalse(overlay.isShowing)
+    }
+
+    @MainActor
+    func testUndoAfterBeginEnvironmentCompletionRemovesMatchingEndEnvironmentTogether() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        for (character, keyCode) in [
+            ("\\", 42), ("b", 11), ("e", 14), ("g", 5), ("i", 34), ("n", 45),
+            ("{", 33), ("f", 3), ("i", 34), ("g", 5)
+        ] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(textView.string, "\\begin{figure}\n\n\\end{figure}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
+
+        textView.undoManager?.undo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\begin{fig}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
+        XCTAssertEqual(state.text, "\\begin{fig}")
+        XCTAssertEqual(state.selection, NSRange(location: 10, length: 0))
     }
 
     @MainActor

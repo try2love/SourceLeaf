@@ -1418,8 +1418,21 @@ struct SourceTextView: NSViewRepresentable {
             let candidate = state.candidates[state.selectedIndex]
             guard NSMaxRange(state.replacementRange) <= (textView.string as NSString).length else { return }
             let insertion = candidate.insertion
+            let originalSelection = textView.selectedRange()
+            let undoManager = textView.undoManager
             var caret = NSRange(location: state.replacementRange.location + Self.caretOffset(afterInserting: insertion), length: 0)
+            textView.breakUndoCoalescing()
+            undoManager?.beginUndoGrouping()
+            undoManager?.registerUndo(withTarget: self) { target in
+                MainActor.assumeIsolated {
+                    target.restoreSelection(originalSelection, opposite: caret)
+                }
+            }
             applyingCompletionEdit = true
+            defer {
+                applyingCompletionEdit = false
+                undoManager?.endUndoGrouping()
+            }
             textView.insertText(insertion, replacementRange: state.replacementRange)
             if state.argumentCommand == "begin" {
                 caret = insertMatchingEndEnvironmentIfNeeded(
@@ -1436,7 +1449,6 @@ struct SourceTextView: NSViewRepresentable {
             }
             textView.setSelectedRange(caret)
             textView.scrollRangeToVisible(caret)
-            applyingCompletionEdit = false
             hideCompletionOverlay()
             commitSelectionToBinding()
         }
