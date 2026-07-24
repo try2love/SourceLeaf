@@ -21,6 +21,7 @@ final class AppRegressionXCTests: XCTestCase {
             hasMarkedText: false,
             recentlyCommittedMarkedText: true
         ))
+        XCTAssertLessThanOrEqual(ComposerNSTextView.markedTextCommitProtectionInterval, 0.25)
         XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
             characters: "\r",
             modifierFlags: [],
@@ -34,15 +35,6 @@ final class AppRegressionXCTests: XCTestCase {
             hasMarkedText: false,
             compositionInputSourceActive: true
         ))
-        XCTAssertFalse(ComposerNSTextView.shouldTreatReturnAsSend(
-            characters: "\r",
-            modifierFlags: [],
-            sendBehavior: .enter,
-            hasMarkedText: false,
-            recentlyTypedWithCompositionInputSource: true
-        ))
-        XCTAssertGreaterThanOrEqual(ComposerNSTextView.markedTextCommitProtectionInterval, 2.0)
-        XCTAssertGreaterThanOrEqual(ComposerNSTextView.compositionTypingProtectionInterval, 5.0)
         XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
             characters: "\r",
             modifierFlags: [.shift],

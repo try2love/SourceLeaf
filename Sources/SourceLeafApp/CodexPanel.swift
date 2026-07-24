@@ -420,9 +420,12 @@ struct CodexPanel: View {
     }
 
     private func selectedMenuItemLabel(_ title: String) -> some View {
-        Label(title, systemImage: "circle.fill")
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.green, .primary)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 7, height: 7)
+            Text(title)
+        }
     }
 
     private var composer: some View {
@@ -761,7 +764,7 @@ final class ComposerNSTextView: NSTextView {
     var onSend: (() -> Bool)?
     var inputSourcePrefersReturnCommitOverride: Bool?
     private var lastMarkedTextCommitDate = Date.distantPast
-    private var lastCompositionLikeKeyDate = Date.distantPast
+    private var hasSeenMarkedTextInCurrentComposition = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
@@ -773,8 +776,12 @@ final class ComposerNSTextView: NSTextView {
     }
 
     override func unmarkText() {
+        let wasComposing = hasMarkedText() || hasSeenMarkedTextInCurrentComposition
         super.unmarkText()
-        lastMarkedTextCommitDate = Date()
+        if wasComposing {
+            lastMarkedTextCommitDate = Date()
+            hasSeenMarkedTextInCurrentComposition = false
+        }
     }
 
     override func setMarkedText(
@@ -782,25 +789,17 @@ final class ComposerNSTextView: NSTextView {
         selectedRange: NSRange,
         replacementRange: NSRange
     ) {
-        lastMarkedTextCommitDate = Date()
-        lastCompositionLikeKeyDate = Date()
+        hasSeenMarkedTextInCurrentComposition = true
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
     }
 
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
-        if inputContextPrefersReturnCommit() {
-            lastCompositionLikeKeyDate = Date()
-        }
+        let wasComposing = hasMarkedText() || hasSeenMarkedTextInCurrentComposition
         super.insertText(insertString, replacementRange: replacementRange)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        let compositionInputSourceActive = inputContextPrefersReturnCommit()
-        if Self.isPlainPrintableInput(event),
-           compositionInputSourceActive {
-            lastCompositionLikeKeyDate = Date()
+        if wasComposing {
+            lastMarkedTextCommitDate = Date()
+            hasSeenMarkedTextInCurrentComposition = false
         }
-        super.keyDown(with: event)
     }
 
     override func doCommand(by commandSelector: Selector) {
@@ -815,8 +814,7 @@ final class ComposerNSTextView: NSTextView {
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
             recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < Self.markedTextCommitProtectionInterval,
-            compositionInputSourceActive: inputContextPrefersReturnCommit(),
-            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < Self.compositionTypingProtectionInterval
+            compositionInputSourceActive: inputContextPrefersReturnCommit()
         ), onSend?() == true {
             return
         }
@@ -843,19 +841,16 @@ final class ComposerNSTextView: NSTextView {
         sendBehavior: ChatSendBehavior,
         hasMarkedText: Bool,
         recentlyCommittedMarkedText: Bool = false,
-        compositionInputSourceActive: Bool = false,
-        recentlyTypedWithCompositionInputSource: Bool = false
+        compositionInputSourceActive: Bool = false
     ) -> Bool {
         guard characters == "\r" || characters == "\n" else { return false }
         guard !hasMarkedText else { return false }
         guard !recentlyCommittedMarkedText else { return false }
         let shift = modifierFlags.contains(.shift)
-        if recentlyTypedWithCompositionInputSource && !shift { return false }
         return sendBehavior == .enter ? !shift : shift
     }
 
-    nonisolated static let markedTextCommitProtectionInterval: TimeInterval = 2.5
-    nonisolated static let compositionTypingProtectionInterval: TimeInterval = 5.0
+    nonisolated static let markedTextCommitProtectionInterval: TimeInterval = 0.18
 
     nonisolated static func isNewlineCommand(_ commandSelector: Selector) -> Bool {
         commandSelector == #selector(NSResponder.insertNewline(_:))
@@ -924,13 +919,6 @@ final class ComposerNSTextView: NSTextView {
         return !id.contains(".keylayout.")
     }
 
-    private static func isPlainPrintableInput(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-              let characters = event.characters,
-              characters.count == 1,
-              let scalar = characters.unicodeScalars.first else { return false }
-        return !CharacterSet.controlCharacters.contains(scalar)
-    }
 }
 
 struct ChatBubble: View {

@@ -39,13 +39,6 @@ import Testing
         hasMarkedText: false,
         compositionInputSourceActive: true
     ))
-    #expect(!ComposerNSTextView.shouldTreatReturnAsSend(
-        characters: "\r",
-        modifierFlags: [],
-        sendBehavior: .enter,
-        hasMarkedText: false,
-        recentlyTypedWithCompositionInputSource: true
-    ))
     #expect(ComposerNSTextView.shouldTreatReturnAsSend(
         characters: "\r",
         modifierFlags: [],
