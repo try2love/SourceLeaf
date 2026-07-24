@@ -2103,26 +2103,28 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         private func completionAnchorRect(for characterIndex: Int, in textView: NSTextView) -> NSRect? {
-            guard let scrollView = textView.enclosingScrollView,
-                  let container = completionOverlay?.superview,
+            guard let container = completionOverlay?.superview,
                   let layoutManager = textView.layoutManager,
                   let textContainer = textView.textContainer else { return nil }
             layoutManager.ensureLayout(for: textContainer)
-            let visible = scrollView.contentView.bounds
-            let origin = NSPoint(
-                x: textView.textContainerOrigin.x - visible.minX,
-                y: textView.textContainerOrigin.y - visible.minY
-            )
             let rect: NSRect
             let length = (textView.string as NSString).length
             if characterIndex < length {
                 let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
                 rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+            } else if length > 0 {
+                let glyphIndex = layoutManager.glyphIndexForCharacter(at: length - 1)
+                let previousRect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+                rect = NSRect(x: previousRect.maxX, y: previousRect.minY, width: 1, height: previousRect.height)
             } else {
                 rect = layoutManager.extraLineFragmentRect
             }
-            let inClip = rect.offsetBy(dx: origin.x, dy: origin.y)
-            return scrollView.contentView.convert(inClip, to: container)
+            guard rect.origin.x.isFinite,
+                  rect.origin.y.isFinite,
+                  rect.size.width.isFinite,
+                  rect.size.height.isFinite else { return nil }
+            let inTextView = rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
+            return textView.convert(inTextView, to: container)
         }
 
         private func currentPalette() -> SourceEditorPalette {
@@ -2497,7 +2499,9 @@ final class LaTeXCompletionOverlayView: NSView {
         let x = min(max(minimumX, anchor.minX), maxX)
         let belowY = anchor.maxY + 5
         let aboveY = anchor.minY - height - 5
-        let y = belowY + height <= containerBounds.maxY ? belowY : max(8, aboveY)
+        let preferredY = belowY + height <= containerBounds.maxY ? belowY : aboveY
+        let maxY = max(CGFloat(8), containerBounds.maxY - height - 8)
+        let y = min(max(CGFloat(8), preferredY), maxY)
         frame = NSRect(x: x, y: y, width: width, height: height)
         isHidden = self.candidates.isEmpty
         needsDisplay = true

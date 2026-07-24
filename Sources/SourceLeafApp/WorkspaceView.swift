@@ -21,6 +21,7 @@ struct WorkspaceView: View {
             }
         }
         .toolbar { workspaceToolbar }
+        .background(MainWindowCloseGuard(model: model).frame(width: 0, height: 0))
         .alert("SourceLeaf", isPresented: Binding(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
@@ -99,6 +100,69 @@ struct WorkspaceView: View {
                 .sourceLeafFont(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+        }
+    }
+}
+
+private struct MainWindowCloseGuard: NSViewRepresentable {
+    @ObservedObject var model: AppModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model)
+    }
+
+    func makeNSView(context: Context) -> WindowCloseGuardHostView {
+        let view = WindowCloseGuardHostView()
+        view.onWindowChanged = { [weak coordinator = context.coordinator] window in
+            coordinator?.install(on: window)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: WindowCloseGuardHostView, context: Context) {
+        context.coordinator.model = model
+        if let window = view.window {
+            context.coordinator.install(on: window)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSWindowDelegate {
+        weak var model: AppModel?
+        weak var installedWindow: NSWindow?
+        weak var originalDelegate: NSWindowDelegate?
+
+        init(model: AppModel) {
+            self.model = model
+        }
+
+        func install(on window: NSWindow) {
+            guard installedWindow !== window else { return }
+            originalDelegate = window.delegate
+            installedWindow = window
+            window.delegate = self
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if originalDelegate?.windowShouldClose?(sender) == false {
+                return false
+            }
+            return model?.requestMainWindowClose() ?? true
+        }
+
+        func windowWillClose(_ notification: Notification) {
+            originalDelegate?.windowWillClose?(notification)
+        }
+    }
+}
+
+private final class WindowCloseGuardHostView: NSView {
+    var onWindowChanged: ((NSWindow) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window {
+            onWindowChanged?(window)
         }
     }
 }

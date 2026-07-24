@@ -1245,6 +1245,35 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBackslashCompletionAtDocumentEndStaysVisibleNearBottom() async throws {
+        let body = (1...1_200)
+            .map { "Line \($0) Some paragraph text for bottom completion anchor testing." }
+            .joined(separator: "\n")
+        let state = SourceTypingState(text: body, selection: NSRange(location: (body as NSString).length, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        let end = (body as NSString).length
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+        try await Task.sleep(for: .milliseconds(120))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(100))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        let bounds = try XCTUnwrap(overlay.superview?.bounds)
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertGreaterThanOrEqual(overlay.frame.minY, bounds.minY)
+        XCTAssertLessThanOrEqual(overlay.frame.maxY, bounds.maxY)
+        XCTAssertGreaterThanOrEqual(overlay.frame.minX, 44)
+        XCTAssertLessThanOrEqual(overlay.frame.maxX, bounds.maxX)
+    }
+
+    @MainActor
     func testBackslashCompletionDoesNotAcceptWhenClickingOverlayPadding() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
@@ -2426,26 +2455,25 @@ private func findCompletionOverlay(in view: NSView) -> LaTeXCompletionOverlayVie
 
 @MainActor
 private func completionAnchorForCurrentSelection(in textView: NSTextView, overlay: LaTeXCompletionOverlayView) -> NSRect? {
-    guard let scrollView = textView.enclosingScrollView,
-          let container = overlay.superview,
+    guard let container = overlay.superview,
           let layoutManager = textView.layoutManager,
           let textContainer = textView.textContainer else { return nil }
     let location = textView.selectedRange().location
     layoutManager.ensureLayout(for: textContainer)
-    let visible = scrollView.contentView.bounds
-    let origin = NSPoint(
-        x: textView.textContainerOrigin.x - visible.minX,
-        y: textView.textContainerOrigin.y - visible.minY
-    )
     let length = (textView.string as NSString).length
     let rect: NSRect
     if location < length {
         let glyphIndex = layoutManager.glyphIndexForCharacter(at: location)
         rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+    } else if length > 0 {
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: length - 1)
+        let previousRect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+        rect = NSRect(x: previousRect.maxX, y: previousRect.minY, width: 1, height: previousRect.height)
     } else {
         rect = layoutManager.extraLineFragmentRect
     }
-    return scrollView.contentView.convert(rect.offsetBy(dx: origin.x, dy: origin.y), to: container)
+    let inTextView = rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
+    return textView.convert(inTextView, to: container)
 }
 
 @MainActor

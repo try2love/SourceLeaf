@@ -130,6 +130,7 @@ final class AppModel: ObservableObject {
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
     private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
     private var currentProjectStateKey: String?
+    private var quitConfirmationSatisfied = false
     private let supportDirectoryOverride: URL?
     private let defaults: UserDefaults
     private static let lastProjectPathKey = "SourceLeaf.lastProjectPath"
@@ -223,7 +224,23 @@ final class AppModel: ObservableObject {
     }
 
     func applicationTerminationReply() -> NSApplication.TerminateReply {
-        guard hasUnsavedChanges, !configuration.autoSave else { return .terminateNow }
+        quitConfirmationSatisfied || confirmQuitIfNeeded() ? .terminateNow : .terminateCancel
+    }
+
+    func requestMainWindowClose() -> Bool {
+        guard confirmQuitIfNeeded() else { return false }
+        DispatchQueue.main.async {
+            NSApplication.shared.terminate(nil)
+        }
+        return false
+    }
+
+    private func confirmQuitIfNeeded() -> Bool {
+        if quitConfirmationSatisfied { return true }
+        guard hasUnsavedChanges, !configuration.autoSave else {
+            quitConfirmationSatisfied = true
+            return true
+        }
         let alert = NSAlert()
         alert.messageText = L10n.text("save.quitTitle")
         alert.informativeText = L10n.text("save.quitMessage")
@@ -234,11 +251,13 @@ final class AppModel: ObservableObject {
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             saveNow()
-            return hasUnsavedChanges ? .terminateCancel : .terminateNow
+            quitConfirmationSatisfied = !hasUnsavedChanges
+            return quitConfirmationSatisfied
         case .alertSecondButtonReturn:
-            return .terminateNow
+            quitConfirmationSatisfied = true
+            return true
         default:
-            return .terminateCancel
+            return false
         }
     }
 
