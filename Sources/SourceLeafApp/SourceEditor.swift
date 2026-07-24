@@ -1399,6 +1399,7 @@ struct SourceTextView: NSViewRepresentable {
         private(set) var appliedStyleSignature: String?
         private var lastAppliedCommandID: UUID?
         private var resettingHorizontalScroll = false
+        private var lastObservedClipViewOrigin: NSPoint?
         private var completedWindowHighlight = false
         private var selectionSyncTimer: Timer?
         private var highlightTimer: Timer?
@@ -1442,6 +1443,7 @@ struct SourceTextView: NSViewRepresentable {
 
         func observeScrollView(_ scrollView: NSScrollView) {
             scrollView.contentView.postsBoundsChangedNotifications = true
+            lastObservedClipViewOrigin = scrollView.contentView.bounds.origin
             NotificationCenter.default.addObserver(
                 self,
                 selector: #selector(scrollBoundsDidChange(_:)),
@@ -1492,18 +1494,33 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
+            guard let clipView = notification.object as? NSClipView else { return }
+            let previousOrigin = lastObservedClipViewOrigin ?? clipView.bounds.origin
+            var attemptedHorizontalOffset = false
+            var resetHorizontalOnly = false
             if !resettingHorizontalScroll,
-               let clipView = notification.object as? NSClipView,
                abs(clipView.bounds.origin.x) > 0.5 {
+                attemptedHorizontalOffset = true
                 resettingHorizontalScroll = true
                 clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
                 clipView.enclosingScrollView?.reflectScrolledClipView(clipView)
                 resettingHorizontalScroll = false
+                resetHorizontalOnly = true
             }
+            let currentOrigin = clipView.bounds.origin
+            let verticalChanged = abs(currentOrigin.y - previousOrigin.y) > 0.5
+            let horizontalChanged = attemptedHorizontalOffset || abs(currentOrigin.x - previousOrigin.x) > 0.5
+            lastObservedClipViewOrigin = currentOrigin
             ruler?.scrollPositionDidChange()
             glyphOverlay?.synchronizeFrame()
             glyphOverlay?.needsDisplay = true
-            if completionOverlay?.isShowing == true { updateCompletionOverlayIfNeeded() }
+            if completionOverlay?.isShowing == true {
+                if verticalChanged {
+                    hideCompletionOverlay()
+                } else if horizontalChanged || resetHorizontalOnly {
+                    updateCompletionOverlayIfNeeded()
+                }
+            }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -1527,7 +1544,7 @@ struct SourceTextView: NSViewRepresentable {
             parent.text = textView.string
             scheduleDeferredHighlighting()
             commitSelectionToBinding()
-            updateCompletionOverlayIfNeeded()
+            updateCompletionOverlayIfNeeded(allowOpening: true)
             ruler?.needsDisplay = true
             glyphOverlay?.restartCaretBlink()
             glyphOverlay?.needsDisplay = true
@@ -1580,7 +1597,11 @@ struct SourceTextView: NSViewRepresentable {
                 glyphOverlay?.selectionDidChange()
                 return
             }
-            updateCompletionOverlayIfNeeded()
+            if activeCompletionState != nil {
+                updateCompletionOverlayIfNeeded()
+            } else {
+                completionOverlay?.hide()
+            }
             if textView.selectedRange().length == 0 {
                 commitSelectionToBinding()
             } else {
@@ -1903,7 +1924,7 @@ struct SourceTextView: NSViewRepresentable {
             completionOverlay?.hide()
         }
 
-        private func updateCompletionOverlayIfNeeded() {
+        private func updateCompletionOverlayIfNeeded(allowOpening: Bool = false) {
             guard !applyingCompletionEdit,
                   let textView,
                   textView.window?.firstResponder === textView,
@@ -1912,7 +1933,16 @@ struct SourceTextView: NSViewRepresentable {
                 hideCompletionOverlay()
                 return
             }
+            let previousRange = activeCompletionState?.replacementRange
+            guard previousRange != nil || allowOpening else {
+                completionOverlay?.hide()
+                return
+            }
             guard let state = completionState(in: textView), !state.candidates.isEmpty else {
+                hideCompletionOverlay()
+                return
+            }
+            if let previousRange, previousRange.location != state.replacementRange.location, !allowOpening {
                 hideCompletionOverlay()
                 return
             }
@@ -2478,7 +2508,7 @@ final class LaTeXCompletionOverlayView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? {
-        isShowing && bounds.contains(point) ? self : nil
+        isShowing && candidateListRect.contains(point) ? self : nil
     }
 
     func show(candidates: [LaTeXCompletionCandidate], selectedIndex: Int, anchor: NSRect, palette: SourceEditorPalette) {
@@ -2546,12 +2576,7 @@ final class LaTeXCompletionOverlayView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         let visibleCandidates = visibleCandidateSlice()
         guard !visibleCandidates.isEmpty else { return }
-        let listRect = NSRect(
-            x: 5,
-            y: 5,
-            width: max(0, bounds.width - 10),
-            height: CGFloat(visibleCandidates.count) * rowHeight
-        )
+        let listRect = candidateListRect
         guard listRect.contains(point) else { return }
         let row = Int(floor((point.y - listRect.minY) / rowHeight))
         guard row >= 0, row < visibleCandidates.count else { return }
@@ -2590,6 +2615,16 @@ final class LaTeXCompletionOverlayView: NSView {
         let start = min(max(0, firstVisibleIndex), max(0, candidates.count - 1))
         let end = min(candidates.count, start + maxRows)
         return candidates[start..<end]
+    }
+
+    private var candidateListRect: NSRect {
+        let rows = min(maxRows, max(0, candidates.count))
+        return NSRect(
+            x: 5,
+            y: 5,
+            width: max(0, bounds.width - 10),
+            height: CGFloat(rows) * rowHeight
+        )
     }
 
     private func ensureSelectionVisible() {

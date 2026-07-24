@@ -1208,6 +1208,7 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertNil(overlay.hitTest(NSPoint(x: -20, y: -20)))
         XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.maxX + 20, y: overlay.bounds.midY)))
+        XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.midX, y: overlay.bounds.maxY - 2)))
     }
 
     @MainActor
@@ -1271,6 +1272,50 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertLessThanOrEqual(overlay.frame.maxY, bounds.maxY)
         XCTAssertGreaterThanOrEqual(overlay.frame.minX, 44)
         XCTAssertLessThanOrEqual(overlay.frame.maxX, bounds.maxX)
+    }
+
+    @MainActor
+    func testMovingCaretIntoExistingLatexCommandDoesNotOpenCompletion() async throws {
+        let source = "\\textbf{Existing text}\nPlain text"
+        let state = SourceTypingState(text: source, selection: NSRange(location: (source as NSString).length, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        let commandInterior = (source as NSString).range(of: "\\textbf").location + 4
+        textView.setSelectedRange(NSRange(location: commandInterior, length: 0))
+        try await Task.sleep(for: .milliseconds(120))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertFalse(overlay.isShowing)
+        XCTAssertEqual(textView.selectedRange().location, commandInterior)
+    }
+
+    @MainActor
+    func testSourceScrollDismissesBackslashCompletionInsteadOfRepositioningItAcrossTheViewport() async throws {
+        let body = (1...1_200)
+            .map { "Line \($0) Some paragraph text for source scroll completion dismissal." }
+            .joined(separator: "\n")
+        let state = SourceTypingState(text: body, selection: NSRange(location: 0, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        let scrollView = try XCTUnwrap(textView.enclosingScrollView)
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(100))
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: 240))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertFalse(overlay.isShowing)
     }
 
     @MainActor
