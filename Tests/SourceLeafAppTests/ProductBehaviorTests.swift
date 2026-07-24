@@ -1,7 +1,28 @@
 import Foundation
 import SourceLeafCore
+import SwiftUI
 import Testing
 @testable import SourceLeafApp
+
+@Test func latexMenuShortcutsCoverHighFrequencyMathAndInsertCommands() {
+    #expect(SourceLeafMenuCommandSpec.math.map(\.command) == [
+        .inlineMath,
+        .displayMath,
+        .equation,
+        .fraction
+    ])
+    #expect(SourceLeafMenuCommandSpec.insert.map(\.command) == [
+        .table,
+        .figure,
+        .cite,
+        .reference,
+        .label
+    ])
+
+    let allSpecs = SourceLeafMenuCommandSpec.math + SourceLeafMenuCommandSpec.insert
+    #expect(allSpecs.allSatisfy { $0.modifiers.contains(.command) })
+    #expect(Set(allSpecs.map { "\($0.key)-\($0.modifiers.rawValue)" }).count == allSpecs.count)
+}
 
 @MainActor
 @Test func customizedPromptPersistsAcrossApplicationModels() throws {

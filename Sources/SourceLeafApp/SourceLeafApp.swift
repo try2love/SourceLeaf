@@ -59,6 +59,28 @@ final class SourceLeafLifecycleDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+struct SourceLeafMenuCommandSpec: Equatable {
+    var command: LaTeXEditCommand
+    var titleKey: String
+    var key: KeyEquivalent
+    var modifiers: EventModifiers
+
+    static let math: [SourceLeafMenuCommandSpec] = [
+        SourceLeafMenuCommandSpec(command: .inlineMath, titleKey: "source.math.inline", key: "m", modifiers: [.command, .shift]),
+        SourceLeafMenuCommandSpec(command: .displayMath, titleKey: "source.math.display", key: "m", modifiers: [.command, .option]),
+        SourceLeafMenuCommandSpec(command: .equation, titleKey: "source.math.equation", key: "e", modifiers: [.command, .option]),
+        SourceLeafMenuCommandSpec(command: .fraction, titleKey: "source.math.fraction", key: "/", modifiers: [.command, .option])
+    ]
+
+    static let insert: [SourceLeafMenuCommandSpec] = [
+        SourceLeafMenuCommandSpec(command: .table, titleKey: "source.insert.table", key: "t", modifiers: [.command, .option]),
+        SourceLeafMenuCommandSpec(command: .figure, titleKey: "source.insert.figure", key: "i", modifiers: [.command, .option]),
+        SourceLeafMenuCommandSpec(command: .cite, titleKey: "source.insert.cite", key: "c", modifiers: [.command, .shift]),
+        SourceLeafMenuCommandSpec(command: .reference, titleKey: "source.insert.reference", key: "r", modifiers: [.command, .shift]),
+        SourceLeafMenuCommandSpec(command: .label, titleKey: "source.insert.label", key: "l", modifiers: [.command, .shift])
+    ]
+}
+
 private struct SourceLeafCommands: Commands {
     @ObservedObject var model: AppModel
 
@@ -111,5 +133,22 @@ private struct SourceLeafCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: .command)
         }
+        CommandMenu(L10n.text("source.toolbar.math")) {
+            ForEach(SourceLeafMenuCommandSpec.math, id: \.command) { spec in
+                latexMenuButton(spec)
+            }
+        }
+        CommandMenu(L10n.text("source.toolbar.insert")) {
+            ForEach(SourceLeafMenuCommandSpec.insert, id: \.command) { spec in
+                latexMenuButton(spec)
+            }
+        }
+    }
+
+    private func latexMenuButton(_ spec: SourceLeafMenuCommandSpec) -> some View {
+        Button(L10n.text(spec.titleKey)) {
+            model.performLaTeXEdit(spec.command)
+        }
+        .keyboardShortcut(spec.key, modifiers: spec.modifiers)
     }
 }
