@@ -188,6 +188,94 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testPackageArgumentCompletionAppearsAndAcceptsInTheRealEditor() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        try await typeCharacters([
+            ("\\", 42), ("u", 32), ("s", 1), ("e", 14), ("p", 35),
+            ("a", 0), ("c", 8), ("k", 40), ("a", 0), ("g", 5),
+            ("e", 14), ("{", 33), ("a", 0), ("m", 46)
+        ], in: textView, window: host.window)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(Array(overlay.candidates.prefix(4).map(\.insertion)), ["amsmath", "amssymb", "amsfonts", "amsthm"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\usepackage{amsmath}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 19, length: 0))
+        XCTAssertEqual(state.text, "\\usepackage{amsmath}")
+        XCTAssertEqual(state.selection, NSRange(location: 19, length: 0))
+    }
+
+    @MainActor
+    func testDocumentClassArgumentCompletionAppearsAndAcceptsInTheRealEditor() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        try await typeCharacters([
+            ("\\", 42), ("d", 2), ("o", 31), ("c", 8), ("u", 32),
+            ("m", 46), ("e", 14), ("n", 45), ("t", 17), ("c", 8),
+            ("l", 37), ("a", 0), ("s", 1), ("s", 1), ("{", 33),
+            ("a", 0), ("c", 8), ("m", 46)
+        ], in: textView, window: host.window)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["acmart"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\documentclass{acmart}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 21, length: 0))
+        XCTAssertEqual(state.text, "\\documentclass{acmart}")
+        XCTAssertEqual(state.selection, NSRange(location: 21, length: 0))
+    }
+
+    @MainActor
+    func testRenderedShortUserChatBubblePaintsOnlyTheMessageWidth() async throws {
+        let message = ChatMessage(role: .user, text: "python", createdAt: Date(timeIntervalSince1970: 0))
+        let view = NSHostingView(rootView: ChatBubble(
+            message: message,
+            onEdit: {},
+            onRegenerate: {}
+        )
+        .accentColor(.blue)
+        .frame(width: 600, height: 120))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        try await Task.sleep(for: .milliseconds(250))
+        view.layoutSubtreeIfNeeded()
+
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let bubbleWidth = try XCTUnwrap(blueBubbleHorizontalSpan(in: bitmap))
+
+        XCTAssertLessThan(bubbleWidth, 150)
+        XCTAssertGreaterThan(bubbleWidth, 40)
+    }
+
+    @MainActor
     func testBackslashShowsSourceLeafLatexCompletionOverlayWithoutMutatingSource() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
@@ -1203,4 +1291,37 @@ private func keyEvent(character: String, keyCode: UInt16, window: NSWindow) -> N
         isARepeat: false,
         keyCode: keyCode
     )
+}
+
+@MainActor
+private func typeCharacters(
+    _ sequence: [(character: String, keyCode: UInt16)],
+    in textView: NSTextView,
+    window: NSWindow
+) async throws {
+    for (character, keyCode) in sequence {
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: keyCode, window: window)))
+        try await Task.sleep(for: .milliseconds(20))
+    }
+}
+
+@MainActor
+private func blueBubbleHorizontalSpan(in bitmap: NSBitmapImageRep) -> CGFloat? {
+    var minX = bitmap.pixelsWide
+    var maxX = -1
+    for y in 0..<bitmap.pixelsHigh {
+        for x in 0..<bitmap.pixelsWide {
+            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+            if color.blueComponent > 0.65,
+               color.redComponent < 0.35,
+               color.greenComponent > 0.20,
+               color.alphaComponent > 0.75 {
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+            }
+        }
+    }
+    guard maxX >= minX else { return nil }
+    let scale = bitmap.pixelsWide > 0 ? CGFloat(bitmap.pixelsWide) / CGFloat(bitmap.size.width) : 1
+    return CGFloat(maxX - minX + 1) / max(scale, 1)
 }
