@@ -206,7 +206,7 @@ enum LaTeXCompletionEngine {
         guard prefix.hasPrefix("\\") else { return [] }
         let normalizedPrefix = prefix.lowercased()
         let scope = completionScope(in: source, cursorLocation: cursorLocation)
-        let usedCommands = usedCommandCandidates(in: source).filter { used in
+        let usedCommands = usedCommandCandidates(in: source, cursorLocation: cursorLocation).filter { used in
             !builtInCandidates.contains { builtIn in
                 builtIn.insertion == used.insertion
                     || builtIn.insertion.hasPrefix(used.insertion + "{")
@@ -302,26 +302,34 @@ enum LaTeXCompletionEngine {
         let nsSource = source as NSString
         let cursor = min(max(0, cursorLocation ?? nsSource.length), nsSource.length)
         guard cursor > 0 else { return .preamble }
-        let prefix = nsSource.substring(with: NSRange(location: 0, length: cursor))
-        let nsPrefix = prefix as NSString
-        let fullRange = NSRange(location: 0, length: nsPrefix.length)
-        guard let beginRange = lastMatchRange(pattern: #"\\begin\s*\{\s*document\s*\}"#, in: prefix, range: fullRange) else {
+        let searchRange = NSRange(location: 0, length: cursor)
+        guard let beginRange = lastMatchRange(
+            pattern: #"\\begin\s*\{\s*document\s*\}"#,
+            in: nsSource,
+            range: searchRange
+        ) else {
             return .preamble
         }
-        if let endRange = lastMatchRange(pattern: #"\\end\s*\{\s*document\s*\}"#, in: prefix, range: fullRange),
+        if let endRange = lastMatchRange(
+            pattern: #"\\end\s*\{\s*document\s*\}"#,
+            in: nsSource,
+            range: searchRange
+        ),
            endRange.location > beginRange.location {
             return .preamble
         }
         return .documentBody
     }
 
-    private static func lastMatchRange(pattern: String, in source: String, range: NSRange) -> NSRange? {
+    private static func lastMatchRange(pattern: String, in source: NSString, range: NSRange) -> NSRange? {
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let nsSource = source as NSString
-        return expression.matches(in: source, range: range)
-            .reversed()
-            .first { !isInsideLineComment(location: $0.range.location, in: nsSource) }?
-            .range
+        var lastRange: NSRange?
+        expression.enumerateMatches(in: source as String, range: range) { match, _, _ in
+            guard let match,
+                  !isInsideLineComment(location: match.range.location, in: source) else { return }
+            lastRange = match.range
+        }
+        return lastRange
     }
 
     static func argumentSuggestions(
@@ -548,11 +556,14 @@ enum LaTeXCompletionEngine {
         }
     }
 
-    private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
+    private static func usedCommandCandidates(in source: String, cursorLocation: Int?) -> [LaTeXCompletionCandidate] {
         let pattern = #"\\[A-Za-z@]+\*?(?:\{\}){0,2}"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsSource = source as NSString
-        return regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length))
+        return commandCandidateScanRanges(in: nsSource, cursorLocation: cursorLocation)
+            .flatMap { range in
+                regex.matches(in: source, range: range)
+            }
             .prefix(120)
             .map { match in
                 LaTeXCompletionCandidate(
@@ -561,6 +572,24 @@ enum LaTeXCompletionEngine {
                     detail: "Already used in this document"
                 )
             }
+    }
+
+    private static func commandCandidateScanRanges(in source: NSString, cursorLocation: Int?) -> [NSRange] {
+        guard source.length > 0 else { return [] }
+        let cursor = min(max(0, cursorLocation ?? source.length), source.length)
+        let localWindow = 24_000
+        let preambleWindow = min(source.length, 16_000)
+        let localStart = max(0, cursor - (localWindow / 2))
+        let localEnd = min(source.length, max(cursor + (localWindow / 2), min(source.length, localStart + localWindow)))
+        let localRange = NSRange(location: localStart, length: localEnd - localStart)
+        let preambleRange = NSRange(location: 0, length: preambleWindow)
+        if NSIntersectionRange(localRange, preambleRange).length == preambleRange.length {
+            return [localRange]
+        }
+        if NSIntersectionRange(localRange, preambleRange).length == localRange.length {
+            return [preambleRange]
+        }
+        return [preambleRange, localRange]
     }
 }
 
@@ -1685,7 +1714,7 @@ struct SourceTextView: NSViewRepresentable {
 
         func shouldIgnoreProtectedSelectionEcho(_ range: NSRange) -> Bool {
             guard protectedSelectionEcho == range else { return false }
-            return Date().timeIntervalSince(lastLocalEditDate) < 0.35
+            return Date().timeIntervalSince(lastLocalEditDate) < 1.2
         }
 
         func shouldIgnoreSelectionEchoDuringLocalEdit(

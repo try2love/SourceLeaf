@@ -308,6 +308,23 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertFalse(suggestions.contains("\\subsection{}"))
     }
 
+    func testNarrowedLatexCompletionStaysFastAtEndOfLargeDocument() {
+        let body = Array(
+            repeating: "\\section{Stress} Text with \\cite{paper} and \\label{sec:stress}.",
+            count: 30_000
+        ).joined(separator: "\n")
+        let source = "\\documentclass{article}\n\\begin{document}\n\(body)\n\\se"
+        let cursor = (source as NSString).length
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\se", source: source, cursorLocation: cursor)
+        let elapsed = started.duration(to: clock.now)
+
+        XCTAssertEqual(suggestions.map(\.insertion), ["\\section{}"])
+        XCTAssertLessThan(elapsed, .milliseconds(180), "Narrowed LaTeX completion scanned too much source: \(elapsed)")
+    }
+
     func testLatexCompletionIgnoresCommandsInsideLineComments() {
         let source = "% \\sec" as NSString
 
@@ -1552,6 +1569,32 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertEqual(textView.string, "alpha testomega")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
+    }
+
+    @MainActor
+    func testDelayedStaleSwiftUISelectionEchoCannotReorderFollowUpTyping() async throws {
+        let state = SourceTypingState(text: "alpha omega", selection: NSRange(location: 6, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+        state.selection = NSRange(location: 6, length: 0)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "t", keyCode: 17, window: host.window)))
+        try await Task.sleep(for: .milliseconds(720))
+        state.selection = NSRange(location: 6, length: 0)
+        try await Task.sleep(for: .milliseconds(40))
+
+        for (character, keyCode) in [("e", 14), ("s", 1), ("t", 17)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(8))
+        }
+
+        XCTAssertEqual(textView.string, "alpha testomega")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
+        XCTAssertFalse(textView.string.contains("alpha tset"))
     }
 
     @MainActor
