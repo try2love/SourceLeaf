@@ -154,6 +154,42 @@ final class AppRegressionXCTests: XCTestCase {
         )
     }
 
+    func testLatexArgumentCompletionSuggestsProjectBibliographyFiles() throws {
+        let context = LaTeXCompletionContext(
+            projectFiles: ["sections/method.tex", "reference.bib", "bib/main-library.bib"]
+        )
+
+        let bibtexSource = "\\bibliography{ref" as NSString
+        let bibtexContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: bibtexSource,
+            cursorLocation: bibtexSource.length
+        ))
+        XCTAssertEqual(bibtexContext.command, "bibliography")
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: bibtexContext.command,
+                prefix: bibtexContext.prefix,
+                context: context
+            ).map(\.insertion),
+            ["reference"]
+        )
+
+        let biblatexSource = "\\addbibresource{bib/" as NSString
+        let biblatexContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: biblatexSource,
+            cursorLocation: biblatexSource.length
+        ))
+        XCTAssertEqual(biblatexContext.command, "addbibresource")
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: biblatexContext.command,
+                prefix: biblatexContext.prefix,
+                context: context
+            ).map(\.insertion),
+            ["bib/main-library.bib"]
+        )
+    }
+
     func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {
         let source = "\\sec" as NSString
         XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
@@ -242,6 +278,36 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 21, length: 0))
         XCTAssertEqual(state.text, "\\documentclass{acmart}")
         XCTAssertEqual(state.selection, NSRange(location: 21, length: 0))
+    }
+
+    @MainActor
+    func testBibliographyArgumentCompletionAppearsAndAcceptsInTheRealEditor() async throws {
+        let state = SourceTypingState()
+        let context = LaTeXCompletionContext(projectFiles: ["sections/method.tex", "reference.bib"])
+        let host = makeSourceEditorHost(state: state, completionContext: context)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        try await typeCharacters([
+            ("\\", 42), ("b", 11), ("i", 34), ("b", 11), ("l", 37),
+            ("i", 34), ("o", 31), ("g", 5), ("r", 15), ("a", 0),
+            ("p", 35), ("h", 4), ("y", 16), ("{", 33),
+            ("r", 15), ("e", 14), ("f", 3)
+        ], in: textView, window: host.window)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["reference"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\bibliography{reference}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 23, length: 0))
+        XCTAssertEqual(state.text, "\\bibliography{reference}")
+        XCTAssertEqual(state.selection, NSRange(location: 23, length: 0))
     }
 
     @MainActor

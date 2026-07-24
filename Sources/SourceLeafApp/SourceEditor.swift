@@ -294,6 +294,10 @@ enum LaTeXCompletionEngine {
             values = commonDocumentClasses.map { ($0, "cls", "Document class") }
         case "bibliographystyle":
             values = commonBibliographyStyles.map { ($0, "bib", "Bibliography style") }
+        case "bibliography":
+            values = bibliographyFiles(in: context, includeExtension: false).map { ($0, "bib", "Project bibliography") }
+        case "addbibresource":
+            values = bibliographyFiles(in: context, includeExtension: true).map { ($0, "bib", "Project bibliography") }
         default:
             return []
         }
@@ -312,7 +316,8 @@ enum LaTeXCompletionEngine {
                     "cite", "citet", "citep", "citealp", "autocite", "parencite", "textcite",
                     "ref", "eqref", "autoref", "cref", "Cref", "pageref",
                     "includegraphics", "input", "include",
-                    "usepackage", "RequirePackage", "documentclass", "bibliographystyle",
+                    "usepackage", "RequirePackage", "documentclass",
+                    "bibliographystyle", "bibliography", "addbibresource",
                     "begin", "end"
                 ].contains(argument.command)
         }
@@ -399,6 +404,17 @@ enum LaTeXCompletionEngine {
     private static let commonBibliographyStyles = [
         "ACM-Reference-Format", "IEEEtran", "plain", "plainnat", "abbrv", "unsrt", "alpha", "apalike"
     ]
+
+    private static func bibliographyFiles(in context: LaTeXCompletionContext, includeExtension: Bool) -> [String] {
+        var seen = Set<String>()
+        return context.projectFiles.compactMap { path in
+            let nsPath = path as NSString
+            guard nsPath.pathExtension.lowercased() == "bib" else { return nil }
+            let insertion = includeExtension ? path : nsPath.deletingPathExtension
+            guard seen.insert(insertion).inserted else { return nil }
+            return insertion
+        }
+    }
 
     private static func usedCommandCandidates(in source: String) -> [LaTeXCompletionCandidate] {
         let pattern = #"\\[A-Za-z@]+\*?(?:\{\}){0,2}"#
