@@ -499,7 +499,7 @@ final class AppModel: ObservableObject {
     private func scheduleOutlineRefresh() {
         outlineRefreshTask?.cancel()
         outlineRefreshTask = Task {
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(320))
             guard !Task.isCancelled else { return }
             refreshActiveFileOutline()
         }
@@ -511,7 +511,7 @@ final class AppModel: ObservableObject {
         let activeFile = selectedFile
         let activeSource = sourceText
         completionIndexRefreshTask = Task {
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled else { return }
             let index = await Task.detached(priority: .utility) {
                 ProjectIndexer.completionIndex(
@@ -1453,13 +1453,13 @@ final class AppModel: ObservableObject {
     private func bufferStreamingAssistantText(_ text: String) {
         pendingStreamingAssistantText += text
         let now = Date()
-        if pendingStreamingAssistantText.count >= 160 || now.timeIntervalSince(lastStreamingFlush) >= 0.12 {
+        if pendingStreamingAssistantText.count >= 320 || now.timeIntervalSince(lastStreamingFlush) >= 0.22 {
             flushStreamingAssistantText()
             return
         }
         guard streamingFlushTask == nil else { return }
         streamingFlushTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(90))
+            try? await Task.sleep(for: .milliseconds(140))
             guard let self else { return }
             self.flushStreamingAssistantText()
         }

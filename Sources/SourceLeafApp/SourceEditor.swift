@@ -240,7 +240,30 @@ enum LaTeXCompletionEngine {
 
     static func argumentContext(in source: NSString, cursorLocation: Int) -> (command: String, prefix: String, range: NSRange)? {
         guard cursorLocation <= source.length else { return nil }
-        let before = source.substring(to: cursorLocation)
+        guard cursorLocation > 0 else { return nil }
+        let previous = source.character(at: cursorLocation - 1)
+        // Fast preflight: argument completion is only useful while the caret is
+        // still inside a short command argument. Avoid running a regular
+        // expression over the whole document on every ordinary keystroke.
+        let previousIsWord = UnicodeScalar(previous)
+            .map { CharacterSet.alphanumerics.contains($0) }
+            ?? false
+        guard previous == 123
+                || previous == 44
+                || previous == 45
+                || previous == 95
+                || previous == 47
+                || previous == 46
+                || previous == 58
+                || previous == 42
+                || previous == 64
+                || previous == 92
+                || previousIsWord else {
+            return nil
+        }
+        let windowLength = min(cursorLocation, 420)
+        let windowStart = cursorLocation - windowLength
+        let before = source.substring(with: NSRange(location: windowStart, length: windowLength))
         guard let regex = try? NSRegularExpression(
             pattern: #"\\([A-Za-z]+)\*?(?:\[[^\]]*\])?\{([^{}]*)$"#
         ) else { return nil }
@@ -249,7 +272,7 @@ enum LaTeXCompletionEngine {
               match.numberOfRanges >= 3 else { return nil }
         let command = nsBefore.substring(with: match.range(at: 1))
         let prefix = nsBefore.substring(with: match.range(at: 2))
-        return (command, prefix, NSRange(location: cursorLocation - (prefix as NSString).length, length: (prefix as NSString).length))
+        return (command, prefix, NSRange(location: windowStart + match.range(at: 2).location, length: (prefix as NSString).length))
     }
 
     private static let commonEnvironmentNames = [

@@ -37,12 +37,12 @@ struct CodexPanel: View {
                         }
                         if !model.streamingAssistantText.isEmpty {
                             HStack {
-                                RenderedChatText(text: model.streamingAssistantText)
-                                    .textSelection(.enabled)
-                                    .padding(9)
-                                    .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                                    .frame(maxWidth: ChatBubble.maximumBubbleWidth, alignment: .leading)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                ChatBubble.adaptiveBubble(
+                                    text: model.streamingAssistantText,
+                                    role: .assistant,
+                                    colorScheme: colorScheme,
+                                    alignment: .leading
+                                )
                                 Spacer(minLength: 24)
                             }
                             .frame(maxWidth: .infinity)
@@ -681,6 +681,16 @@ final class ComposerNSTextView: NSTextView {
         lastMarkedTextCommitDate = Date()
     }
 
+    override func setMarkedText(
+        _ string: Any,
+        selectedRange: NSRange,
+        replacementRange: NSRange
+    ) {
+        lastMarkedTextCommitDate = Date()
+        lastCompositionLikeKeyDate = Date()
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    }
+
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         if Self.currentInputSourcePrefersReturnCommit() {
             lastCompositionLikeKeyDate = Date()
@@ -699,9 +709,9 @@ final class ComposerNSTextView: NSTextView {
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
-            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.3,
+            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.8,
             compositionInputSourceActive: compositionInputSourceActive,
-            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 2.0
+            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 2.5
         ), onSend?() == true {
             return
         }
@@ -822,25 +832,44 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        styledBubble
-            .frame(maxWidth: Self.maximumBubbleWidth, alignment: message.role == .user ? .trailing : .leading)
-            .fixedSize(horizontal: false, vertical: true)
+        Self.adaptiveBubble(
+            text: message.text,
+            role: message.role,
+            colorScheme: colorScheme,
+            alignment: message.role == .user ? .trailing : .leading
+        )
         .layoutPriority(1)
     }
 
     static let maximumBubbleWidth: CGFloat = 720
 
-    private var styledBubble: some View {
-        RenderedChatText(text: message.text)
-            .textSelection(.enabled)
-            .lineLimit(nil)
-            .foregroundStyle(message.role == .user ? Color.white : Color.primary)
-            .padding(9)
-            .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 10))
+    static func adaptiveBubble(
+        text: String,
+        role: ChatRole,
+        colorScheme: ColorScheme,
+        alignment: Alignment
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            renderedBubble(text: text, role: role, colorScheme: colorScheme)
+                .fixedSize(horizontal: true, vertical: true)
+            renderedBubble(text: text, role: role, colorScheme: colorScheme)
+                .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
     }
 
-    private var bubbleBackground: Color {
-        message.role == .user
+    static func renderedBubble(text: String, role: ChatRole, colorScheme: ColorScheme) -> some View {
+        RenderedChatText(text: text)
+            .textSelection(.enabled)
+            .lineLimit(nil)
+            .foregroundStyle(role == .user ? Color.white : Color.primary)
+            .padding(9)
+            .background(bubbleBackground(role: role, colorScheme: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private static func bubbleBackground(role: ChatRole, colorScheme: ColorScheme) -> Color {
+        role == .user
             ? Color.accentColor
             : (colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.07))
     }

@@ -96,6 +96,28 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertFalse(suggestions.contains("\\subsection{}"))
     }
 
+    func testLatexArgumentCompletionUsesLocalWindowAndKeepsAbsoluteRange() throws {
+        let prefix = String(repeating: "The paper discusses retrieval augmented generation. ", count: 40)
+        let source = (prefix + "\\cite{smi") as NSString
+        let context = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: source,
+            cursorLocation: source.length
+        ))
+
+        XCTAssertEqual(context.command, "cite")
+        XCTAssertEqual(context.prefix, "smi")
+        XCTAssertEqual(context.range, NSRange(location: source.length - 3, length: 3))
+    }
+
+    func testLatexArgumentCompletionIgnoresPlainParagraphTyping() {
+        let source = (String(repeating: "plain paragraph typing with no command ", count: 80) + "done") as NSString
+
+        XCTAssertNil(LaTeXCompletionEngine.argumentContext(
+            in: source,
+            cursorLocation: source.length
+        ))
+    }
+
     @MainActor
     func testBackslashShowsSourceLeafLatexCompletionOverlayWithoutMutatingSource() async throws {
         let state = SourceTypingState()
