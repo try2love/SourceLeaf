@@ -144,6 +144,40 @@ import Testing
     #expect(insertions.contains("\\includegraphics[]{}"))
 }
 
+@Test func latexCompletionPrioritizesBodyCommandsInsideTheDocumentBody() {
+    let source = "\\documentclass{article}\n\\begin{document}\n\\"
+    let suggestions = LaTeXCompletionEngine.suggestions(
+        prefix: "\\",
+        source: source,
+        cursorLocation: (source as NSString).length
+    )
+
+    #expect(Array(suggestions.prefix(6).map(\.insertion)) == [
+        "\\section{}",
+        "\\subsection{}",
+        "\\subsubsection{}",
+        "\\paragraph{}",
+        "\\cite{}",
+        "\\ref{}"
+    ])
+}
+
+@Test func latexCompletionScopeIgnoresCommentedDocumentMarkers() {
+    let source = "% \\begin{document}\n\\"
+    let suggestions = LaTeXCompletionEngine.suggestions(
+        prefix: "\\",
+        source: source,
+        cursorLocation: (source as NSString).length
+    )
+
+    #expect(Array(suggestions.prefix(4).map(\.insertion)) == [
+        "\\usepackage{}",
+        "\\begin{}",
+        "\\end{}",
+        "\\usepackage[]{}"
+    ])
+}
+
 @Test func latexCompletionNarrowsByCommandPrefixAndTracksReplacementRange() throws {
     let source = "\\us" as NSString
     let command = try #require(LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: source.length))
@@ -194,6 +228,45 @@ import Testing
     )
 
     #expect(endContext.command == "end")
+    #expect(suggestions.first?.insertion == "figure")
+}
+
+@Test func latexEndEnvironmentCompletionTracksNestedAndClosedEnvironments() throws {
+    let nested = "\\begin{figure}\n\\begin{equation}\n\\end{" as NSString
+    let nestedContext = try #require(LaTeXCompletionEngine.argumentContext(in: nested, cursorLocation: nested.length))
+    let nestedSuggestions = LaTeXCompletionEngine.argumentSuggestions(
+        command: nestedContext.command,
+        prefix: nestedContext.prefix,
+        context: LaTeXCompletionContext(),
+        source: nested as String,
+        cursorLocation: nested.length
+    )
+
+    let outer = "\\begin{figure}\n\\begin{equation}\nx\n\\end{equation}\n\\end{" as NSString
+    let outerContext = try #require(LaTeXCompletionEngine.argumentContext(in: outer, cursorLocation: outer.length))
+    let outerSuggestions = LaTeXCompletionEngine.argumentSuggestions(
+        command: outerContext.command,
+        prefix: outerContext.prefix,
+        context: LaTeXCompletionContext(),
+        source: outer as String,
+        cursorLocation: outer.length
+    )
+
+    #expect(nestedSuggestions.first?.insertion == "equation")
+    #expect(outerSuggestions.first?.insertion == "figure")
+}
+
+@Test func latexEndEnvironmentCompletionIgnoresCommentedEnvironmentMarkers() throws {
+    let source = "\\begin{figure}\n% \\begin{equation}\n\\end{" as NSString
+    let endContext = try #require(LaTeXCompletionEngine.argumentContext(in: source, cursorLocation: source.length))
+    let suggestions = LaTeXCompletionEngine.argumentSuggestions(
+        command: endContext.command,
+        prefix: endContext.prefix,
+        context: LaTeXCompletionContext(),
+        source: source as String,
+        cursorLocation: source.length
+    )
+
     #expect(suggestions.first?.insertion == "figure")
 }
 

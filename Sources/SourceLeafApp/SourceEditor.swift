@@ -197,9 +197,15 @@ enum LaTeXCompletionEngine {
         .init(insertion: #"\emptyset"#, category: "math", detail: "Empty set")
     ]
 
-    static func suggestions(prefix: String, source: String) -> [LaTeXCompletionCandidate] {
+    private enum CompletionScope {
+        case preamble
+        case documentBody
+    }
+
+    static func suggestions(prefix: String, source: String, cursorLocation: Int? = nil) -> [LaTeXCompletionCandidate] {
         guard prefix.hasPrefix("\\") else { return [] }
         let normalizedPrefix = prefix.lowercased()
+        let scope = completionScope(in: source, cursorLocation: cursorLocation)
         let usedCommands = usedCommandCandidates(in: source).filter { used in
             !builtInCandidates.contains { builtIn in
                 builtIn.insertion == used.insertion
@@ -214,33 +220,17 @@ enum LaTeXCompletionEngine {
             .filter { $0.insertion.lowercased() != normalizedPrefix }
             .filter { seen.insert($0.insertion).inserted }
             .sorted { lhs, rhs in
-                let lhsPriority = completionPriority(for: lhs.insertion, prefix: normalizedPrefix)
-                let rhsPriority = completionPriority(for: rhs.insertion, prefix: normalizedPrefix)
+                let lhsPriority = completionPriority(for: lhs.insertion, prefix: normalizedPrefix, scope: scope)
+                let rhsPriority = completionPriority(for: rhs.insertion, prefix: normalizedPrefix, scope: scope)
                 if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
                 if lhs.category != rhs.category { return lhs.category < rhs.category }
                 return lhs.insertion.localizedStandardCompare(rhs.insertion) == .orderedAscending
             }
     }
 
-    private static func completionPriority(for insertion: String, prefix: String) -> Int {
+    private static func completionPriority(for insertion: String, prefix: String, scope: CompletionScope) -> Int {
         let commonOrder = prefix == "\\"
-            ? [
-                #"\usepackage{}"#,
-                #"\begin{}"#,
-                #"\end{}"#,
-                #"\usepackage[]{}"#,
-                #"\item"#,
-                #"\item[]"#,
-                #"\section{}"#,
-                #"\subsection{}"#,
-                #"\subsubsection{}"#,
-                #"\textbf{}"#,
-                #"\cite{}"#,
-                #"\ref{}"#,
-                #"\label{}"#,
-                #"\includegraphics[]{}"#,
-                #"\documentclass{}"#
-            ]
+            ? (scope == .documentBody ? bodyCompletionOrder : preambleCompletionOrder)
             : [
                 #"\section{}"#,
                 #"\subsection{}"#,
@@ -250,16 +240,6 @@ enum LaTeXCompletionEngine {
                 #"\ref{}"#,
                 #"\label{}"#,
                 #"\includegraphics[]{}"#,
-                #"\begin{}"#,
-                #"\begin{document}"#,
-                #"\begin{figure}"#,
-                #"\begin{table}"#,
-                #"\begin{equation}"#,
-                #"\begin{align}"#,
-                #"\begin{itemize}"#,
-                #"\begin{enumerate}"#,
-                #"\item"#,
-                #"\usepackage{}"#,
                 #"\documentclass{}"#
             ]
         if let index = commonOrder.firstIndex(of: insertion) { return index }
@@ -269,6 +249,79 @@ enum LaTeXCompletionEngine {
         case _ where insertion.hasPrefix(#"\end"#): return 210
         default: return 1_000
         }
+    }
+
+    private static let preambleCompletionOrder = [
+        #"\usepackage{}"#,
+        #"\begin{}"#,
+        #"\end{}"#,
+        #"\usepackage[]{}"#,
+        #"\item"#,
+        #"\item[]"#,
+        #"\section{}"#,
+        #"\subsection{}"#,
+        #"\subsubsection{}"#,
+        #"\textbf{}"#,
+        #"\cite{}"#,
+        #"\ref{}"#,
+        #"\label{}"#,
+        #"\includegraphics[]{}"#,
+        #"\documentclass{}"#
+    ]
+
+    private static let bodyCompletionOrder = [
+        #"\section{}"#,
+        #"\subsection{}"#,
+        #"\subsubsection{}"#,
+        #"\paragraph{}"#,
+        #"\cite{}"#,
+        #"\ref{}"#,
+        #"\label{}"#,
+        #"\textbf{}"#,
+        #"\textit{}"#,
+        #"\emph{}"#,
+        #"\includegraphics[]{}"#,
+        #"\begin{figure}"#,
+        #"\caption{}"#,
+        #"\begin{table}"#,
+        #"\begin{equation}"#,
+        #"\begin{align}"#,
+        #"\begin{itemize}"#,
+        #"\begin{enumerate}"#,
+        #"\item"#,
+        #"\footnote{}"#,
+        #"\url{}"#,
+        #"\frac{}{}"#,
+        #"\sqrt{}"#,
+        #"\alpha"#,
+        #"\beta"#,
+        #"\rightarrow"#
+    ]
+
+    private static func completionScope(in source: String, cursorLocation: Int?) -> CompletionScope {
+        let nsSource = source as NSString
+        let cursor = min(max(0, cursorLocation ?? nsSource.length), nsSource.length)
+        guard cursor > 0 else { return .preamble }
+        let prefix = nsSource.substring(with: NSRange(location: 0, length: cursor))
+        let nsPrefix = prefix as NSString
+        let fullRange = NSRange(location: 0, length: nsPrefix.length)
+        guard let beginRange = lastMatchRange(pattern: #"\\begin\s*\{\s*document\s*\}"#, in: prefix, range: fullRange) else {
+            return .preamble
+        }
+        if let endRange = lastMatchRange(pattern: #"\\end\s*\{\s*document\s*\}"#, in: prefix, range: fullRange),
+           endRange.location > beginRange.location {
+            return .preamble
+        }
+        return .documentBody
+    }
+
+    private static func lastMatchRange(pattern: String, in source: String, range: NSRange) -> NSRange? {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let nsSource = source as NSString
+        return expression.matches(in: source, range: range)
+            .reversed()
+            .first { !isInsideLineComment(location: $0.range.location, in: nsSource) }?
+            .range
     }
 
     static func argumentSuggestions(
@@ -329,6 +382,7 @@ enum LaTeXCompletionEngine {
         var stack: [String] = []
         for match in expression.matches(in: prefix, range: NSRange(location: 0, length: nsPrefix.length)) {
             guard match.numberOfRanges >= 3 else { continue }
+            guard !isInsideLineComment(location: match.range.location, in: nsPrefix) else { continue }
             let command = nsPrefix.substring(with: match.range(at: 1))
             let name = nsPrefix.substring(with: match.range(at: 2))
             if command == "begin" {
@@ -338,6 +392,34 @@ enum LaTeXCompletionEngine {
             }
         }
         return Array(stack.reversed())
+    }
+
+    private static func isInsideLineComment(location: Int, in source: NSString) -> Bool {
+        guard source.length > 0 else { return false }
+        let safeLocation = min(max(0, location), source.length - 1)
+        var lineStart = 0
+        source.getLineStart(&lineStart, end: nil, contentsEnd: nil, for: NSRange(location: safeLocation, length: 0))
+        guard lineStart < location else { return false }
+        var index = lineStart
+        while index < location {
+            if source.character(at: index) == 37,
+               !isEscapedCharacter(at: index, in: source) {
+                return true
+            }
+            index += 1
+        }
+        return false
+    }
+
+    private static func isEscapedCharacter(at location: Int, in source: NSString) -> Bool {
+        guard location > 0 else { return false }
+        var slashCount = 0
+        var index = location - 1
+        while index >= 0, source.character(at: index) == 92 {
+            slashCount += 1
+            index -= 1
+        }
+        return slashCount % 2 == 1
     }
 
     static func shouldTriggerCompletion(afterChangeIn source: NSString, selection: NSRange) -> Bool {
@@ -1613,7 +1695,11 @@ struct SourceTextView: NSViewRepresentable {
                   textView.selectedRange().length == 0 else { return false }
             let state = completionState(in: textView) ?? LaTeXCompletionState(
                 replacementRange: textView.selectedRange(),
-                candidates: LaTeXCompletionEngine.suggestions(prefix: "\\", source: "")
+                candidates: LaTeXCompletionEngine.suggestions(
+                    prefix: "\\",
+                    source: textView.string,
+                    cursorLocation: textView.selectedRange().location
+                )
             )
             guard !state.candidates.isEmpty else { return false }
             activeCompletionState = state
@@ -1644,8 +1730,11 @@ struct SourceTextView: NSViewRepresentable {
             }
             guard let command = LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: cursor),
                   command.prefix.hasPrefix("\\") else { return nil }
-            let completionSource = command.prefix == "\\" ? "" : textView.string
-            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: completionSource)
+            let candidates = LaTeXCompletionEngine.suggestions(
+                prefix: command.prefix,
+                source: textView.string,
+                cursorLocation: cursor
+            )
             return LaTeXCompletionState(replacementRange: command.range, candidates: candidates)
         }
 
@@ -1814,7 +1903,11 @@ struct SourceTextView: NSViewRepresentable {
                 cursorLocation: textView.selectedRange().location
             ) else { return [] }
             index?.pointee = -1
-            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: textView.string)
+            let candidates = LaTeXCompletionEngine.suggestions(
+                prefix: command.prefix,
+                source: textView.string,
+                cursorLocation: textView.selectedRange().location
+            )
             let slashIsAlreadyInDocument = charRange.location > 0
                 && (textView.string as NSString).character(at: charRange.location - 1) == 92
             return candidates.map { candidate in

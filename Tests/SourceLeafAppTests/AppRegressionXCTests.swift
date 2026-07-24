@@ -641,6 +641,33 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBackslashCompletionInDocumentBodyPrioritizesWritingCommands() async throws {
+        let source = "\\documentclass{article}\n\\begin{document}\n"
+        let state = SourceTypingState(text: source, selection: NSRange(location: (source as NSString).length, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: (source as NSString).length, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertEqual(Array(overlay.candidates.prefix(6).map(\.insertion)), [
+            "\\section{}",
+            "\\subsection{}",
+            "\\subsubsection{}",
+            "\\paragraph{}",
+            "\\cite{}",
+            "\\ref{}"
+        ])
+        XCTAssertEqual(textView.string, source + "\\")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: (source as NSString).length + 1, length: 0))
+    }
+
+    @MainActor
     func testCommandSlashTogglesLatexLineCommentsInFocusedEditor() async throws {
         let source = "alpha\n  beta\n"
         let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
