@@ -465,7 +465,11 @@ struct SourcePanel: View {
 
     private func replaceAllFindMatches() {
         guard !findQuery.isEmpty else { return }
-        model.sourceChanged(model.sourceText.replacingOccurrences(of: findQuery, with: replaceQuery))
+        model.sourceChanged(SourceFindController.replacingAllMatches(
+            in: model.sourceText,
+            query: findQuery,
+            replacement: replaceQuery
+        ))
         activeFindIndex = 0
     }
 }
@@ -484,6 +488,16 @@ enum SourceFindController {
             searchRange = NSRange(location: nextLocation, length: nsSource.length - nextLocation)
         }
         return ranges
+    }
+
+    static func replacingAllMatches(in source: String, query: String, replacement: String) -> String {
+        let ranges = matches(in: source, query: query)
+        guard !ranges.isEmpty else { return source }
+        let next = NSMutableString(string: source)
+        for range in ranges.reversed() {
+            next.replaceCharacters(in: range, with: replacement)
+        }
+        return next as String
     }
 }
 

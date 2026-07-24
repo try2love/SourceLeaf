@@ -64,6 +64,14 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(matches.map(\.location), [0, 11, 17])
     }
 
+    func testReplaceAllUsesTheSameCaseInsensitiveMatchesShownByFindHighlights() {
+        let source = "alpha beta Alpha alphabet ALPHA"
+
+        let replaced = SourceFindController.replacingAllMatches(in: source, query: "alpha", replacement: "X")
+
+        XCTAssertEqual(replaced, "X beta X Xbet X")
+    }
+
     func testLatexCompletionCandidatesCoverCoreAuthoringCommands() {
         let suggestions = LaTeXCompletionEngine.suggestions(prefix: "\\", source: "\\documentclass{article}")
             .map(\.insertion)
