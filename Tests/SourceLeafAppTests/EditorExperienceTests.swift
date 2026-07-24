@@ -78,6 +78,37 @@ import Testing
         localizedName: "ABC",
         languages: ["en"]
     ) == false)
+    #expect(ComposerNSTextView.inputSourcePrefersReturnCommit(
+        sourceID: "com.sogou.inputmethod.sogou.pinyin",
+        localizedName: "搜狗拼音",
+        languages: ["zh-Hans"]
+    ))
+    #expect(ComposerNSTextView.inputSourcePrefersReturnCommit(
+        sourceID: "im.rime.inputmethod.Squirrel",
+        localizedName: "鼠须管",
+        languages: ["zh-Hans"]
+    ))
+}
+
+@MainActor
+@Test func shortChatBubbleWidthTracksTheMessageInsteadOfUsingTheMaximum() {
+    #expect(ChatBubble.preferredBubbleWidth(for: "python") < 100)
+    #expect(ChatBubble.preferredBubbleWidth(for: "最简单直观的方式介绍你自己") < 360)
+    #expect(ChatBubble.preferredBubbleWidth(for: String(repeating: "long markdown reply ", count: 80)) == ChatBubble.maximumBubbleWidth)
+}
+
+@Test func chatMarkdownRecognizesTablesAsStructuredBlocks() {
+    let blocks = ChatMarkdownBlock.parse("""
+    | 功能 | 状态 |
+    | --- | --- |
+    | Markdown | 已支持 |
+    """)
+
+    guard case let .table(rows) = blocks.first?.kind else {
+        Issue.record("Expected a Markdown table block")
+        return
+    }
+    #expect(rows == [["功能", "状态"], ["Markdown", "已支持"]])
 }
 
 @Test func sourceFindMatchesAllOccurrencesForPersistentHighlighting() {

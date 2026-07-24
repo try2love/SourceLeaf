@@ -692,14 +692,14 @@ final class ComposerNSTextView: NSTextView {
     }
 
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
-        if Self.currentInputSourcePrefersReturnCommit() {
+        if inputContextPrefersReturnCommit() {
             lastCompositionLikeKeyDate = Date()
         }
         super.insertText(insertString, replacementRange: replacementRange)
     }
 
     override func keyDown(with event: NSEvent) {
-        let compositionInputSourceActive = Self.currentInputSourcePrefersReturnCommit()
+        let compositionInputSourceActive = inputContextPrefersReturnCommit()
         if Self.isPlainPrintableInput(event),
            compositionInputSourceActive {
             lastCompositionLikeKeyDate = Date()
@@ -716,6 +716,17 @@ final class ComposerNSTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    private func inputContextPrefersReturnCommit() -> Bool {
+        if Self.currentInputSourcePrefersReturnCommit() {
+            return true
+        }
+        if let sources = inputContext?.keyboardInputSources,
+           sources.contains(where: { Self.inputSourcePrefersReturnCommit(sourceID: $0) }) {
+            return true
+        }
+        return false
     }
 
     nonisolated static func shouldTreatReturnAsSend(
@@ -764,11 +775,21 @@ final class ComposerNSTextView: NSTextView {
             || lowered.contains("zhuyin")
             || lowered.contains("cangjie")
             || lowered.contains("scim")
+            || lowered.contains("sogou")
+            || lowered.contains("rime")
+            || lowered.contains("wetype")
+            || lowered.contains("baidu")
+            || lowered.contains("qqinput")
             || lowered.contains("kotoeri")
             || lowered.contains("hangul")
             || lowered.contains("拼音")
             || lowered.contains("双拼")
-            || lowered.contains("五笔") {
+            || lowered.contains("五笔")
+            || lowered.contains("搜狗")
+            || lowered.contains("鼠须管")
+            || lowered.contains("微信输入法")
+            || lowered.contains("百度输入法")
+            || lowered.contains("qq输入法") {
             return true
         }
         if lowered.contains("简体")
@@ -797,7 +818,7 @@ final class ComposerNSTextView: NSTextView {
     }
 }
 
-private struct ChatBubble: View {
+struct ChatBubble: View {
     let message: ChatMessage
     let onEdit: () -> Void
     let onRegenerate: () -> Void
@@ -842,6 +863,8 @@ private struct ChatBubble: View {
     }
 
     static let maximumBubbleWidth: CGFloat = 720
+    static let minimumBubbleWidth: CGFloat = 44
+    static let bubbleHorizontalPadding: CGFloat = 18
 
     static func adaptiveBubble(
         text: String,
@@ -849,14 +872,24 @@ private struct ChatBubble: View {
         colorScheme: ColorScheme,
         alignment: Alignment
     ) -> some View {
-        ViewThatFits(in: .horizontal) {
+        let preferredWidth = preferredBubbleWidth(for: text)
+        return ViewThatFits(in: .horizontal) {
             renderedBubble(text: text, role: role, colorScheme: colorScheme)
-                .fixedSize(horizontal: true, vertical: true)
+                .frame(width: preferredWidth, alignment: alignment)
+                .fixedSize(horizontal: false, vertical: true)
             renderedBubble(text: text, role: role, colorScheme: colorScheme)
                 .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
+    }
+
+    static func preferredBubbleWidth(for text: String, fontSize: CGFloat = NSFont.systemFontSize) -> CGFloat {
+        let contentWidth = ChatMarkdownBlock.parse(text).map {
+            $0.estimatedDisplayWidth(fontSize: fontSize)
+        }.max() ?? 0
+        let padded = ceil(contentWidth + bubbleHorizontalPadding)
+        return min(maximumBubbleWidth, max(minimumBubbleWidth, padded))
     }
 
     static func renderedBubble(text: String, role: ChatRole, colorScheme: ColorScheme) -> some View {
@@ -916,9 +949,37 @@ private struct RenderedChatText: View {
                         .textSelection(.enabled)
                         .padding(7)
                         .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                case let .table(rows):
+                    ChatMarkdownTable(rows: rows)
                 }
             }
         }
+    }
+}
+
+private struct ChatMarkdownTable: View {
+    let rows: [[String]]
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        InlineMarkdownText(cell)
+                            .sourceLeafFont(rowIndex == 0 ? .caption : .body, weight: rowIndex == 0 ? .semibold : .regular)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                if rowIndex == 0 {
+                    Divider()
+                        .gridCellColumns(max(rows.first?.count ?? 1, 1))
+                }
+            }
+        }
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.22)))
     }
 }
 
@@ -944,7 +1005,7 @@ private struct InlineMarkdownText: View {
     }
 }
 
-private struct ChatMarkdownBlock {
+struct ChatMarkdownBlock {
     enum Kind {
         case heading(level: Int, content: String)
         case paragraph(String)
@@ -952,6 +1013,7 @@ private struct ChatMarkdownBlock {
         case numbered(number: Int, content: String)
         case quote(String)
         case code(String)
+        case table([[String]])
     }
 
     let kind: Kind
@@ -961,6 +1023,7 @@ private struct ChatMarkdownBlock {
         var blocks: [ChatMarkdownBlock] = []
         var paragraph: [String] = []
         var codeLines: [String] = []
+        var tableLines: [String] = []
         var inCode = false
 
         func flushParagraph() {
@@ -968,6 +1031,16 @@ private struct ChatMarkdownBlock {
             paragraph.removeAll()
             guard !content.isEmpty else { return }
             blocks.append(ChatMarkdownBlock(kind: .paragraph(content)))
+        }
+
+        func flushTable() {
+            defer { tableLines.removeAll() }
+            let rows = normalizedTableRows(tableLines)
+            guard rows.count >= 2 else {
+                paragraph.append(contentsOf: tableLines)
+                return
+            }
+            blocks.append(ChatMarkdownBlock(kind: .table(rows)))
         }
 
         for line in lines {
@@ -988,8 +1061,16 @@ private struct ChatMarkdownBlock {
             }
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
+                flushTable()
                 flushParagraph()
                 continue
+            }
+            if looksLikeTableRow(trimmed) {
+                flushParagraph()
+                tableLines.append(trimmed)
+                continue
+            } else {
+                flushTable()
             }
             if let heading = heading(in: trimmed) {
                 flushParagraph()
@@ -1010,6 +1091,7 @@ private struct ChatMarkdownBlock {
         if inCode {
             blocks.append(ChatMarkdownBlock(kind: .code(codeLines.joined(separator: "\n"))))
         }
+        flushTable()
         flushParagraph()
         return blocks.isEmpty ? [ChatMarkdownBlock(kind: .paragraph(text))] : blocks
     }
@@ -1034,6 +1116,62 @@ private struct ChatMarkdownBlock {
               line.dropFirst(digits.count).hasPrefix(". "),
               let number = Int(digits) else { return nil }
         return (number, String(line.dropFirst(digits.count + 2)))
+    }
+
+    private static func looksLikeTableRow(_ line: String) -> Bool {
+        guard line.contains("|") else { return false }
+        return line.split(separator: "|", omittingEmptySubsequences: false).count >= 2
+    }
+
+    private static func normalizedTableRows(_ lines: [String]) -> [[String]] {
+        guard lines.count >= 2 else { return [] }
+        let rawRows = lines.map { line in
+            line
+                .trimmingCharacters(in: CharacterSet(charactersIn: "|").union(.whitespaces))
+                .split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        guard rawRows.count >= 2,
+              rawRows[1].allSatisfy({ cell in
+                  let compact = cell.replacingOccurrences(of: " ", with: "")
+                  return compact.range(of: #"^:?-{3,}:?$"#, options: .regularExpression) != nil
+              }) else { return [] }
+        return rawRows.enumerated().compactMap { index, row in
+            index == 1 ? nil : row
+        }
+    }
+
+    func estimatedDisplayWidth(fontSize: CGFloat = NSFont.systemFontSize) -> CGFloat {
+        switch kind {
+        case let .heading(_, content),
+             let .paragraph(content),
+             let .bullet(content),
+             let .numbered(_, content),
+             let .quote(content):
+            return Self.estimatedLineWidth(content, fontSize: fontSize)
+        case let .code(content):
+            return content
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { Self.estimatedLineWidth(String($0), fontSize: fontSize, monospaced: true) + 14 }
+                .max() ?? 0
+        case let .table(rows):
+            let columnCount = rows.map(\.count).max() ?? 0
+            guard columnCount > 0 else { return 0 }
+            return (0..<columnCount).reduce(CGFloat(0)) { total, index in
+                let maxColumnWidth = rows.map { row -> CGFloat in
+                    guard row.indices.contains(index) else { return 0 }
+                    return Self.estimatedLineWidth(row[index], fontSize: fontSize)
+                }.max() ?? 0
+                return total + maxColumnWidth + 14
+            }
+        }
+    }
+
+    private static func estimatedLineWidth(_ text: String, fontSize: CGFloat, monospaced: Bool = false) -> CGFloat {
+        let font = monospaced
+            ? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            : NSFont.systemFont(ofSize: fontSize)
+        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 }
 

@@ -752,6 +752,44 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 15, length: 0))
     }
 
+    @MainActor
+    func testBackspaceBetweenAutoInsertedSmartPairDeletesBothDelimiters() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "{", keyCode: 33, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 1, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\u{7f}", keyCode: 51, window: host.window)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 0))
+        XCTAssertEqual(state.text, "")
+        XCTAssertEqual(state.selection, NSRange(location: 0, length: 0))
+
+        textView.undoManager?.undo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 2))
+        XCTAssertEqual(state.text, "{}")
+
+        textView.undoManager?.redo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 0))
+        XCTAssertEqual(state.text, "")
+    }
+
     func testRealMutedRAGProjectBuildsUsableFileAndCompletionIndexesWhenProvided() throws {
         guard let path = ProcessInfo.processInfo.environment["SOURCELEAF_REAL_PROJECT"] else { throw XCTSkip("SOURCELEAF_REAL_PROJECT not set") }
         let root = URL(fileURLWithPath: path, isDirectory: true)

@@ -298,7 +298,7 @@ enum LaTeXCompletionEngine {
 
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
-    @State private var findBarShowsReplace = false
+    @AppStorage("SourceLeaf.findBarShowsReplace") private var findBarShowsReplace = false
     @State private var findBarVisible = false
     @State private var findQuery = ""
     @State private var replaceQuery = ""
@@ -425,7 +425,6 @@ struct SourcePanel: View {
 
     private func closeFindBar() {
         findBarVisible = false
-        findQuery = ""
         activeFindIndex = 0
     }
 
@@ -885,6 +884,7 @@ struct SourceTextView: NSViewRepresentable {
             context.coordinator.lastLocallyEmittedSelection = nil
         } else if staleLocalSelectionEcho {
             context.coordinator.lastLocallyEmittedSelection = nil
+            context.coordinator.commitNativeSelectionToBinding()
         } else if context.coordinator.shouldIgnoreProtectedSelectionEcho(selection) {
             context.coordinator.lastLocallyEmittedSelection = nil
             context.coordinator.commitNativeSelectionToBinding()
@@ -941,6 +941,8 @@ struct SourceTextView: NSViewRepresentable {
         private var protectedSelectionEcho: NSRange?
         private var applyingSmartPairEdit = false
         private var applyingLineShiftEdit = false
+        private var lastFindHighlightRanges: [NSRange] = []
+        private var lastActiveFindHighlightRange: NSRange?
         var lastLocallyEmittedText: String?
         var lastLocallyEmittedSelection: NSRange?
 
@@ -1085,6 +1087,8 @@ struct SourceTextView: NSViewRepresentable {
             case #selector(NSResponder.insertNewline(_:)),
                  #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
                 return applySmartNewlineCommand(in: textView)
+            case #selector(NSResponder.deleteBackward(_:)):
+                return deleteEmptySmartPairIfNeeded(in: textView)
             case #selector(NSResponder.insertBacktab(_:)):
                 return applyLineShiftCommand(.outdentLines, in: textView)
             case #selector(NSResponder.insertTab(_:)):
@@ -1096,6 +1100,25 @@ struct SourceTextView: NSViewRepresentable {
             default:
                 return false
             }
+        }
+
+        private func deleteEmptySmartPairIfNeeded(in textView: NSTextView) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
+            let selection = textView.selectedRange()
+            let source = textView.string as NSString
+            guard selection.length == 0,
+                  selection.location > 0,
+                  selection.location < source.length else { return false }
+            let opening = source.substring(with: NSRange(location: selection.location - 1, length: 1))
+            let closing = source.substring(with: NSRange(location: selection.location, length: 1))
+            guard Self.smartPairClosingDelimiter(for: opening) == closing else { return false }
+            applySmartPairEdit(
+                "",
+                replacementRange: NSRange(location: selection.location - 1, length: 2),
+                resultingSelection: NSRange(location: selection.location - 1, length: 0),
+                in: textView
+            )
+            return true
         }
 
         func textView(
@@ -1732,6 +1755,9 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         func updateFindHighlights(_ ranges: [NSRange], activeRange: NSRange?) {
+            guard ranges != lastFindHighlightRanges || activeRange != lastActiveFindHighlightRange else { return }
+            lastFindHighlightRanges = ranges
+            lastActiveFindHighlightRange = activeRange
             glyphOverlay?.findRanges = ranges
             glyphOverlay?.activeFindRange = activeRange
             glyphOverlay?.needsDisplay = true
