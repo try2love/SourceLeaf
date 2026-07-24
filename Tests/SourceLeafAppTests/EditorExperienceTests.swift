@@ -507,6 +507,25 @@ import Testing
 }
 
 @MainActor
+@Test func sourceCaretLayerMovesSynchronouslyWithNativeSelection() async throws {
+    let host = makeEditorHost(source: "\\section{Fast caret}", theme: .light, fontFamily: "Menlo", fontSize: 16)
+    defer { closeEditorHost(host) }
+    try await Task.sleep(for: .milliseconds(400))
+    let textView = try #require(findSourceTextView(in: host.view))
+    let overlay = try #require(findGlyphOverlay(in: host.view))
+    host.window.makeFirstResponder(textView)
+
+    textView.setSelectedRange(NSRange(location: 1, length: 0))
+    let first = try #require(overlay.lastCaretRect)
+    textView.setSelectedRange(NSRange(location: 12, length: 0))
+    let second = try #require(overlay.lastCaretRect)
+
+    #expect(second.minX > first.minX)
+    #expect(overlay.lastPaintedSelection == NSRange(location: 12, length: 0))
+    #expect(overlay.caretBlinkAnimationActive)
+}
+
+@MainActor
 @Test func editorThemesRenderSyntaxSelectionAndCaretSnapshots() async throws {
     guard let outputPath = ProcessInfo.processInfo.environment["SOURCELEAF_EDITOR_SNAPSHOT_OUTPUT"] else { return }
     let output = URL(fileURLWithPath: outputPath, isDirectory: true)

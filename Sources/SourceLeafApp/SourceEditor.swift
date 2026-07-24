@@ -2408,9 +2408,9 @@ final class SourceGlyphOverlayView: NSView {
     }
 
     func selectionDidChange() {
-        restartCaretBlink()
-        needsDisplay = true
         lastPaintedSelection = textView?.selectedRange() ?? NSRange(location: NSNotFound, length: 0)
+        updateCaretLayerForCurrentSelection()
+        needsDisplay = true
     }
 
     func restartCaretBlink() {
@@ -2436,9 +2436,6 @@ final class SourceGlyphOverlayView: NSView {
         )
         lastSelectionRectCount = 0
         lastFindHighlightRectCount = 0
-        lastCaretRect = nil
-        caretLayer.isHidden = true
-        caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
         let selectedRange = textView.selectedRange()
         lastPaintedSelection = selectedRange
         drawFindHighlights(
@@ -2447,21 +2444,72 @@ final class SourceGlyphOverlayView: NSView {
             visible: visible,
             origin: origin
         )
-        if selectedRange.length == 0,
-           textView.window?.firstResponder === textView,
-           let caret = caretRect(
-               at: selectedRange.location,
-               textView: textView,
-               layoutManager: layoutManager,
-               textContainer: textContainer,
-               origin: origin
-           ) {
-            lastCaretRect = caret
-            caretLayer.frame = caret
-            caretLayer.backgroundColor = palette.caret.cgColor
-            caretLayer.isHidden = false
-            installCaretBlinkAnimation()
+        updateCaretLayerForCurrentSelection(
+            textView: textView,
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            visible: visible,
+            origin: origin
+        )
+    }
+
+    @discardableResult
+    private func updateCaretLayerForCurrentSelection() -> NSRect? {
+        guard let textView,
+              let scrollView = textView.enclosingScrollView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else {
+            hideCaretLayer()
+            return nil
         }
+        let visible = scrollView.contentView.bounds
+        let origin = NSPoint(
+            x: textView.textContainerOrigin.x - visible.minX,
+            y: textView.textContainerOrigin.y - visible.minY
+        )
+        return updateCaretLayerForCurrentSelection(
+            textView: textView,
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            visible: visible,
+            origin: origin
+        )
+    }
+
+    @discardableResult
+    private func updateCaretLayerForCurrentSelection(
+        textView: NSTextView,
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer,
+        visible _: NSRect,
+        origin: NSPoint
+    ) -> NSRect? {
+        layoutManager.ensureLayout(for: textContainer)
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.length == 0,
+              textView.window?.firstResponder === textView,
+              let caret = caretRect(
+                  at: selectedRange.location,
+                  textView: textView,
+                  layoutManager: layoutManager,
+                  textContainer: textContainer,
+                  origin: origin
+              ) else {
+            hideCaretLayer()
+            return nil
+        }
+        lastCaretRect = caret
+        caretLayer.frame = caret
+        caretLayer.backgroundColor = palette.caret.cgColor
+        caretLayer.isHidden = false
+        installCaretBlinkAnimation()
+        return caret
+    }
+
+    private func hideCaretLayer() {
+        lastCaretRect = nil
+        caretLayer.isHidden = true
+        caretLayer.removeAnimation(forKey: "SourceLeafCaretBlink")
     }
 
     private func drawFindHighlights(
