@@ -1256,14 +1256,26 @@ struct SourceTextView: NSViewRepresentable {
         }
 
         func handleEditorKeyEquivalent(_ event: NSEvent) -> Bool {
-            guard event.charactersIgnoringModifiers == "/",
-                  event.modifierFlags.contains(.command),
+            guard event.modifierFlags.contains(.command),
                   event.modifierFlags.intersection([.control, .option, .shift]).isEmpty,
+                  let command = formatterCommand(forKeyEquivalent: event.charactersIgnoringModifiers),
                   let textView,
                   event.window === textView.window,
                   textView.window?.firstResponder === textView else { return false }
             hideCompletionOverlay()
-            return applyFormatterCommand(.toggleComment, in: textView)
+            return applyFormatterCommand(command, in: textView)
+        }
+
+        private func formatterCommand(forKeyEquivalent key: String?) -> LaTeXEditCommand? {
+            switch key?.lowercased() {
+            case "b": .bold
+            case "i": .italic
+            case "u": .underline
+            case "/": .toggleComment
+            case "]": .indentLines
+            case "[": .outdentLines
+            default: nil
+            }
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {

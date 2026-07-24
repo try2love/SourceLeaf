@@ -695,6 +695,94 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandBTogglesBoldInFocusedSourceEditor() async throws {
+        let source = "alpha"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "b", keyCode: 11, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "\\textbf{alpha}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 8, length: 5))
+        XCTAssertEqual(state.text, "\\textbf{alpha}")
+        XCTAssertEqual(state.selection, NSRange(location: 8, length: 5))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "b", keyCode: 11, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, source)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (source as NSString).length))
+        XCTAssertEqual(state.text, source)
+    }
+
+    @MainActor
+    func testCommandIAndUToggleItalicAndUnderlineInFocusedSourceEditor() async throws {
+        let italicSource = "italic"
+        let italicState = SourceTypingState(text: italicSource, selection: NSRange(location: 0, length: (italicSource as NSString).length))
+        let italicHost = makeSourceEditorHost(state: italicState)
+        defer { closeWindow(italicHost.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let italicTextView = try XCTUnwrap(findSourceTextView(in: italicHost.view))
+        italicHost.window.makeFirstResponder(italicTextView)
+        italicTextView.setSelectedRange(NSRange(location: 0, length: (italicSource as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "i", keyCode: 34, window: italicHost.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(italicTextView.string, "\\textit{italic}")
+        XCTAssertEqual(italicTextView.selectedRange(), NSRange(location: 8, length: 6))
+        XCTAssertEqual(italicState.text, "\\textit{italic}")
+
+        let underlineSource = "under"
+        let underlineState = SourceTypingState(text: underlineSource, selection: NSRange(location: 0, length: (underlineSource as NSString).length))
+        let underlineHost = makeSourceEditorHost(state: underlineState)
+        defer { closeWindow(underlineHost.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let underlineTextView = try XCTUnwrap(findSourceTextView(in: underlineHost.view))
+        underlineHost.window.makeFirstResponder(underlineTextView)
+        underlineTextView.setSelectedRange(NSRange(location: 0, length: (underlineSource as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "u", keyCode: 32, window: underlineHost.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(underlineTextView.string, "\\underline{under}")
+        XCTAssertEqual(underlineTextView.selectedRange(), NSRange(location: 11, length: 5))
+        XCTAssertEqual(underlineState.text, "\\underline{under}")
+    }
+
+    @MainActor
+    func testCommandBracketShortcutsIndentAndOutdentFocusedSourceEditorLines() async throws {
+        let source = "alpha\nbeta"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "]", keyCode: 30, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "  alpha\n  beta")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (textView.string as NSString).length))
+        XCTAssertEqual(state.text, "  alpha\n  beta")
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "[", keyCode: 33, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, source)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (source as NSString).length))
+        XCTAssertEqual(state.text, source)
+    }
+
+    @MainActor
     func testBackslashInsertedThroughTextInputSystemShowsCompletionOverlay() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
