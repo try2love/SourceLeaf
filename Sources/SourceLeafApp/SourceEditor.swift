@@ -134,7 +134,13 @@ enum LaTeXCompletionEngine {
     static func suggestions(prefix: String, source: String) -> [LaTeXCompletionCandidate] {
         guard prefix.hasPrefix("\\") else { return [] }
         let normalizedPrefix = prefix.lowercased()
-        let usedCommands = usedCommandCandidates(in: source)
+        let usedCommands = usedCommandCandidates(in: source).filter { used in
+            !builtInCandidates.contains { builtIn in
+                builtIn.insertion == used.insertion
+                    || builtIn.insertion.hasPrefix(used.insertion + "{")
+                    || builtIn.insertion.hasPrefix(used.insertion + "[")
+            }
+        }
         let merged = builtInCandidates + usedCommands
         var seen: Set<String> = []
         return merged
@@ -151,27 +157,45 @@ enum LaTeXCompletionEngine {
     }
 
     private static func completionPriority(for insertion: String, prefix: String) -> Int {
-        let commonOrder = [
-            #"\section{}"#,
-            #"\subsection{}"#,
-            #"\subsubsection{}"#,
-            #"\textbf{}"#,
-            #"\cite{}"#,
-            #"\ref{}"#,
-            #"\label{}"#,
-            #"\includegraphics[]{}"#,
-            #"\begin{}"#,
-            #"\begin{document}"#,
-            #"\begin{figure}"#,
-            #"\begin{table}"#,
-            #"\begin{equation}"#,
-            #"\begin{align}"#,
-            #"\begin{itemize}"#,
-            #"\begin{enumerate}"#,
-            #"\item"#,
-            #"\usepackage{}"#,
-            #"\documentclass{}"#
-        ]
+        let commonOrder = prefix == "\\"
+            ? [
+                #"\usepackage{}"#,
+                #"\begin{}"#,
+                #"\end{}"#,
+                #"\usepackage[]{}"#,
+                #"\item"#,
+                #"\item[]"#,
+                #"\section{}"#,
+                #"\subsection{}"#,
+                #"\subsubsection{}"#,
+                #"\textbf{}"#,
+                #"\cite{}"#,
+                #"\ref{}"#,
+                #"\label{}"#,
+                #"\includegraphics[]{}"#,
+                #"\documentclass{}"#
+            ]
+            : [
+                #"\section{}"#,
+                #"\subsection{}"#,
+                #"\subsubsection{}"#,
+                #"\textbf{}"#,
+                #"\cite{}"#,
+                #"\ref{}"#,
+                #"\label{}"#,
+                #"\includegraphics[]{}"#,
+                #"\begin{}"#,
+                #"\begin{document}"#,
+                #"\begin{figure}"#,
+                #"\begin{table}"#,
+                #"\begin{equation}"#,
+                #"\begin{align}"#,
+                #"\begin{itemize}"#,
+                #"\begin{enumerate}"#,
+                #"\item"#,
+                #"\usepackage{}"#,
+                #"\documentclass{}"#
+            ]
         if let index = commonOrder.firstIndex(of: insertion) { return index }
         if prefix != "\\", insertion.lowercased().hasPrefix(prefix) { return 100 }
         switch insertion {
@@ -1084,6 +1108,8 @@ struct SourceTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if handleCompletionCommand(commandSelector, in: textView) { return true }
             switch commandSelector {
+            case #selector(NSResponder.complete(_:)):
+                return showManualCompletion(in: textView)
             case #selector(NSResponder.insertNewline(_:)),
                  #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
                 return applySmartNewlineCommand(in: textView)
@@ -1394,6 +1420,25 @@ struct SourceTextView: NSViewRepresentable {
                 return
             }
             activeCompletionState = state
+            showCompletionOverlay(state, in: textView)
+        }
+
+        private func showManualCompletion(in textView: NSTextView) -> Bool {
+            guard !applyingCompletionEdit,
+                  textView.window?.firstResponder === textView,
+                  !textView.hasMarkedText(),
+                  textView.selectedRange().length == 0 else { return false }
+            let state = completionState(in: textView) ?? LaTeXCompletionState(
+                replacementRange: textView.selectedRange(),
+                candidates: LaTeXCompletionEngine.suggestions(prefix: "\\", source: "")
+            )
+            guard !state.candidates.isEmpty else { return false }
+            activeCompletionState = state
+            showCompletionOverlay(state, in: textView)
+            return true
+        }
+
+        private func showCompletionOverlay(_ state: LaTeXCompletionState, in textView: NSTextView) {
             guard let anchor = completionAnchorRect(for: textView.selectedRange().location, in: textView) else {
                 completionOverlay?.show(candidates: state.candidates, selectedIndex: state.selectedIndex, anchor: .zero, palette: currentPalette())
                 return
@@ -1414,7 +1459,8 @@ struct SourceTextView: NSViewRepresentable {
             }
             guard let command = LaTeXCompletionEngine.commandPrefix(in: source, cursorLocation: cursor),
                   command.prefix.hasPrefix("\\") else { return nil }
-            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: textView.string)
+            let completionSource = command.prefix == "\\" ? "" : textView.string
+            let candidates = LaTeXCompletionEngine.suggestions(prefix: command.prefix, source: completionSource)
             return LaTeXCompletionState(replacementRange: command.range, candidates: candidates)
         }
 
@@ -1842,6 +1888,7 @@ final class LaTeXCompletionOverlayView: NSView {
     private let rowHeight: CGFloat = 27
     private let maxRows = 12
     private let overlayWidth: CGFloat = 390
+    private let minimumOverlayWidth: CGFloat = 220
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1861,12 +1908,16 @@ final class LaTeXCompletionOverlayView: NSView {
         let rows = max(1, min(maxRows, self.candidates.count))
         let height = CGFloat(rows) * rowHeight + 10
         let containerBounds = superview?.bounds ?? NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        let maxX = max(8, containerBounds.maxX - overlayWidth - 8)
+        let availableWidth = max(80, containerBounds.width - 16)
+        let width = availableWidth >= minimumOverlayWidth
+            ? min(overlayWidth, availableWidth)
+            : availableWidth
+        let maxX = max(8, containerBounds.maxX - width - 8)
         let x = min(max(8, anchor.minX), maxX)
         let belowY = anchor.maxY + 5
         let aboveY = anchor.minY - height - 5
         let y = belowY + height <= containerBounds.maxY ? belowY : max(8, aboveY)
-        frame = NSRect(x: x, y: y, width: overlayWidth, height: height)
+        frame = NSRect(x: x, y: y, width: width, height: height)
         isHidden = self.candidates.isEmpty
         needsDisplay = true
     }
@@ -1974,8 +2025,11 @@ final class LaTeXCompletionOverlayView: NSView {
         let insertion = NSAttributedString(string: candidate.insertion, attributes: insertionAttributes)
         let detail = NSAttributedString(string: candidate.detail, attributes: detailAttributes)
         let category = NSAttributedString(string: candidate.category.uppercased(), attributes: categoryAttributes)
-        insertion.draw(in: NSRect(x: row.minX + 8, y: row.minY + 5, width: 190, height: 17))
-        detail.draw(in: NSRect(x: row.minX + 205, y: row.minY + 5, width: 120, height: 17))
+        let insertionWidth = max(110, min(190, row.width * 0.54))
+        let detailX = row.minX + insertionWidth + 18
+        let detailWidth = max(60, row.maxX - detailX - 48)
+        insertion.draw(in: NSRect(x: row.minX + 8, y: row.minY + 5, width: insertionWidth, height: 17))
+        detail.draw(in: NSRect(x: detailX, y: row.minY + 5, width: detailWidth, height: 17))
         category.draw(in: NSRect(x: row.maxX - 48, y: row.minY + 6, width: 42, height: 15))
     }
 }

@@ -143,6 +143,120 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.string, "\\")
         XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
         XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\cite{}"))
+        XCTAssertEqual(Array(overlay.candidates.prefix(5).map(\.insertion)), [
+            "\\usepackage{}",
+            "\\begin{}",
+            "\\end{}",
+            "\\usepackage[]{}",
+            "\\item"
+        ])
+    }
+
+    @MainActor
+    func testBackslashInsertedThroughTextInputSystemShowsCompletionOverlay() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.insertText("\\", replacementRange: textView.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(textView.string, "\\")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 1, length: 0))
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+    }
+
+    @MainActor
+    func testManualCompletionCommandShowsLatexCandidatesWithoutTypingBackslash() async throws {
+        let state = SourceTypingState(text: "Intro ", selection: NSRange(location: 6, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        textView.doCommand(by: #selector(NSResponder.complete(_:)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertTrue(textView.string.hasPrefix("Intro \\usepackage{}"))
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 18, length: 0))
+    }
+
+    @MainActor
+    func testBareBackslashCompletionInLargeDocumentStaysInteractiveAndVisible() async throws {
+        let source = Array(
+            repeating: "\\section{Stress} Some source with \\cite{paper} and \\label{sec:stress}.",
+            count: 7_000
+        ).joined(separator: "\n")
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        textView.insertText("\\", replacementRange: textView.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        let elapsed = started.duration(to: clock.now)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertLessThan(elapsed, .milliseconds(220))
+        XCTAssertTrue(host.view.bounds.insetBy(dx: 0, dy: 0).contains(overlay.frame.origin))
+        XCTAssertTrue(overlay.candidates.map(\.insertion).contains("\\section{}"))
+    }
+
+    @MainActor
+    func testBackslashCompletionFitsInsideNarrowEditorPanel() async throws {
+        let state = SourceTypingState()
+        let view = NSHostingView(rootView: SourceTextView(
+            text: Binding(get: { state.text }, set: { state.text = $0 }),
+            selection: Binding(get: { state.selection }, set: { state.selection = $0 }),
+            showSelectionButton: false,
+            editorTheme: .light,
+            editorFontFamily: "Menlo",
+            editorFontSize: 14,
+            onAskAI: {}
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 190, height: 240),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(350))
+
+        let textView = try XCTUnwrap(findSourceTextView(in: view))
+        window.makeFirstResponder(textView)
+        textView.insertText("\\", replacementRange: textView.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertGreaterThanOrEqual(overlay.frame.minX, view.bounds.minX)
+        XCTAssertLessThanOrEqual(overlay.frame.maxX, view.bounds.maxX)
+        XCTAssertGreaterThanOrEqual(overlay.frame.width, 80)
     }
 
     @MainActor
@@ -654,6 +768,65 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual((textView.string as NSString).substring(with: NSRange(location: 0, length: 7)), "test\\se")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 7, length: 0))
         XCTAssertEqual(model.selectedRange, NSRange(location: 7, length: 0))
+    }
+
+    @MainActor
+    func testSourcePanelNoWaitTypingKeepsCaretMovingInsideLargeProject() async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-xctest-nowait-editor-caret-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let project = support.appendingPathComponent("项目", isDirectory: true)
+        let appSupport = support.appendingPathComponent("应用状态", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let body = Array(
+            repeating: "\\section{Caret Stress} Some source with \\cite{paper} and \\label{sec:stress}.",
+            count: 2_500
+        ).joined(separator: "\n")
+        try Data("\\documentclass{article}\n\\begin{document}\n\(body)\n\\end{document}\n".utf8)
+            .write(to: project.appendingPathComponent("main.tex"), options: .atomic)
+        try Data("@article{paper,title={Stress}}\n".utf8)
+            .write(to: project.appendingPathComponent("refs.bib"), options: .atomic)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SourceLeaf.xctest-nowait-editor-caret.\(UUID().uuidString)"))
+        let model = AppModel(restoreLastProject: false, supportDirectory: appSupport, defaults: defaults)
+        model.openProject(project)
+        model.configuration.build.autoBuild = false
+        model.configuration.autoSave = false
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        let view = NSHostingView(rootView: SourcePanel().environmentObject(model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(450))
+
+        let textView = try XCTUnwrap(findSourceTextView(in: view))
+        window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        model.selectedRange = NSRange(location: 0, length: 0)
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        for (character, keyCode) in [("t", 17), ("e", 14), ("s", 1), ("t", 17), ("\\", 42), ("s", 1), ("e", 14), ("c", 8)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: window)))
+        }
+        let typingElapsed = started.duration(to: clock.now)
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual((textView.string as NSString).substring(with: NSRange(location: 0, length: 8)), "test\\sec")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 8, length: 0))
+        XCTAssertEqual(model.selectedRange, NSRange(location: 8, length: 0))
+        XCTAssertLessThan(typingElapsed, .milliseconds(700), "No-wait typing took \(typingElapsed)")
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["\\section{}"])
     }
 
     @MainActor
