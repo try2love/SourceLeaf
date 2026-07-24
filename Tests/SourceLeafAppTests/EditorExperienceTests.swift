@@ -182,6 +182,21 @@ import Testing
     #expect(LaTeXCompletionEngine.argumentSuggestions(command: graphicContext.command, prefix: graphicContext.prefix, context: context).map(\.insertion) == ["figures/overview.png", "figures/results.pdf"])
 }
 
+@Test func latexEndEnvironmentCompletionPrioritizesTheNearestUnclosedBeginEnvironment() throws {
+    let source = "\\begin{figure}\n  \\caption{Demo}\n  \\end{" as NSString
+    let endContext = try #require(LaTeXCompletionEngine.argumentContext(in: source, cursorLocation: source.length))
+    let suggestions = LaTeXCompletionEngine.argumentSuggestions(
+        command: endContext.command,
+        prefix: endContext.prefix,
+        context: LaTeXCompletionContext(),
+        source: source as String,
+        cursorLocation: source.length
+    )
+
+    #expect(endContext.command == "end")
+    #expect(suggestions.first?.insertion == "figure")
+}
+
 @MainActor
 @Test func rapidNativeTypingPreservesCharacterOrderAndCaretPosition() async throws {
     let state = TypingState()

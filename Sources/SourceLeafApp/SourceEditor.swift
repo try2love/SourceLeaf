@@ -274,7 +274,9 @@ enum LaTeXCompletionEngine {
     static func argumentSuggestions(
         command: String,
         prefix: String,
-        context: LaTeXCompletionContext
+        context: LaTeXCompletionContext,
+        source: String? = nil,
+        cursorLocation: Int? = nil
     ) -> [LaTeXCompletionCandidate] {
         let values: [(String, String, String)]
         switch command {
@@ -286,8 +288,15 @@ enum LaTeXCompletionEngine {
             values = context.graphicsFiles.map { ($0, "file", "Project file") }
         case "input", "include":
             values = texSourceFiles(in: context).map { ($0, "file", "Project source") }
-        case "begin", "end":
+        case "begin":
             values = commonEnvironmentNames.map { ($0, "env", "LaTeX environment") }
+        case "end":
+            let openEnvironmentNames = nearestUnclosedEnvironmentNames(in: source, upTo: cursorLocation)
+            let openSet = Set(openEnvironmentNames)
+            values = openEnvironmentNames.map { ($0, "env", "Unclosed environment") }
+                + commonEnvironmentNames
+                .filter { !openSet.contains($0) }
+                .map { ($0, "env", "LaTeX environment") }
         case "usepackage", "RequirePackage":
             values = commonPackages.map { ($0, "pkg", "Common package") }
         case "documentclass":
@@ -305,6 +314,30 @@ enum LaTeXCompletionEngine {
         return values
             .filter { normalized.isEmpty || $0.0.lowercased().hasPrefix(normalized) }
             .map { LaTeXCompletionCandidate(insertion: $0.0, category: $0.1, detail: $0.2) }
+    }
+
+    private static func nearestUnclosedEnvironmentNames(in source: String?, upTo cursorLocation: Int?) -> [String] {
+        guard let source, let cursorLocation else { return [] }
+        let nsSource = source as NSString
+        let cursor = min(max(0, cursorLocation), nsSource.length)
+        guard cursor > 0 else { return [] }
+        let prefix = nsSource.substring(with: NSRange(location: 0, length: cursor))
+        guard let expression = try? NSRegularExpression(pattern: #"\\(begin|end)\s*\{([A-Za-z*][A-Za-z0-9*:-]*)\}"#) else {
+            return []
+        }
+        let nsPrefix = prefix as NSString
+        var stack: [String] = []
+        for match in expression.matches(in: prefix, range: NSRange(location: 0, length: nsPrefix.length)) {
+            guard match.numberOfRanges >= 3 else { continue }
+            let command = nsPrefix.substring(with: match.range(at: 1))
+            let name = nsPrefix.substring(with: match.range(at: 2))
+            if command == "begin" {
+                stack.append(name)
+            } else if let index = stack.lastIndex(of: name) {
+                stack.remove(at: index)
+            }
+        }
+        return Array(stack.reversed())
     }
 
     static func shouldTriggerCompletion(afterChangeIn source: NSString, selection: NSRange) -> Bool {
@@ -983,6 +1016,7 @@ struct SourceTextView: NSViewRepresentable {
         context.coordinator.ruler = ruler
         context.coordinator.glyphOverlay = glyphOverlay
         context.coordinator.completionOverlay = completionOverlay
+        context.coordinator.installKeyEventMonitor()
         completionOverlay.onPick = { [weak coordinator = context.coordinator] index in
             coordinator?.acceptCompletionFromOverlay(at: index)
         }
@@ -1088,6 +1122,7 @@ struct SourceTextView: NSViewRepresentable {
         private var protectedSelectionEcho: NSRange?
         private var applyingSmartPairEdit = false
         private var applyingLineShiftEdit = false
+        private var keyEventMonitor: Any?
         private var lastFindHighlightRanges: [NSRange] = []
         private var lastActiveFindHighlightRange: NSRange?
         var lastLocallyEmittedText: String?
@@ -1105,6 +1140,10 @@ struct SourceTextView: NSViewRepresentable {
             selectionSyncTimer = nil
             highlightTimer?.invalidate()
             highlightTimer = nil
+            if let keyEventMonitor {
+                NSEvent.removeMonitor(keyEventMonitor)
+                self.keyEventMonitor = nil
+            }
             NotificationCenter.default.removeObserver(self)
             textView?.delegate = nil
             completionOverlay?.removeFromSuperview()
@@ -1124,6 +1163,25 @@ struct SourceTextView: NSViewRepresentable {
                 name: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView
             )
+        }
+
+        func installKeyEventMonitor() {
+            guard keyEventMonitor == nil else { return }
+            keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let handled = MainActor.assumeIsolated { self?.handleEditorKeyEquivalent(event) ?? false }
+                return handled ? nil : event
+            }
+        }
+
+        func handleEditorKeyEquivalent(_ event: NSEvent) -> Bool {
+            guard event.charactersIgnoringModifiers == "/",
+                  event.modifierFlags.contains(.command),
+                  event.modifierFlags.intersection([.control, .option, .shift]).isEmpty,
+                  let textView,
+                  event.window === textView.window,
+                  textView.window?.firstResponder === textView else { return false }
+            hideCompletionOverlay()
+            return applyFormatterCommand(.toggleComment, in: textView)
         }
 
         @objc private func scrollBoundsDidChange(_ notification: Notification) {
@@ -1578,7 +1636,9 @@ struct SourceTextView: NSViewRepresentable {
                 let candidates = LaTeXCompletionEngine.argumentSuggestions(
                     command: argument.command,
                     prefix: argument.prefix,
-                    context: parent.completionContext
+                    context: parent.completionContext,
+                    source: textView.string,
+                    cursorLocation: cursor
                 )
                 return LaTeXCompletionState(replacementRange: argument.range, candidates: candidates, argumentCommand: argument.command)
             }
@@ -1744,7 +1804,9 @@ struct SourceTextView: NSViewRepresentable {
                 return LaTeXCompletionEngine.argumentSuggestions(
                     command: argument.command,
                     prefix: argument.prefix,
-                    context: parent.completionContext
+                    context: parent.completionContext,
+                    source: textView.string,
+                    cursorLocation: textView.selectedRange().location
                 ).map(\.insertion)
             }
             guard let command = LaTeXCompletionEngine.commandPrefix(
@@ -1782,28 +1844,42 @@ struct SourceTextView: NSViewRepresentable {
                     if attempt < 20 { self.executePendingCommand(request, attempt: attempt + 1) }
                     return
                 }
-                let edit = LaTeXSourceFormatter.edit(
-                    command: request.command,
-                    source: textView.string,
-                    selection: textView.selectedRange(),
-                    argument: request.argument
-                )
-                let originalSelection = textView.selectedRange()
-                let undoManager = textView.undoManager
-                undoManager?.beginUndoGrouping()
-                undoManager?.registerUndo(withTarget: self) { target in
-                    MainActor.assumeIsolated {
-                        target.restoreSelection(originalSelection, opposite: edit.resultingSelection)
-                    }
+                if self.applyFormatterCommand(request.command, argument: request.argument, in: textView) {
+                    self.parent.onCommandApplied(request.id)
                 }
-                textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
-                textView.setSelectedRange(edit.resultingSelection)
-                undoManager?.endUndoGrouping()
-                textView.scrollRangeToVisible(edit.resultingSelection)
-                self.parent.selection = edit.resultingSelection
-                self.glyphOverlay?.needsDisplay = true
-                self.parent.onCommandApplied(request.id)
             }
+        }
+
+        @discardableResult
+        private func applyFormatterCommand(_ command: LaTeXEditCommand, argument: String? = nil, in textView: NSTextView) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
+            let edit = LaTeXSourceFormatter.edit(
+                command: command,
+                source: textView.string,
+                selection: textView.selectedRange(),
+                argument: argument
+            )
+            guard edit.replacementRange.location != NSNotFound,
+                  NSMaxRange(edit.replacementRange) <= (textView.string as NSString).length else { return false }
+            let originalSelection = textView.selectedRange()
+            let undoManager = textView.undoManager
+            textView.breakUndoCoalescing()
+            undoManager?.beginUndoGrouping()
+            undoManager?.registerUndo(withTarget: self) { target in
+                MainActor.assumeIsolated {
+                    target.restoreSelection(originalSelection, opposite: edit.resultingSelection)
+                }
+            }
+            applyingLineShiftEdit = true
+            textView.insertText(edit.replacement, replacementRange: edit.replacementRange)
+            applyingLineShiftEdit = false
+            textView.setSelectedRange(edit.resultingSelection)
+            undoManager?.endUndoGrouping()
+            textView.scrollRangeToVisible(edit.resultingSelection)
+            parent.selection = edit.resultingSelection
+            glyphOverlay?.selectionDidChange()
+            glyphOverlay?.needsDisplay = true
+            return true
         }
 
         private func restoreSelection(_ requested: NSRange, opposite: NSRange) {

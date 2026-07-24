@@ -607,6 +607,67 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testBareBackslashOverlayPickInsertsOneUsableLatexCommand() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        let insertions = overlay.candidates.map(\.insertion)
+        let sectionIndex = try XCTUnwrap(
+            insertions.firstIndex(of: "\\section{}"),
+            "Missing section candidate. Candidates: \(insertions.joined(separator: " | "))"
+        )
+
+        overlay.onPick?(sectionIndex)
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(textView.string, "\\section{}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+        XCTAssertEqual(state.text, "\\section{}")
+        XCTAssertEqual(state.selection, NSRange(location: 9, length: 0))
+
+        textView.undoManager?.undo()
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 1, length: 0))
+    }
+
+    @MainActor
+    func testCommandSlashTogglesLatexLineCommentsInFocusedEditor() async throws {
+        let source = "alpha\n  beta\n"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "% alpha\n  % beta\n")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (textView.string as NSString).length))
+        XCTAssertEqual(state.text, "% alpha\n  % beta\n")
+        XCTAssertEqual(state.selection, NSRange(location: 0, length: (textView.string as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, source)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: (source as NSString).length))
+        XCTAssertEqual(state.text, source)
+    }
+
+    @MainActor
     func testBackslashInsertedThroughTextInputSystemShowsCompletionOverlay() async throws {
         let state = SourceTypingState()
         let host = makeSourceEditorHost(state: state)
@@ -1725,11 +1786,11 @@ private func findCompletionOverlay(in view: NSView) -> LaTeXCompletionOverlayVie
 }
 
 @MainActor
-private func keyEvent(character: String, keyCode: UInt16, window: NSWindow) -> NSEvent? {
+private func keyEvent(character: String, keyCode: UInt16, window: NSWindow, modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
     NSEvent.keyEvent(
         with: .keyDown,
         location: .zero,
-        modifierFlags: [],
+        modifierFlags: modifiers,
         timestamp: ProcessInfo.processInfo.systemUptime,
         windowNumber: window.windowNumber,
         context: nil,
