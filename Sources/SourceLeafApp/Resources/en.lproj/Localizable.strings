@@ -260,6 +260,10 @@
 "source.findPrevious" = "Previous match";
 "source.findNext" = "Next match";
 "source.findDoneHelp" = "Keep the find bar open and keep all matches highlighted.";
+"source.find.matchCase" = "Match case";
+"source.find.regex" = "Use regular expression";
+"source.find.wholeWord" = "Match whole word";
+"source.find.withinSelection" = "Search within selection";
 "source.replace" = "Replace";
 "source.replaceWith" = "Replace with";
 "source.replaceCurrent" = "Replace";

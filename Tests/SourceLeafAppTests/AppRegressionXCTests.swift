@@ -108,12 +108,54 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(matches.map(\.location), [0, 11, 17])
     }
 
+    func testFindOptionsSupportCaseRegexWholeWordAndSelectionScopes() {
+        let source = "alpha Alpha alphabet beta42 beta 42"
+
+        XCTAssertEqual(
+            SourceFindController.matches(
+                in: source,
+                query: "alpha",
+                options: SourceFindOptions(matchCase: true)
+            ).map(\.location),
+            [0, 12]
+        )
+        XCTAssertEqual(
+            SourceFindController.matches(
+                in: source,
+                query: #"beta\d+"#,
+                options: SourceFindOptions(regularExpression: true)
+            ).map { (source as NSString).substring(with: $0) },
+            ["beta42"]
+        )
+        XCTAssertEqual(
+            SourceFindController.matches(
+                in: source,
+                query: "alpha",
+                options: SourceFindOptions(wholeWord: true)
+            ).map(\.location),
+            [0, 6]
+        )
+        XCTAssertEqual(
+            SourceFindController.matches(
+                in: source,
+                query: "alpha",
+                options: SourceFindOptions(withinSelectionRange: NSRange(location: 6, length: 15))
+            ).map(\.location),
+            [6, 12]
+        )
+    }
+
     func testReplaceAllUsesTheSameCaseInsensitiveMatchesShownByFindHighlights() {
         let source = "alpha beta Alpha alphabet ALPHA"
 
-        let replaced = SourceFindController.replacingAllMatches(in: source, query: "alpha", replacement: "X")
+        let replaced = SourceFindController.replacingAllMatches(
+            in: source,
+            query: "alpha",
+            replacement: "X",
+            options: SourceFindOptions(wholeWord: true)
+        )
 
-        XCTAssertEqual(replaced, "X beta X Xbet X")
+        XCTAssertEqual(replaced, "X beta X alphabet X")
     }
 
     func testLatexCompletionCandidatesCoverCoreAuthoringCommands() {
@@ -1154,6 +1196,52 @@ final class AppRegressionXCTests: XCTestCase {
         let movedIndex = overlay.selectedIndex
         overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: 27, window: host.window)))
         XCTAssertLessThan(overlay.selectedIndex, movedIndex)
+
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: -20_000, window: host.window)))
+        XCTAssertEqual(overlay.selectedIndex, overlay.candidates.count - 1)
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: -20_000, window: host.window)))
+        XCTAssertEqual(overlay.selectedIndex, overlay.candidates.count - 1)
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: 20_000, window: host.window)))
+        XCTAssertEqual(overlay.selectedIndex, 0)
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: 20_000, window: host.window)))
+        XCTAssertEqual(overlay.selectedIndex, 0)
+
+        XCTAssertNil(overlay.hitTest(NSPoint(x: -20, y: -20)))
+        XCTAssertNil(overlay.hitTest(NSPoint(x: overlay.bounds.maxX + 20, y: overlay.bounds.midY)))
+    }
+
+    @MainActor
+    func testBackslashCompletionAnchorsToTheCaretAfterEditorScrolling() async throws {
+        let body = (1...1_200)
+            .map { "Line \($0) Some paragraph text for completion anchor testing." }
+            .joined(separator: "\n")
+        let state = SourceTypingState(text: body, selection: NSRange(location: 0, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        let insertion = (body as NSString).range(of: "Line 1121").location
+        textView.setSelectedRange(NSRange(location: insertion, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: insertion, length: 0))
+        try await Task.sleep(for: .milliseconds(100))
+
+        for (character, keyCode) in [("\\", 42), ("t", 17), ("e", 14)] {
+            textView.keyDown(with: try XCTUnwrap(keyEvent(character: character, keyCode: UInt16(keyCode), window: host.window)))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertGreaterThanOrEqual(overlay.frame.minX, 44, "Completion overlay must not cover the line-number gutter.")
+        let expectedAnchor = try XCTUnwrap(completionAnchorForCurrentSelection(in: textView, overlay: overlay))
+        let belowDistance = abs(overlay.frame.minY - (expectedAnchor.maxY + 5))
+        let aboveDistance = abs(overlay.frame.maxY - (expectedAnchor.minY - 5))
+        XCTAssertLessThan(
+            min(belowDistance, aboveDistance),
+            24,
+            "Completion overlay should follow the typed prefix near the caret. overlay=\(overlay.frame), anchor=\(expectedAnchor)"
+        )
     }
 
     @MainActor
@@ -2334,6 +2422,30 @@ private func findCompletionOverlay(in view: NSView) -> LaTeXCompletionOverlayVie
         if let match = findCompletionOverlay(in: child) { return match }
     }
     return nil
+}
+
+@MainActor
+private func completionAnchorForCurrentSelection(in textView: NSTextView, overlay: LaTeXCompletionOverlayView) -> NSRect? {
+    guard let scrollView = textView.enclosingScrollView,
+          let container = overlay.superview,
+          let layoutManager = textView.layoutManager,
+          let textContainer = textView.textContainer else { return nil }
+    let location = textView.selectedRange().location
+    layoutManager.ensureLayout(for: textContainer)
+    let visible = scrollView.contentView.bounds
+    let origin = NSPoint(
+        x: textView.textContainerOrigin.x - visible.minX,
+        y: textView.textContainerOrigin.y - visible.minY
+    )
+    let length = (textView.string as NSString).length
+    let rect: NSRect
+    if location < length {
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: location)
+        rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+    } else {
+        rect = layoutManager.extraLineFragmentRect
+    }
+    return scrollView.contentView.convert(rect.offsetBy(dx: origin.x, dy: origin.y), to: container)
 }
 
 @MainActor

@@ -596,18 +596,32 @@ enum LaTeXCompletionEngine {
 struct SourcePanel: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("SourceLeaf.findBarShowsReplace") private var findBarShowsReplace = false
+    @AppStorage("SourceLeaf.findMatchCase") private var findMatchCase = false
+    @AppStorage("SourceLeaf.findRegularExpression") private var findRegularExpression = false
+    @AppStorage("SourceLeaf.findWholeWord") private var findWholeWord = false
+    @AppStorage("SourceLeaf.findWithinSelection") private var findWithinSelection = false
     @State private var findBarVisible = false
     @State private var findQuery = ""
     @State private var replaceQuery = ""
     @State private var activeFindIndex = 0
+    @State private var findWithinSelectionRange: NSRange?
 
     private var findMatches: [NSRange] {
-        SourceFindController.matches(in: model.sourceText, query: findQuery)
+        SourceFindController.matches(in: model.sourceText, query: findQuery, options: findOptions)
     }
 
     private var activeFindRange: NSRange? {
         guard findMatches.indices.contains(activeFindIndex) else { return nil }
         return findMatches[activeFindIndex]
+    }
+
+    private var findOptions: SourceFindOptions {
+        SourceFindOptions(
+            matchCase: findMatchCase,
+            regularExpression: findRegularExpression,
+            wholeWord: findWholeWord,
+            withinSelectionRange: findWithinSelection ? findWithinSelectionRange : nil
+        )
     }
 
     private var completionContext: LaTeXCompletionContext {
@@ -677,6 +691,17 @@ struct SourcePanel: View {
                     query: $findQuery,
                     replacement: $replaceQuery,
                     showsReplace: $findBarShowsReplace,
+                    matchCase: $findMatchCase,
+                    regularExpression: $findRegularExpression,
+                    wholeWord: $findWholeWord,
+                    withinSelection: Binding(
+                        get: { findWithinSelection },
+                        set: { enabled in
+                            findWithinSelection = enabled
+                            findWithinSelectionRange = enabled ? currentFindSelectionScope() : nil
+                            normalizeActiveFindIndexAndFocus()
+                        }
+                    ),
                     matchCount: findMatches.count,
                     activeIndex: activeFindIndex,
                     onPrevious: { moveFindSelection(delta: -1) },
@@ -707,6 +732,9 @@ struct SourcePanel: View {
             openFindBarFromSelection()
         }
         .onChange(of: findQuery) { _, _ in normalizeActiveFindIndexAndFocus() }
+        .onChange(of: findMatchCase) { _, _ in normalizeActiveFindIndexAndFocus() }
+        .onChange(of: findRegularExpression) { _, _ in normalizeActiveFindIndexAndFocus() }
+        .onChange(of: findWholeWord) { _, _ in normalizeActiveFindIndexAndFocus() }
         .onChange(of: model.sourceText) { _, _ in normalizeActiveFindIndexAndFocus(scroll: false) }
     }
 
@@ -715,6 +743,10 @@ struct SourcePanel: View {
            model.selectedRange.length > 0,
            NSMaxRange(model.selectedRange) <= (model.sourceText as NSString).length {
             findQuery = (model.sourceText as NSString).substring(with: model.selectedRange)
+            findWithinSelectionRange = model.selectedRange
+        }
+        if findWithinSelection, findWithinSelectionRange == nil {
+            findWithinSelectionRange = currentFindSelectionScope()
         }
         findBarVisible = true
         normalizeActiveFindIndexAndFocus()
@@ -723,6 +755,14 @@ struct SourcePanel: View {
     private func closeFindBar() {
         findBarVisible = false
         activeFindIndex = 0
+    }
+
+    private func currentFindSelectionScope() -> NSRange? {
+        guard model.selectedRange.length > 0,
+              NSMaxRange(model.selectedRange) <= (model.sourceText as NSString).length else {
+            return nil
+        }
+        return model.selectedRange
     }
 
     private func finishFindEditing() {
@@ -764,30 +804,75 @@ struct SourcePanel: View {
         model.sourceChanged(SourceFindController.replacingAllMatches(
             in: model.sourceText,
             query: findQuery,
-            replacement: replaceQuery
+            replacement: replaceQuery,
+            options: findOptions
         ))
         activeFindIndex = 0
     }
 }
 
+struct SourceFindOptions: Equatable {
+    var matchCase = false
+    var regularExpression = false
+    var wholeWord = false
+    var withinSelectionRange: NSRange?
+}
+
 enum SourceFindController {
-    static func matches(in source: String, query: String) -> [NSRange] {
+    static func matches(in source: String, query: String, options: SourceFindOptions = SourceFindOptions()) -> [NSRange] {
         guard !query.isEmpty else { return [] }
         let nsSource = source as NSString
+        let searchScope = validSearchScope(options.withinSelectionRange, sourceLength: nsSource.length)
+        if options.regularExpression {
+            return regularExpressionMatches(in: source, query: query, scope: searchScope, options: options)
+        }
+        return plainTextMatches(in: nsSource, query: query, scope: searchScope, options: options)
+    }
+
+    private static func plainTextMatches(
+        in source: NSString,
+        query: String,
+        scope: NSRange,
+        options: SourceFindOptions
+    ) -> [NSRange] {
         var ranges: [NSRange] = []
-        var searchRange = NSRange(location: 0, length: nsSource.length)
+        var searchRange = scope
+        let compareOptions: NSString.CompareOptions = options.matchCase ? [] : [.caseInsensitive]
         while searchRange.length > 0 {
-            let match = nsSource.range(of: query, options: [.caseInsensitive], range: searchRange)
+            let match = source.range(of: query, options: compareOptions, range: searchRange)
             guard match.location != NSNotFound, match.length > 0 else { break }
-            ranges.append(match)
+            if !options.wholeWord || isWholeWord(range: match, in: source) {
+                ranges.append(match)
+            }
             let nextLocation = match.location + match.length
-            searchRange = NSRange(location: nextLocation, length: nsSource.length - nextLocation)
+            let scopeEnd = NSMaxRange(scope)
+            guard nextLocation < scopeEnd else { break }
+            searchRange = NSRange(location: nextLocation, length: scopeEnd - nextLocation)
         }
         return ranges
     }
 
-    static func replacingAllMatches(in source: String, query: String, replacement: String) -> String {
-        let ranges = matches(in: source, query: query)
+    private static func regularExpressionMatches(
+        in source: String,
+        query: String,
+        scope: NSRange,
+        options: SourceFindOptions
+    ) -> [NSRange] {
+        let pattern = options.wholeWord ? #"(?<![A-Za-z0-9_])(?:\#(query))(?![A-Za-z0-9_])"# : query
+        let regexOptions: NSRegularExpression.Options = options.matchCase ? [] : [.caseInsensitive]
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: regexOptions) else { return [] }
+        return expression.matches(in: source, range: scope)
+            .map(\.range)
+            .filter { $0.length > 0 }
+    }
+
+    static func replacingAllMatches(
+        in source: String,
+        query: String,
+        replacement: String,
+        options: SourceFindOptions = SourceFindOptions()
+    ) -> String {
+        let ranges = matches(in: source, query: query, options: options)
         guard !ranges.isEmpty else { return source }
         let next = NSMutableString(string: source)
         for range in ranges.reversed() {
@@ -795,12 +880,37 @@ enum SourceFindController {
         }
         return next as String
     }
+
+    private static func validSearchScope(_ range: NSRange?, sourceLength: Int) -> NSRange {
+        guard let range, range.length > 0 else {
+            return NSRange(location: 0, length: sourceLength)
+        }
+        let location = min(max(0, range.location), sourceLength)
+        let length = min(max(0, range.length), sourceLength - location)
+        return NSRange(location: location, length: length)
+    }
+
+    private static func isWholeWord(range: NSRange, in source: NSString) -> Bool {
+        let beforeIsWord = range.location > 0 && isWordCharacter(source.character(at: range.location - 1))
+        let afterLocation = NSMaxRange(range)
+        let afterIsWord = afterLocation < source.length && isWordCharacter(source.character(at: afterLocation))
+        return !beforeIsWord && !afterIsWord
+    }
+
+    private static func isWordCharacter(_ character: unichar) -> Bool {
+        guard let scalar = UnicodeScalar(character) else { return false }
+        return CharacterSet.alphanumerics.contains(scalar) || character == 95
+    }
 }
 
 private struct SourceFindBar: View {
     @Binding var query: String
     @Binding var replacement: String
     @Binding var showsReplace: Bool
+    @Binding var matchCase: Bool
+    @Binding var regularExpression: Bool
+    @Binding var wholeWord: Bool
+    @Binding var withinSelection: Bool
     let matchCount: Int
     let activeIndex: Int
     let onPrevious: () -> Void
@@ -818,6 +928,26 @@ private struct SourceFindBar: View {
                 TextField(L10n.text("source.find"), text: $query)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(onDone)
+                findOptionButton(
+                    isOn: $matchCase,
+                    title: "Aa",
+                    help: L10n.text("source.find.matchCase")
+                )
+                findOptionButton(
+                    isOn: $regularExpression,
+                    title: ".*",
+                    help: L10n.text("source.find.regex")
+                )
+                findOptionButton(
+                    isOn: $wholeWord,
+                    title: "W",
+                    help: L10n.text("source.find.wholeWord")
+                )
+                findOptionButton(
+                    isOn: $withinSelection,
+                    systemImage: "text.line.first.and.arrowtriangle.forward",
+                    help: L10n.text("source.find.withinSelection")
+                )
                 Text(matchCount == 0 ? "0/0" : "\(activeIndex + 1)/\(matchCount)")
                     .sourceLeafFont(.caption, design: .monospaced)
                     .foregroundStyle(.secondary)
@@ -856,6 +986,37 @@ private struct SourceFindBar: View {
         .padding(.vertical, 7)
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func findOptionButton(isOn: Binding<Bool>, title: String, help: String) -> some View {
+        Button { isOn.wrappedValue.toggle() } label: {
+            Text(title)
+                .sourceLeafFont(.caption, weight: .semibold)
+                .frame(minWidth: 22, minHeight: 20)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(isOn.wrappedValue ? Color.accentColor : .secondary)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isOn.wrappedValue ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternaryLabelColor).opacity(0.10))
+        )
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func findOptionButton(isOn: Binding<Bool>, systemImage: String, help: String) -> some View {
+        Button { isOn.wrappedValue.toggle() } label: {
+            Image(systemName: systemImage)
+                .frame(minWidth: 22, minHeight: 20)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(isOn.wrappedValue ? Color.accentColor : .secondary)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isOn.wrappedValue ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternaryLabelColor).opacity(0.10))
+        )
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -1961,8 +2122,7 @@ struct SourceTextView: NSViewRepresentable {
                 rect = layoutManager.extraLineFragmentRect
             }
             let inClip = rect.offsetBy(dx: origin.x, dy: origin.y)
-            guard let superview = textView.enclosingScrollView?.superview else { return nil }
-            return superview.convert(inClip, to: container)
+            return scrollView.contentView.convert(inClip, to: container)
         }
 
         private func currentPalette() -> SourceEditorPalette {
@@ -2315,7 +2475,9 @@ final class LaTeXCompletionOverlayView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { isShowing ? self : nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isShowing && bounds.contains(point) ? self : nil
+    }
 
     func show(candidates: [LaTeXCompletionCandidate], selectedIndex: Int, anchor: NSRect, palette: SourceEditorPalette) {
         self.candidates = candidates
@@ -2325,12 +2487,14 @@ final class LaTeXCompletionOverlayView: NSView {
         let rows = max(1, min(maxRows, self.candidates.count))
         let height = CGFloat(rows) * rowHeight + 10
         let containerBounds = superview?.bounds ?? NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        let availableWidth = max(80, containerBounds.width - 16)
+        let desiredMinimumX = anchor.minX > 44 ? CGFloat(44) : CGFloat(8)
+        let minimumX = min(max(CGFloat(8), desiredMinimumX), max(CGFloat(8), containerBounds.maxX - 80))
+        let availableWidth = max(80, containerBounds.maxX - minimumX - 8)
         let width = availableWidth >= minimumOverlayWidth
             ? min(overlayWidth, availableWidth)
             : availableWidth
-        let maxX = max(8, containerBounds.maxX - width - 8)
-        let x = min(max(8, anchor.minX), maxX)
+        let maxX = max(minimumX, containerBounds.maxX - width - 8)
+        let x = min(max(minimumX, anchor.minX), maxX)
         let belowY = anchor.maxY + 5
         let aboveY = anchor.minY - height - 5
         let y = belowY + height <= containerBounds.maxY ? belowY : max(8, aboveY)
@@ -2362,7 +2526,15 @@ final class LaTeXCompletionOverlayView: NSView {
         let rawDelta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
         guard rawDelta != 0 else { return }
         let rows = max(1, Int(ceil(abs(rawDelta) / max(1, rowHeight))))
-        moveSelection(delta: rawDelta < 0 ? rows : -rows)
+        moveSelectionWithoutWrapping(delta: rawDelta < 0 ? rows : -rows)
+    }
+
+    private func moveSelectionWithoutWrapping(delta: Int) {
+        guard !candidates.isEmpty else { return }
+        let previous = selectedIndex
+        selectedIndex = min(max(0, selectedIndex + delta), candidates.count - 1)
+        ensureSelectionVisible()
+        if previous != selectedIndex { needsDisplay = true }
     }
 
     override func mouseDown(with event: NSEvent) {
