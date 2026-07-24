@@ -695,6 +695,51 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandSlashUsesPhysicalKeyFallbackInFocusedSourceEditor() async throws {
+        let source = "alpha"
+        let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: (source as NSString).length))
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "、", keyCode: 44, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(textView.string, "% alpha")
+        XCTAssertEqual(state.text, "% alpha")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: ("% alpha" as NSString).length))
+    }
+
+    @MainActor
+    func testCommandSlashDoesNotStealInputMethodComposition() async throws {
+        let state = SourceTypingState(text: "alpha", selection: NSRange(location: 0, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        textView.setMarkedText(
+            "pinyin",
+            selectedRange: NSRange(location: 6, length: 0),
+            replacementRange: textView.selectedRange()
+        )
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(textView.hasMarkedText())
+
+        NSApp.sendEvent(try XCTUnwrap(keyEvent(character: "/", keyCode: 44, window: host.window, modifiers: .command)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "pinyinalpha")
+        XCTAssertTrue(textView.hasMarkedText())
+        XCTAssertFalse(state.text.hasPrefix("%"))
+    }
+
+    @MainActor
     func testCommandBTogglesBoldInFocusedSourceEditor() async throws {
         let source = "alpha"
         let state = SourceTypingState(text: source, selection: NSRange(location: 0, length: (source as NSString).length))
@@ -941,6 +986,31 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(overlay.selectedIndex, 14)
         XCTAssertLessThan(overlay.selectedIndex, overlay.candidates.count)
+    }
+
+    @MainActor
+    func testBackslashCompletionKeepsAllCandidatesReachableByScrollWheel() async throws {
+        let state = SourceTypingState()
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\\", keyCode: 42, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertGreaterThanOrEqual(overlay.candidates.count, 60)
+        XCTAssertEqual(overlay.selectedIndex, 0)
+
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: -81, window: host.window)))
+        XCTAssertGreaterThanOrEqual(overlay.selectedIndex, 3)
+
+        let movedIndex = overlay.selectedIndex
+        overlay.scrollWheel(with: try XCTUnwrap(scrollEvent(deltaY: 27, window: host.window)))
+        XCTAssertLessThan(overlay.selectedIndex, movedIndex)
     }
 
     @MainActor
@@ -1914,6 +1984,22 @@ private func keyEvent(character: String, keyCode: UInt16, window: NSWindow, modi
         isARepeat: false,
         keyCode: keyCode
     )
+}
+
+@MainActor
+private func scrollEvent(deltaY: CGFloat, window: NSWindow) -> NSEvent? {
+    guard let cgEvent = CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 1,
+        wheel1: Int32(deltaY.rounded()),
+        wheel2: 0,
+        wheel3: 0
+    ) else {
+        return nil
+    }
+    cgEvent.location = NSPoint(x: window.frame.minX + 24, y: window.frame.minY + 24)
+    return NSEvent(cgEvent: cgEvent)
 }
 
 @MainActor

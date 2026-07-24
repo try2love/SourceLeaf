@@ -1258,15 +1258,16 @@ struct SourceTextView: NSViewRepresentable {
         func handleEditorKeyEquivalent(_ event: NSEvent) -> Bool {
             guard event.modifierFlags.contains(.command),
                   event.modifierFlags.intersection([.control, .option, .shift]).isEmpty,
-                  let command = formatterCommand(forKeyEquivalent: event.charactersIgnoringModifiers),
                   let textView,
                   event.window === textView.window,
-                  textView.window?.firstResponder === textView else { return false }
+                  textView.window?.firstResponder === textView,
+                  !textView.hasMarkedText(),
+                  let command = formatterCommand(forKeyEquivalent: event.charactersIgnoringModifiers, keyCode: event.keyCode) else { return false }
             hideCompletionOverlay()
             return applyFormatterCommand(command, in: textView)
         }
 
-        private func formatterCommand(forKeyEquivalent key: String?) -> LaTeXEditCommand? {
+        private func formatterCommand(forKeyEquivalent key: String?, keyCode: UInt16? = nil) -> LaTeXEditCommand? {
             switch key?.lowercased() {
             case "b": .bold
             case "i": .italic
@@ -1274,7 +1275,16 @@ struct SourceTextView: NSViewRepresentable {
             case "/": .toggleComment
             case "]": .indentLines
             case "[": .outdentLines
-            default: nil
+            default:
+                switch keyCode {
+                case 11: .bold
+                case 34: .italic
+                case 32: .underline
+                case 44: .toggleComment
+                case 30: .indentLines
+                case 33: .outdentLines
+                default: nil
+                }
             }
         }
 
@@ -2241,6 +2251,17 @@ final class LaTeXCompletionOverlayView: NSView {
         selectedIndex = (selectedIndex + delta + candidates.count) % candidates.count
         ensureSelectionVisible()
         needsDisplay = true
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard isShowing, candidates.count > maxRows else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let rawDelta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
+        guard rawDelta != 0 else { return }
+        let rows = max(1, Int(ceil(abs(rawDelta) / max(1, rowHeight))))
+        moveSelection(delta: rawDelta < 0 ? rows : -rows)
     }
 
     override func mouseDown(with event: NSEvent) {
