@@ -41,6 +41,8 @@ final class AppRegressionXCTests: XCTestCase {
             hasMarkedText: false,
             recentlyTypedWithCompositionInputSource: true
         ))
+        XCTAssertGreaterThanOrEqual(ComposerNSTextView.markedTextCommitProtectionInterval, 2.0)
+        XCTAssertGreaterThanOrEqual(ComposerNSTextView.compositionTypingProtectionInterval, 5.0)
         XCTAssertTrue(ComposerNSTextView.shouldTreatReturnAsSend(
             characters: "\r",
             modifierFlags: [.shift],
@@ -226,6 +228,33 @@ final class AppRegressionXCTests: XCTestCase {
         )
     }
 
+    func testCompletionIndexSuggestsPdfGraphicsForIncludegraphics() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeafPDFGraphics-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryRoot.appendingPathComponent("figures", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        let mainURL = temporaryRoot.appendingPathComponent("main.tex")
+        let pdfURL = temporaryRoot.appendingPathComponent("figures/architecture.pdf")
+        let pngURL = temporaryRoot.appendingPathComponent("figures/overview.png")
+        try Data("\\documentclass{article}".utf8).write(to: mainURL)
+        try Data("%PDF-1.4\n".utf8).write(to: pdfURL)
+        try Data("png".utf8).write(to: pngURL)
+
+        let files = ProjectIndexer.discoverFiles(root: temporaryRoot)
+        let activeFile = try XCTUnwrap(files.first { $0.relativePath == "main.tex" })
+        let index = ProjectIndexer.completionIndex(
+            files: files,
+            activeFile: activeFile,
+            activeSource: "\\documentclass{article}"
+        )
+
+        XCTAssertTrue(index.includedFiles.contains("figures/overview.png"))
+        XCTAssertTrue(index.includedFiles.contains("figures/architecture.pdf"))
+    }
+
     func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {
         let source = "\\sec" as NSString
         XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
@@ -376,6 +405,42 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testIncludegraphicsArgumentCompletionAcceptsPdfGraphicsInTheRealEditor() async throws {
+        let state = SourceTypingState()
+        let context = LaTeXCompletionContext(index: ProjectIndex(
+            rootDocument: nil,
+            sectionSummaries: [:],
+            labels: [:],
+            citations: [],
+            includedFiles: ["figures/architecture.pdf", "figures/overview.png"]
+        ))
+        let host = makeSourceEditorHost(state: state, completionContext: context)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        try await typeCharacters([
+            ("\\", 42), ("i", 34), ("n", 45), ("c", 8), ("l", 37),
+            ("u", 32), ("d", 2), ("e", 14), ("g", 5), ("r", 15),
+            ("a", 0), ("p", 35), ("h", 4), ("i", 34), ("c", 8),
+            ("s", 1), ("{", 33), ("f", 3), ("i", 34), ("g", 5)
+        ], in: textView, window: host.window)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["figures/architecture.pdf", "figures/overview.png"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\includegraphics{figures/architecture.pdf}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 41, length: 0))
+        XCTAssertEqual(state.text, "\\includegraphics{figures/architecture.pdf}")
+        XCTAssertEqual(state.selection, NSRange(location: 41, length: 0))
+    }
+
+    @MainActor
     func testRenderedShortUserChatBubblePaintsOnlyTheMessageWidth() async throws {
         let message = ChatMessage(role: .user, text: "python", createdAt: Date(timeIntervalSince1970: 0))
         let view = NSHostingView(rootView: ChatBubble(
@@ -404,6 +469,38 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertLessThan(bubbleWidth, 150)
         XCTAssertGreaterThan(bubbleWidth, 40)
+    }
+
+    @MainActor
+    func testRenderedShortUserChatBubbleStillTracksContentWhenInterfaceTextIsLarge() async throws {
+        let message = ChatMessage(role: .user, text: "你是什么模型呀", createdAt: Date(timeIntervalSince1970: 0))
+        let view = NSHostingView(rootView: ChatBubble(
+            message: message,
+            onEdit: {},
+            onRegenerate: {}
+        )
+        .environment(\.sourceLeafInterfaceScale, 1.6)
+        .accentColor(.blue)
+        .frame(width: 760, height: 150))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 150),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        try await Task.sleep(for: .milliseconds(250))
+        view.layoutSubtreeIfNeeded()
+
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let bubbleWidth = try XCTUnwrap(blueBubbleHorizontalSpan(in: bitmap))
+
+        XCTAssertLessThan(bubbleWidth, 360)
+        XCTAssertGreaterThan(bubbleWidth, 90)
     }
 
     @MainActor
@@ -951,6 +1048,27 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertEqual(textView.string, "alpha testomega")
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 10, length: 0))
+    }
+
+    @MainActor
+    func testStaleSwiftUISelectionEchoCannotMoveCaretForwardAfterDelete() async throws {
+        let state = SourceTypingState(text: "alpha testomega", selection: NSRange(location: 10, length: 0))
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 10, length: 0))
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\u{7f}", keyCode: 51, window: host.window)))
+        try await Task.sleep(for: .milliseconds(8))
+        XCTAssertEqual(textView.string, "alpha tesomega")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
+
+        state.selection = NSRange(location: 10, length: 0)
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 9, length: 0))
     }
 
     @MainActor

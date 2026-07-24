@@ -277,6 +277,24 @@ import Testing
 }
 
 @MainActor
+@Test func conversationHistoryContextIsBoundedForLongChatSessions() throws {
+    let messages = (0..<40).flatMap { index in
+        [
+            ChatMessage(role: .user, text: "user-\(index) " + String(repeating: "u", count: 700)),
+            ChatMessage(role: .assistant, text: "assistant-\(index) " + String(repeating: "a", count: 700)),
+            ChatMessage(role: .system, text: AppModel.aiActivityPrefix + "internal-\(index)")
+        ]
+    }
+
+    let history = AppModel.conversationHistoryContext(from: messages, messageLimit: 12, characterLimit: 4_000)
+
+    #expect(history.count <= 4_000)
+    #expect(!history.contains(AppModel.aiActivityPrefix))
+    #expect(!history.contains("user-0"))
+    #expect(history.contains("assistant-39"))
+}
+
+@MainActor
 @Test func providerHealthChecksArePrintedIntoTheConversationHistory() throws {
     let state = try productTestState(named: "provider-health-chat-message")
     defer { state.cleanup() }

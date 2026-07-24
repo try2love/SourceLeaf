@@ -213,7 +213,9 @@ public enum ProjectIndexer {
             guard let source = try? String(contentsOf: file.url, encoding: .utf8) else { return [String]() }
             return citationKeys(in: source)
         }
-        let imageFiles = files.filter { $0.kind == .image }.map(\.relativePath)
+        let imageFiles = files
+            .filter { $0.kind == .image || $0.kind == .pdf }
+            .map(\.relativePath)
         return ProjectIndex(
             rootDocument: nil,
             sectionSummaries: [:],

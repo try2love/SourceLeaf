@@ -709,9 +709,9 @@ final class ComposerNSTextView: NSTextView {
             modifierFlags: event.modifierFlags,
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
-            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < 0.8,
+            recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < Self.markedTextCommitProtectionInterval,
             compositionInputSourceActive: compositionInputSourceActive,
-            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < 2.5
+            recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < Self.compositionTypingProtectionInterval
         ), onSend?() == true {
             return
         }
@@ -746,6 +746,9 @@ final class ComposerNSTextView: NSTextView {
         if recentlyTypedWithCompositionInputSource && !shift { return false }
         return sendBehavior == .enter ? !shift : shift
     }
+
+    nonisolated static let markedTextCommitProtectionInterval: TimeInterval = 2.5
+    nonisolated static let compositionTypingProtectionInterval: TimeInterval = 5.0
 
     static func currentInputSourcePrefersReturnCommit() -> Bool {
         if let current = NSTextInputContext.current?.selectedKeyboardInputSource,
@@ -823,6 +826,7 @@ struct ChatBubble: View {
     let onEdit: () -> Void
     let onRegenerate: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.sourceLeafInterfaceScale) private var interfaceScale
 
     var body: some View {
         HStack {
@@ -857,7 +861,8 @@ struct ChatBubble: View {
             text: message.text,
             role: message.role,
             colorScheme: colorScheme,
-            alignment: message.role == .user ? .trailing : .leading
+            alignment: message.role == .user ? .trailing : .leading,
+            interfaceScale: interfaceScale
         )
         .layoutPriority(1)
     }
@@ -870,9 +875,10 @@ struct ChatBubble: View {
         text: String,
         role: ChatRole,
         colorScheme: ColorScheme,
-        alignment: Alignment
+        alignment: Alignment,
+        interfaceScale: Double = 1
     ) -> some View {
-        let preferredWidth = preferredBubbleWidth(for: text)
+        let preferredWidth = preferredBubbleWidth(for: text, interfaceScale: interfaceScale)
         return ViewThatFits(in: .horizontal) {
             renderedBubble(text: text, role: role, colorScheme: colorScheme)
                 .frame(width: preferredWidth, alignment: alignment)
@@ -881,12 +887,17 @@ struct ChatBubble: View {
                 .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    static func preferredBubbleWidth(for text: String, fontSize: CGFloat = NSFont.systemFontSize) -> CGFloat {
+    static func preferredBubbleWidth(
+        for text: String,
+        fontSize: CGFloat = NSFont.systemFontSize,
+        interfaceScale: Double = 1
+    ) -> CGFloat {
+        let scaledFontSize = fontSize * CGFloat(max(0.85, min(1.6, interfaceScale)))
         let contentWidth = ChatMarkdownBlock.parse(text).map {
-            $0.estimatedDisplayWidth(fontSize: fontSize)
+            $0.estimatedDisplayWidth(fontSize: scaledFontSize)
         }.max() ?? 0
         let padded = ceil(contentWidth + bubbleHorizontalPadding)
         return min(maximumBubbleWidth, max(minimumBubbleWidth, padded))

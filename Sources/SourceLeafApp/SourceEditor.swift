@@ -1509,20 +1509,21 @@ struct SourceTextView: NSViewRepresentable {
         func shouldIgnoreSelectionEchoDuringLocalEdit(
             _ range: NSRange,
             nativeSelection: NSRange,
-            boundText: String,
-            nativeText: String
+            boundText _: String,
+            nativeText _: String
         ) -> Bool {
             guard Date().timeIntervalSince(lastLocalEditDate) < 0.28,
-                  boundText == nativeText,
                   range.length == 0,
                   nativeSelection.length == 0 else { return false }
             // During rapid typing the NSTextView is the source of truth. A
-            // zero-length binding selection behind the native insertion point
-            // is almost always a stale SwiftUI echo from the previous key
-            // event; accepting it reorders text (`test` -> `tset`). Explicit
-            // jumps such as find/outline happen outside this tiny post-edit
-            // window and are still applied normally.
-            return range.location < nativeSelection.location
+            // zero-length binding selection close to the native insertion
+            // point is almost always a stale SwiftUI echo from the previous key
+            // event. Accepting it reorders inserts (`test` -> `tset`) or moves
+            // the caret back after deletes. Explicit jumps such as find/outline
+            // happen outside this tiny post-edit window and are still applied
+            // normally.
+            return range.location != nativeSelection.location
+                && abs(range.location - nativeSelection.location) <= 8
         }
 
         func hideCompletionOverlay() {

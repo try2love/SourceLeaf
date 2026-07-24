@@ -1382,11 +1382,31 @@ final class AppModel: ObservableObject {
 
     private func baseConversationContext() -> [String: String] {
         var result: [String: String] = [:]
-        let prior = messages.dropLast()
-            .filter { !Self.isInternalChatNotice($0) }
-            .map { "\($0.role.rawValue): \($0.text)" }
-            .joined(separator: "\n\n")
+        let prior = Self.conversationHistoryContext(from: Array(messages.dropLast()))
         if !prior.isEmpty { result["conversation-history"] = prior }
+        return result
+    }
+
+    static let conversationHistoryMessageLimit = 12
+    static let conversationHistoryCharacterLimit = 12_000
+
+    static func conversationHistoryContext(
+        from messages: [ChatMessage],
+        messageLimit: Int = conversationHistoryMessageLimit,
+        characterLimit: Int = conversationHistoryCharacterLimit
+    ) -> String {
+        guard messageLimit > 0, characterLimit > 0 else { return "" }
+        let visible = messages
+            .filter { !Self.isInternalChatNotice($0) }
+            .suffix(messageLimit)
+            .map { "\($0.role.rawValue): \($0.text)" }
+        var result = visible.joined(separator: "\n\n")
+        guard result.count > characterLimit else { return result }
+        let start = result.index(result.endIndex, offsetBy: -characterLimit)
+        result = String(result[start...])
+        if let firstBreak = result.range(of: "\n\n") {
+            result = String(result[firstBreak.upperBound...])
+        }
         return result
     }
 
