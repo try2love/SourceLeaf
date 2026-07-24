@@ -285,7 +285,7 @@ enum LaTeXCompletionEngine {
         case "includegraphics":
             values = context.graphicsFiles.map { ($0, "file", "Project file") }
         case "input", "include":
-            values = context.projectFiles.map { ($0, "file", "Project file") }
+            values = texSourceFiles(in: context).map { ($0, "file", "Project source") }
         case "begin", "end":
             values = commonEnvironmentNames.map { ($0, "env", "LaTeX environment") }
         case "usepackage", "RequirePackage":
@@ -411,6 +411,17 @@ enum LaTeXCompletionEngine {
             let nsPath = path as NSString
             guard nsPath.pathExtension.lowercased() == "bib" else { return nil }
             let insertion = includeExtension ? path : nsPath.deletingPathExtension
+            guard seen.insert(insertion).inserted else { return nil }
+            return insertion
+        }
+    }
+
+    private static func texSourceFiles(in context: LaTeXCompletionContext) -> [String] {
+        var seen = Set<String>()
+        return context.projectFiles.compactMap { path in
+            let nsPath = path as NSString
+            guard nsPath.pathExtension.lowercased() == "tex" else { return nil }
+            let insertion = nsPath.deletingPathExtension
             guard seen.insert(insertion).inserted else { return nil }
             return insertion
         }

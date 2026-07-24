@@ -190,6 +190,42 @@ final class AppRegressionXCTests: XCTestCase {
         )
     }
 
+    func testLatexArgumentCompletionSuggestsProjectTexFilesWithoutExtension() throws {
+        let context = LaTeXCompletionContext(
+            projectFiles: ["sections/method.tex", "sections/appendix.tex", "reference.bib", "macros.sty"]
+        )
+
+        let inputSource = "\\input{sec" as NSString
+        let inputContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: inputSource,
+            cursorLocation: inputSource.length
+        ))
+        XCTAssertEqual(inputContext.command, "input")
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: inputContext.command,
+                prefix: inputContext.prefix,
+                context: context
+            ).map(\.insertion),
+            ["sections/method", "sections/appendix"]
+        )
+
+        let includeSource = "\\include{sections/m" as NSString
+        let includeContext = try XCTUnwrap(LaTeXCompletionEngine.argumentContext(
+            in: includeSource,
+            cursorLocation: includeSource.length
+        ))
+        XCTAssertEqual(includeContext.command, "include")
+        XCTAssertEqual(
+            LaTeXCompletionEngine.argumentSuggestions(
+                command: includeContext.command,
+                prefix: includeContext.prefix,
+                context: context
+            ).map(\.insertion),
+            ["sections/method"]
+        )
+    }
+
     func testLatexCompletionNarrowsCommandPrefixWithoutRepeatedAutoTriggering() {
         let source = "\\sec" as NSString
         XCTAssertFalse(LaTeXCompletionEngine.shouldTriggerCompletion(
@@ -308,6 +344,35 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 23, length: 0))
         XCTAssertEqual(state.text, "\\bibliography{reference}")
         XCTAssertEqual(state.selection, NSRange(location: 23, length: 0))
+    }
+
+    @MainActor
+    func testInputArgumentCompletionAppearsWithoutTexExtensionInTheRealEditor() async throws {
+        let state = SourceTypingState()
+        let context = LaTeXCompletionContext(projectFiles: ["sections/method.tex", "reference.bib", "macros.sty"])
+        let host = makeSourceEditorHost(state: state, completionContext: context)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        try await typeCharacters([
+            ("\\", 42), ("i", 34), ("n", 45), ("p", 35),
+            ("u", 32), ("t", 17), ("{", 33),
+            ("s", 1), ("e", 14), ("c", 8)
+        ], in: textView, window: host.window)
+
+        let overlay = try XCTUnwrap(findCompletionOverlay(in: host.view))
+        XCTAssertTrue(overlay.isShowing)
+        XCTAssertEqual(overlay.candidates.map(\.insertion), ["sections/method"])
+
+        textView.keyDown(with: try XCTUnwrap(keyEvent(character: "\t", keyCode: 48, window: host.window)))
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(textView.string, "\\input{sections/method}")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 22, length: 0))
+        XCTAssertEqual(state.text, "\\input{sections/method}")
+        XCTAssertEqual(state.selection, NSRange(location: 22, length: 0))
     }
 
     @MainActor
