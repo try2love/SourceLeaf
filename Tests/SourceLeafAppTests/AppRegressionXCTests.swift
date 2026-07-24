@@ -59,6 +59,48 @@ final class AppRegressionXCTests: XCTestCase {
         XCTAssertFalse(ComposerNSTextView.inputSourcePrefersReturnCommit(sourceID: "com.apple.keylayout.US", languages: ["en"]))
     }
 
+    @MainActor
+    func testComposerSendsOnlyAfterTextInputSystemProducesANewlineCommand() {
+        let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
+        textView.inputSourcePrefersReturnCommitOverride = false
+        textView.sendBehavior = .enter
+        textView.string = "hello"
+        var sendCount = 0
+        textView.onSend = {
+            sendCount += 1
+            return true
+        }
+
+        textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        XCTAssertEqual(sendCount, 1)
+
+        textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
+        textView.setMarkedText(
+            "python",
+            selectedRange: NSRange(location: 6, length: 0),
+            replacementRange: textView.selectedRange()
+        )
+        textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        XCTAssertEqual(sendCount, 1)
+    }
+
+    @MainActor
+    func testComposerReturnDoesNotSendWhenTheCurrentInputSourceUsesReturnToCommitCandidates() {
+        let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
+        textView.inputSourcePrefersReturnCommitOverride = true
+        textView.sendBehavior = .enter
+        textView.string = "python"
+        var didSend = false
+        textView.onSend = {
+            didSend = true
+            return true
+        }
+
+        textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+
+        XCTAssertFalse(didSend)
+    }
+
     func testFindMatchesReturnEveryOccurrenceForPersistentHighlighting() {
         let matches = SourceFindController.matches(in: "alpha beta Alpha alphabet", query: "alpha")
 
@@ -501,6 +543,41 @@ final class AppRegressionXCTests: XCTestCase {
 
         XCTAssertLessThan(bubbleWidth, 360)
         XCTAssertGreaterThan(bubbleWidth, 90)
+    }
+
+    @MainActor
+    func testRenderedLongUserChatBubbleWrapsInsideANarrowColumn() async throws {
+        let message = ChatMessage(
+            role: .user,
+            text: "请用最简单直观的方式介绍你自己，并且说明你能不能帮助我修改 LaTeX 论文中的公式、表格和参考文献。",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let view = NSHostingView(rootView: ChatBubble(
+            message: message,
+            onEdit: {},
+            onRegenerate: {}
+        )
+        .accentColor(.blue)
+        .frame(width: 360, height: 180))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer { closeWindow(window) }
+        try await Task.sleep(for: .milliseconds(250))
+        view.layoutSubtreeIfNeeded()
+
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let bubbleWidth = try XCTUnwrap(blueBubbleHorizontalSpan(in: bitmap))
+
+        XCTAssertLessThanOrEqual(bubbleWidth, 330)
+        XCTAssertGreaterThan(bubbleWidth, 180)
     }
 
     @MainActor

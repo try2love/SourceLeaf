@@ -673,6 +673,7 @@ final class ComposerNSTextView: NSTextView {
     var sendBehavior: ChatSendBehavior = .enter
     var isGenerating = false
     var onSend: (() -> Bool)?
+    var inputSourcePrefersReturnCommitOverride: Bool?
     private var lastMarkedTextCommitDate = Date.distantPast
     private var lastCompositionLikeKeyDate = Date.distantPast
 
@@ -704,21 +705,33 @@ final class ComposerNSTextView: NSTextView {
            compositionInputSourceActive {
             lastCompositionLikeKeyDate = Date()
         }
+        super.keyDown(with: event)
+    }
+
+    override func doCommand(by commandSelector: Selector) {
+        guard Self.isNewlineCommand(commandSelector) else {
+            super.doCommand(by: commandSelector)
+            return
+        }
+        let event = NSApplication.shared.currentEvent
         if Self.shouldTreatReturnAsSend(
-            characters: event.charactersIgnoringModifiers,
-            modifierFlags: event.modifierFlags,
+            characters: "\r",
+            modifierFlags: event?.modifierFlags ?? [],
             sendBehavior: sendBehavior,
             hasMarkedText: hasMarkedText(),
             recentlyCommittedMarkedText: Date().timeIntervalSince(lastMarkedTextCommitDate) < Self.markedTextCommitProtectionInterval,
-            compositionInputSourceActive: compositionInputSourceActive,
+            compositionInputSourceActive: inputContextPrefersReturnCommit(),
             recentlyTypedWithCompositionInputSource: Date().timeIntervalSince(lastCompositionLikeKeyDate) < Self.compositionTypingProtectionInterval
         ), onSend?() == true {
             return
         }
-        super.keyDown(with: event)
+        super.doCommand(by: commandSelector)
     }
 
     private func inputContextPrefersReturnCommit() -> Bool {
+        if let inputSourcePrefersReturnCommitOverride {
+            return inputSourcePrefersReturnCommitOverride
+        }
         if Self.currentInputSourcePrefersReturnCommit() {
             return true
         }
@@ -749,6 +762,11 @@ final class ComposerNSTextView: NSTextView {
 
     nonisolated static let markedTextCommitProtectionInterval: TimeInterval = 2.5
     nonisolated static let compositionTypingProtectionInterval: TimeInterval = 5.0
+
+    nonisolated static func isNewlineCommand(_ commandSelector: Selector) -> Bool {
+        commandSelector == #selector(NSResponder.insertNewline(_:))
+            || commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))
+    }
 
     static func currentInputSourcePrefersReturnCommit() -> Bool {
         if let current = NSTextInputContext.current?.selectedKeyboardInputSource,
@@ -878,11 +896,9 @@ struct ChatBubble: View {
         alignment: Alignment,
         interfaceScale: Double = 1
     ) -> some View {
-        let preferredWidth = preferredBubbleWidth(for: text, interfaceScale: interfaceScale)
         return ViewThatFits(in: .horizontal) {
             renderedBubble(text: text, role: role, colorScheme: colorScheme)
-                .frame(width: preferredWidth, alignment: alignment)
-                .fixedSize(horizontal: false, vertical: true)
+                .fixedSize(horizontal: true, vertical: true)
             renderedBubble(text: text, role: role, colorScheme: colorScheme)
                 .frame(maxWidth: Self.maximumBubbleWidth, alignment: alignment)
                 .fixedSize(horizontal: false, vertical: true)
