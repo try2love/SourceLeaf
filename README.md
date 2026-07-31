@@ -63,6 +63,7 @@ The rest of the application follows the same local-first boundary. Project metad
 ### Reviewable AI assistance
 
 - **Local Codex CLI first**: reuse the Mac's existing Codex login and configuration without copying `auth.json`.
+- **Persistent local conversation bridge**: keep one `codex app-server` process and one ephemeral thread per SourceLeaf chat while the app is running, so later turns avoid repeated CLI startup and environment initialization.
 - **Configurable providers**: local Codex, restricted headless CodeBuddy, and HTTP API profiles with model and supported reasoning controls.
 - **Verifiable connectivity**: an explicit `hello` health check drives the unknown/checking/connected/failed status indicator.
 - **Selectable context scope**: none, selection only, nearby text, section, full document, project, or custom files; no-target requests use a normal plain-text conversation protocol.
@@ -147,7 +148,7 @@ Atomic write or rejection
 
 SourceLeaf records the target's original text and hash. If the source changes while a proposal is being generated, acceptance is refused and the user must create a fresh target.
 
-Local Codex runs from a source-free workspace in Application Support with ephemeral, read-only execution. CodeBuddy also runs headlessly from a source-free workspace with file, command, search, and web tools disabled. HTTP providers receive only the assembled target and selected context and have no filesystem or tool access through SourceLeaf.
+Local Codex runs from a source-free workspace in Application Support with ephemeral, read-only execution. SourceLeaf communicates with one persistent `codex app-server` process over JSONL and reuses an in-memory thread for each chat; thread IDs are discarded when the app or project closes. CodeBuddy also runs headlessly from a source-free workspace with file, command, search, and web tools disabled. HTTP providers receive only the assembled target and selected context and have no filesystem or tool access through SourceLeaf.
 
 ## Data and Privacy
 

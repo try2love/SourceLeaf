@@ -15,7 +15,7 @@ SourceLeaf separates deterministic, testable editing rules from the native macOS
 4. Returned target IDs are checked against the request. Each replacement is statically inspected for braces, environments, citations, references, and labels.
 5. The UI shows a diff. On acceptance, SourceLeaf checks the original target hash again and refuses to overwrite stale text.
 
-Local Codex does not run inside the paper project. It runs from an empty per-project directory in Application Support, uses the existing Codex CLI authentication and configuration, receives its prompt through standard input, and is restricted to read-only/ephemeral execution.
+Local Codex does not run inside the paper project. It runs from an empty per-project directory in Application Support, uses the existing Codex CLI authentication and configuration, and is restricted to read-only/ephemeral execution. SourceLeaf keeps one `codex app-server` subprocess connected over stdin/stdout JSONL and maps each active SourceLeaf chat to an in-memory Codex thread. Subsequent turns reuse that process and thread; editing or regenerating an earlier message invalidates the mapping so removed conversation state cannot leak into the next request.
 
 Local CodeBuddy follows the same source-free workspace boundary through its documented headless JSON mode. SourceLeaf disables file, shell, search, and web tools and parses only the CLI's `result` or `structured_output` field. Provider connectivity is never inferred from configuration alone: a user-triggered health check sends an exact-`hello` request and exposes unknown, checking, connected, or unavailable runtime state.
 

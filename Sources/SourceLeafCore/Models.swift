@@ -472,6 +472,7 @@ public struct AIProposal: Codable, Identifiable, Equatable, Sendable {
     public var summary: String
     public var replacements: [ProposedReplacement]
     public var providerName: String
+    public var providerThreadID: String?
     public var createdAt: Date
 
     public init(
@@ -479,12 +480,14 @@ public struct AIProposal: Codable, Identifiable, Equatable, Sendable {
         summary: String,
         replacements: [ProposedReplacement],
         providerName: String,
+        providerThreadID: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.summary = summary
         self.replacements = replacements
         self.providerName = providerName
+        self.providerThreadID = providerThreadID
         self.createdAt = createdAt
     }
 }

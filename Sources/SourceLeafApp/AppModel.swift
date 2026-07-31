@@ -134,6 +134,7 @@ final class AppModel: ObservableObject {
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
     private var chatStore: JSONFileStore<[ChatMessage]>?
     private var chatSessionsStore: JSONFileStore<[ChatSession]>?
+    private var codexThreadIDsBySession: [UUID: String] = [:]
     private var promptsStore: JSONFileStore<[PromptTemplate]>?
     private var floatingOrigins: [WorkspacePanel: DockZone] = [:]
     private var currentProjectStateKey: String?
@@ -385,6 +386,7 @@ final class AppModel: ObservableObject {
             historyStore = JSONFileStore(url: stateRoot.appendingPathComponent("ai-history.json"))
             chatStore = JSONFileStore(url: stateRoot.appendingPathComponent("messages.json"))
             chatSessionsStore = JSONFileStore(url: stateRoot.appendingPathComponent("chat-sessions.json"))
+            codexThreadIDsBySession.removeAll(keepingCapacity: false)
             configuration = try projectConfigStore?.load(default: ProjectConfiguration()) ?? ProjectConfiguration()
             layout = configuration.layout
             contextScope = configuration.defaultContextScope
@@ -786,6 +788,10 @@ final class AppModel: ObservableObject {
     func sendToAI() {
         guard !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let root = projectRoot else { return }
+        let requestSessionID = selectedChatSessionID
+        let existingThreadID = requestSessionID.flatMap { sessionID in
+            codexThreadIDsBySession[sessionID]
+        }
         attachLineReferencesFromInstruction()
         configuration.defaultContextScope = contextScope
         persistConfiguration()
@@ -819,7 +825,8 @@ final class AppModel: ObservableObject {
                     targets: targets,
                     context: context,
                     systemPrompt: configuration.systemPrompt,
-                    projectRoot: root
+                    projectRoot: root,
+                    existingThreadID: existingThreadID
                 )
                 let proposal = try await provider.generateProposal(for: request) { [weak self] event in
                     Task { @MainActor [weak self] in
@@ -828,6 +835,17 @@ final class AppModel: ObservableObject {
                 }
                 try Task.checkCancellation()
                 flushStreamingAssistantText()
+                persistProviderThreadID(proposal.providerThreadID, sessionID: requestSessionID)
+                if targets.isEmpty {
+                    appendAIActivityMessage()
+                    messages.append(ChatMessage(role: .assistant, text: proposal.summary))
+                    streamingAssistantText = ""
+                    generationEvents = []
+                    persistMessages()
+                    generating = false
+                    generationStatus = ""
+                    return
+                }
                 generationStatus = L10n.text("ai.validatingResponse")
                 appendGenerationEvent(generationStatus)
                 guard Set(proposal.replacements.map(\.targetID)).isSubset(of: Set(targets.map(\.id))) else {
@@ -910,6 +928,7 @@ final class AppModel: ObservableObject {
               let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
         instruction = message.text
         messages.removeSubrange(index...)
+        invalidateSelectedCodexThread()
         pendingProposal = nil
         persistMessages()
     }
@@ -921,6 +940,7 @@ final class AppModel: ObservableObject {
               let userIndex = messages[..<assistantIndex].lastIndex(where: { $0.role == .user }) else { return false }
         let prompt = messages[userIndex].text
         messages.removeSubrange(userIndex..<messages.count)
+        invalidateSelectedCodexThread()
         persistMessages()
         instruction = prompt
         pendingProposal = nil
@@ -1176,6 +1196,7 @@ final class AppModel: ObservableObject {
         messages = []
         chatSessions = []
         selectedChatSessionID = nil
+        codexThreadIDsBySession.removeAll(keepingCapacity: false)
         do {
             try chatStore?.remove()
             try chatSessionsStore?.remove()
@@ -1475,6 +1496,17 @@ final class AppModel: ObservableObject {
             }
             try chatSessionsStore?.save(chatSessions)
         } catch { report(error) }
+    }
+
+    private func persistProviderThreadID(_ threadID: String?, sessionID: UUID?) {
+        guard let sessionID else { return }
+        if let threadID { codexThreadIDsBySession[sessionID] = threadID }
+        else { codexThreadIDsBySession.removeValue(forKey: sessionID) }
+    }
+
+    private func invalidateSelectedCodexThread() {
+        guard let selectedChatSessionID else { return }
+        codexThreadIDsBySession.removeValue(forKey: selectedChatSessionID)
     }
 
     private func persistSelectedChatSession() {

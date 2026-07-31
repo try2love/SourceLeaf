@@ -6,19 +6,22 @@ public struct AIRequest: Sendable {
     public var context: [String: String]
     public var systemPrompt: String
     public var projectRoot: URL
+    public var existingThreadID: String?
 
     public init(
         instruction: String,
         targets: [SourceTarget],
         context: [String: String],
         systemPrompt: String = "",
-        projectRoot: URL
+        projectRoot: URL,
+        existingThreadID: String? = nil
     ) {
         self.instruction = instruction
         self.targets = targets
         self.context = context
         self.systemPrompt = systemPrompt
         self.projectRoot = projectRoot
+        self.existingThreadID = existingThreadID
     }
 }
 
@@ -214,6 +217,7 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
     private let executableURL: URL
     private let runner: ProcessRunner
     private let profile: ProviderProfile
+    private let appServer: CodexAppServerClient
 
     public init(
         profile: ProviderProfile = .localCodex,
@@ -226,6 +230,7 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         self.executableURL = executableURL
         self.runner = runner
         self.profile = profile
+        appServer = .shared
         displayName = profile.name
     }
 
@@ -238,11 +243,39 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
         onEvent: @escaping @Sendable (AIProviderEvent) -> Void
     ) async throws -> AIProposal {
         onEvent(.requestStarted)
-        let prompt = AIEditPromptBuilder.buildForCLI(request)
         let sandboxDirectory = try Self.sandboxDirectory(
             key: String(SourceTargetService.hash(request.projectRoot.standardizedFileURL.path).prefix(16))
         )
         try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
+        var isolatedRequest = request
+        isolatedRequest.projectRoot = sandboxDirectory
+        do {
+            let result = try await appServer.runTurn(
+                executableURL: executableURL,
+                request: isolatedRequest,
+                profile: profile,
+                onEvent: onEvent
+            )
+            if request.targets.isEmpty {
+                return AIProposal(
+                    summary: result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    replacements: [],
+                    providerName: displayName,
+                    providerThreadID: result.threadID
+                )
+            }
+            var proposal = try AIProposalCodec.decode(result.text, providerName: displayName)
+            proposal.providerThreadID = result.threadID
+            return proposal
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as CodexAppServerError where Self.shouldUseLegacyFallback(for: error) {
+            onEvent(.working)
+        }
+
+        // Compatibility fallback for older Codex installations that do not
+        // provide app-server. Normal SourceLeaf chat uses the persistent path.
+        let prompt = AIEditPromptBuilder.buildForCLI(request)
         let output = try await runner.run(
             executableURL: executableURL,
             arguments: Self.invocationArguments(for: profile, chatFastPath: request.targets.isEmpty),
@@ -261,17 +294,31 @@ public final class CodexCLIProvider: AIProvider, @unchecked Sendable {
     }
 
     public func healthCheck() async throws -> String {
-        let sandboxDirectory = try Self.sandboxDirectory(key: "Health")
-        try FileManager.default.createDirectory(at: sandboxDirectory, withIntermediateDirectories: true)
-        let output = try await runner.run(
-            executableURL: executableURL,
-            arguments: Self.invocationArguments(for: profile, chatFastPath: true),
-            currentDirectoryURL: sandboxDirectory,
-            input: Data(AIProviderHealthCheck.prompt.utf8)
+        let directory = try Self.sandboxDirectory(key: "Health")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let proposal = try await generateProposal(
+            for: AIRequest(
+                instruction: AIProviderHealthCheck.prompt,
+                targets: [],
+                context: [:],
+                projectRoot: directory
+            )
         )
-        guard output.exitCode == 0 else { throw ProcessRunnerError.nonZeroExit(output) }
-        let message = Self.lastAgentMessage(in: output.standardOutput) ?? output.standardOutput
-        return try AIProviderHealthCheck.validated(message)
+        return try AIProviderHealthCheck.validated(proposal.summary)
+    }
+
+    private static func shouldUseLegacyFallback(for error: CodexAppServerError) -> Bool {
+        switch error {
+        case .serverClosed, .invalidMessage:
+            return true
+        case let .serverError(message):
+            let normalized = message.lowercased()
+            return normalized.contains("method not found")
+                || normalized.contains("unknown method")
+                || normalized.contains("app-server") && normalized.contains("unsupported")
+        case .emptyResponse, .busy:
+            return false
+        }
     }
 
     private static func sandboxDirectory(key: String) throws -> URL {

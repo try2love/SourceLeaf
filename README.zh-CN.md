@@ -63,6 +63,7 @@ SourceLeaf 将学术写作的核心流程放在同一个原生工作区中：编
 ### 可审阅的 AI 辅助
 
 - **本机 Codex CLI 优先**：复用当前 Mac 的 Codex 登录和配置，不复制 `auth.json`。
+- **常驻本机对话桥接**：应用运行期间复用同一个 `codex app-server` 进程，并为每个 SourceLeaf 会话保留一个临时 thread，后续对话不再重复启动 CLI 和初始化运行环境。
 - **可配置 Provider**：支持本机 Codex、受限无头 CodeBuddy 和 HTTP API，可选择模型与 Provider 支持的思考深度。
 - **可验证连接**：显式发送 `hello` 健康检查，驱动未检测/检测中/已连接/失败状态。
 - **可选择上下文范围**：无、仅选区、附近内容、当前章节、全文、整个项目或自定义文件；没有修改目标时自动使用普通纯文本对话协议。
@@ -147,7 +148,7 @@ Provider 修改建议
 
 SourceLeaf 会记录目标原文及其哈希。如果生成建议期间源码已经变化，应用会拒绝接受旧建议，用户需要重新创建目标。
 
-本机 Codex 在 Application Support 下不包含论文源码的工作区中运行，并使用临时、只读执行模式。CodeBuddy 也以无头模式运行于不含源码的工作区，并禁用文件、命令、搜索和网络工具。HTTP Provider 只能接收组装后的目标和所选上下文，不会通过 SourceLeaf 获得文件系统或工具权限。
+本机 Codex 在 Application Support 下不包含论文源码的工作区中运行，并使用临时、只读执行模式。SourceLeaf 通过 JSONL 与一个常驻的 `codex app-server` 进程通信，并为每个对话复用内存中的 thread；关闭应用或项目后即丢弃 thread ID。CodeBuddy 也以无头模式运行于不含源码的工作区，并禁用文件、命令、搜索和网络工具。HTTP Provider 只能接收组装后的目标和所选上下文，不会通过 SourceLeaf 获得文件系统或工具权限。
 
 ## 数据与隐私
 

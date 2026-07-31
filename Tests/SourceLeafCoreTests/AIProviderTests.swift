@@ -87,6 +87,50 @@ import Testing
     #expect(explicitChatArguments.contains("model_reasoning_effort=\"high\""))
 }
 
+@Test func codexAppServerWireUsesPersistentThreadsAndStreamsAgentDeltas() throws {
+    let profile = ProviderProfile(
+        name: "Local Codex",
+        kind: .localCodex,
+        model: "gpt-5.6-sol",
+        reasoningEffort: .low
+    )
+    let start = CodexAppServerWire.threadStartRequest(
+        id: 2,
+        profile: profile,
+        cwd: URL(fileURLWithPath: "/tmp/sourceleaf-app-server")
+    )
+    #expect(start["method"] as? String == "thread/start")
+    let startParams = try #require(start["params"] as? [String: Any])
+    #expect(startParams["ephemeral"] as? Bool == true)
+    #expect(startParams["model"] as? String == "gpt-5.6-sol")
+    #expect(startParams["sandbox"] as? String == "read-only")
+
+    let turn = CodexAppServerWire.turnStartRequest(
+        id: 3,
+        threadID: "thread-123",
+        prompt: "hello",
+        model: profile.model,
+        reasoningEffort: .low
+    )
+    #expect(turn["method"] as? String == "turn/start")
+    let turnParams = try #require(turn["params"] as? [String: Any])
+    #expect(turnParams["threadId"] as? String == "thread-123")
+    #expect(turnParams["model"] as? String == "gpt-5.6-sol")
+    #expect(turnParams["effort"] as? String == "low")
+
+    let delta: [String: Any] = [
+        "method": "item/agentMessage/delta",
+        "params": ["threadId": "thread-123", "turnId": "turn-456", "itemId": "item-1", "delta": "Hel"]
+    ]
+    #expect(CodexAppServerWire.providerEvent(from: delta, threadID: "thread-123", turnID: "turn-456") == .textDelta("Hel"))
+
+    let completed: [String: Any] = [
+        "method": "turn/completed",
+        "params": ["threadId": "thread-123", "turn": ["id": "turn-456", "status": "completed"]]
+    ]
+    #expect(CodexAppServerWire.isTurnCompleted(completed, threadID: "thread-123", turnID: "turn-456"))
+}
+
 @Test func codeBuddyInvocationIsHeadlessModelAwareAndToolRestricted() throws {
     let profile = ProviderProfile(name: "CodeBuddy", kind: .codeBuddy, model: "claude-test")
     let arguments = CodeBuddyCLIProvider.invocationArguments(for: profile)
