@@ -313,6 +313,12 @@
 "save.dontSave" = "不保存";
 "save.switchTitle" = "切换文件前保存修改吗？";
 "save.switchMessage" = "当前源码包含尚未保存的修改。";
+"externalSource.title" = "磁盘上的源码已更新";
+"externalSource.message" = "其他应用修改了 %@。请选择加载磁盘版本，或保留 SourceLeaf 当前缓存内容。";
+"externalSource.loadDisk" = "加载磁盘版本";
+"externalSource.keepCurrent" = "保留当前缓存";
+"status.externalSourceLoaded" = "已加载磁盘上的新源码。";
+"status.externalSourceKept" = "已保留当前缓存，未加载磁盘版本。";
 "preview.zoomIn" = "放大";
 "preview.zoomOut" = "缩小";
 "preview.center" = "居中图片";

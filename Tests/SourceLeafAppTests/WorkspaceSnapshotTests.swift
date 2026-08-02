@@ -174,6 +174,77 @@ import Testing
 }
 
 @MainActor
+@Test func pdfPreviewReloadsSamePathAndPreservesManualZoom() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SourceLeaf-pdf-refresh-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("paper.pdf")
+    try writeTestPDF(to: url, pageCount: 1)
+    let state = PDFRefreshState(url: url, revision: 1, zoomScale: 2)
+    let hostingView = NSHostingView(rootView: PDFRefreshHarness(state: state))
+    hostingView.frame = NSRect(x: 0, y: 0, width: 640, height: 700)
+    hostingView.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+    let pdfView = try #require(findPDFView(in: hostingView))
+    #expect(pdfView.document?.pageCount == 1)
+    #expect(abs(pdfView.scaleFactor - 2) < 0.01)
+
+    try writeTestPDF(to: url, pageCount: 2)
+    state.revision += 1
+    hostingView.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+
+    #expect(pdfView.document?.pageCount == 2)
+    #expect(abs(pdfView.scaleFactor - 2) < 0.01)
+    #expect(!pdfView.autoScales)
+}
+
+@MainActor
+private final class PDFRefreshState: ObservableObject {
+    let url: URL
+    @Published var revision: Int
+    @Published var zoomScale: Double
+
+    init(url: URL, revision: Int, zoomScale: Double) {
+        self.url = url
+        self.revision = revision
+        self.zoomScale = zoomScale
+    }
+}
+
+private struct PDFRefreshHarness: View {
+    @ObservedObject var state: PDFRefreshState
+
+    var body: some View {
+        PDFKitView(
+            url: state.url,
+            contentRevision: state.revision,
+            selection: .constant(""),
+            pageIndex: .constant(0),
+            pageCount: .constant(0),
+            zoomScale: $state.zoomScale,
+            navigationTarget: nil,
+            onCommandClick: { _, _, _, _ in }
+        )
+    }
+}
+
+private func writeTestPDF(to url: URL, pageCount: Int) throws {
+    let document = PDFDocument()
+    for index in 0..<pageCount {
+        let image = NSImage(size: NSSize(width: 300, height: 400))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 300, height: 400).fill()
+        NSString(string: "Page \(index + 1)").draw(at: NSPoint(x: 40, y: 200))
+        image.unlockFocus()
+        document.insert(try #require(PDFPage(image: image)), at: index)
+    }
+    #expect(document.write(to: url))
+}
+
+@MainActor
 @Test func pdfContainerRoutesControlWheelBeforeItsInternalScrollViewConsumesIt() throws {
     let pdfView = NavigablePDFView()
     pdfView.minScaleFactor = 0.1

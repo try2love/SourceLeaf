@@ -513,6 +513,7 @@ struct PDFPanel: View {
                 ZStack(alignment: .bottom) {
                     PDFKitView(
                         url: url,
+                        contentRevision: model.pdfContentRevision,
                         selection: $model.pdfSelection,
                         pageIndex: $model.pdfPageIndex,
                         pageCount: $model.pdfPageCount,
@@ -712,6 +713,7 @@ struct PDFPanel: View {
 
 struct PDFKitView: NSViewRepresentable {
     let url: URL
+    let contentRevision: Int
     @Binding var selection: String
     @Binding var pageIndex: Int
     @Binding var pageCount: Int
@@ -722,6 +724,7 @@ struct PDFKitView: NSViewRepresentable {
 
     init(
         url: URL,
+        contentRevision: Int = 0,
         selection: Binding<String>,
         pageIndex: Binding<Int>,
         pageCount: Binding<Int>,
@@ -731,6 +734,7 @@ struct PDFKitView: NSViewRepresentable {
         onCommandClick: @escaping (Int, Double, Double, String?) -> Void
     ) {
         self.url = url
+        self.contentRevision = contentRevision
         _selection = selection
         _pageIndex = pageIndex
         _pageCount = pageCount
@@ -753,6 +757,11 @@ struct PDFKitView: NSViewRepresentable {
         view.displayDirection = .vertical
         view.displaysPageBreaks = true
         view.document = PDFDocument(url: url)
+        if zoomScale > 0 {
+            view.autoScales = false
+            view.scaleFactor = min(view.maxScaleFactor, max(view.minScaleFactor, zoomScale))
+        }
+        context.coordinator.lastContentRevision = contentRevision
         view.onCommandClick = onCommandClick
         view.onScaleChanged = { context.coordinator.scaleChanged(to: $0) }
         NotificationCenter.default.addObserver(
@@ -774,10 +783,29 @@ struct PDFKitView: NSViewRepresentable {
     func updateNSView(_ container: PDFPreviewContainerView, context: Context) {
         let view = container.pdfView
         container.showsThumbnails = showThumbnails
-        if zoomScale == 0, !view.autoScales { view.autoScales = true }
-        if view.document?.documentURL != url {
+        let shouldReloadDocument = view.document?.documentURL != url
+            || context.coordinator.lastContentRevision != contentRevision
+        if shouldReloadDocument {
+            let preservedScale = zoomScale > 0 ? zoomScale : (view.autoScales ? nil : view.scaleFactor)
+            let preservedPageIndex = view.document.flatMap { document in
+                view.currentPage.map { document.index(for: $0) }
+            } ?? pageIndex
             view.document = PDFDocument(url: url)
+            context.coordinator.lastContentRevision = contentRevision
+            if let preservedScale {
+                view.autoScales = false
+                view.scaleFactor = min(view.maxScaleFactor, max(view.minScaleFactor, preservedScale))
+            } else {
+                view.autoScales = true
+            }
             context.coordinator.updatePageState(from: view)
+            if let document = view.document,
+               document.pageCount > 0,
+               let preservedPage = document.page(at: min(max(preservedPageIndex, 0), document.pageCount - 1)) {
+                view.go(to: preservedPage)
+            }
+        } else if zoomScale == 0, !view.autoScales {
+            view.autoScales = true
         }
         view.onCommandClick = onCommandClick
         view.onScaleChanged = { context.coordinator.scaleChanged(to: $0) }
@@ -813,6 +841,7 @@ struct PDFKitView: NSViewRepresentable {
         @Binding var pageCount: Int
         @Binding var zoomScale: Double
         var lastNavigationID: UUID?
+        var lastContentRevision = 0
         private weak var highlightedPage: PDFPage?
         private var highlightAnnotation: PDFAnnotation?
 

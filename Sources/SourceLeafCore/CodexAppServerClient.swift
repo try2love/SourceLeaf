@@ -37,7 +37,7 @@ enum CodexAppServerWire {
                 "clientInfo": [
                     "name": "sourceleaf",
                     "title": "SourceLeaf",
-                    "version": "0.3.62"
+                    "version": "0.3.63"
                 ]
             ]
         ]

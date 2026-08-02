@@ -187,6 +187,68 @@ import Testing
     #expect(saved == edited)
 }
 
+@MainActor
+@Test func externalSourceChangeCanKeepTheUnsavedMemoryBuffer() throws {
+    let fixture = try ExternalSourceFixture(decision: .keepCurrent)
+    fixture.model.sourceChanged("local unsaved")
+    try "new disk".write(to: fixture.sourceURL, atomically: true, encoding: .utf8)
+
+    fixture.model.checkCurrentSourceForExternalChanges()
+
+    #expect(fixture.model.sourceText == "local unsaved")
+    #expect(fixture.model.hasUnsavedChanges)
+}
+
+@MainActor
+@Test func externalSourceChangeCanLoadTheNewDiskBuffer() throws {
+    let fixture = try ExternalSourceFixture(decision: .loadDisk)
+    fixture.model.sourceChanged("local unsaved")
+    try "new disk".write(to: fixture.sourceURL, atomically: true, encoding: .utf8)
+
+    fixture.model.checkCurrentSourceForExternalChanges()
+
+    #expect(fixture.model.sourceText == "new disk")
+    #expect(!fixture.model.hasUnsavedChanges)
+}
+
+@MainActor
+@Test func sourceDirectoryMonitorDetectsAnExternalAtomicSave() async throws {
+    let fixture = try ExternalSourceFixture(decision: .loadDisk)
+    try await Task.sleep(for: .milliseconds(100))
+    try "watched disk update".write(to: fixture.sourceURL, atomically: true, encoding: .utf8)
+
+    for _ in 0..<30 where fixture.model.sourceText != "watched disk update" {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    #expect(fixture.model.sourceText == "watched disk update")
+    #expect(!fixture.model.hasUnsavedChanges)
+}
+
+@MainActor
+private struct ExternalSourceFixture {
+    let model: AppModel
+    let sourceURL: URL
+
+    init(decision: ExternalSourceChangeDecision) throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SourceLeaf-external-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        sourceURL = root.appendingPathComponent("paper.tex")
+        try "original".write(to: sourceURL, atomically: true, encoding: .utf8)
+        let defaults = try #require(UserDefaults(suiteName: "SourceLeaf.external-source.\(UUID().uuidString)"))
+        model = AppModel(
+            restoreLastProject: false,
+            supportDirectory: root.appendingPathComponent("support", isDirectory: true),
+            defaults: defaults,
+            externalSourceChangeResolver: { _, _ in decision }
+        )
+        model.openProject(root)
+        model.setAutoSave(false)
+        model.openFile(try #require(model.projectFiles.first { $0.relativePath == "paper.tex" }))
+    }
+}
+
 @Test func latexFormattingTogglesLineCommentsAcrossSelectedLines() throws {
     let source = "alpha\n  beta\n\n% already\n"
     let selectedLength = ("alpha\n  beta\n" as NSString).length

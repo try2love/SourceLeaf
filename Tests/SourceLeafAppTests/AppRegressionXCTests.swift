@@ -915,6 +915,21 @@ final class AppRegressionXCTests: XCTestCase {
     }
 
     @MainActor
+    func testSourceEditorContainerHandlesCommandSSaveKeyEquivalent() async throws {
+        let state = SourceTypingState(text: "edited")
+        let host = makeSourceEditorHost(state: state)
+        defer { closeWindow(host.window) }
+        try await Task.sleep(for: .milliseconds(350))
+        let textView = try XCTUnwrap(findSourceTextView(in: host.view))
+        host.window.makeFirstResponder(textView)
+
+        XCTAssertTrue(host.view.performKeyEquivalent(with: try XCTUnwrap(
+            keyEvent(character: "s", keyCode: 1, window: host.window, modifiers: .command)
+        )))
+        XCTAssertEqual(state.saveCount, 1)
+    }
+
+    @MainActor
     func testCommandSlashDoesNotStealInputMethodComposition() async throws {
         let state = SourceTypingState(text: "alpha", selection: NSRange(location: 0, length: 0))
         let host = makeSourceEditorHost(state: state)
@@ -2480,6 +2495,7 @@ private final class SourceTypingState: ObservableObject {
     @Published var text: String
     @Published var selection: NSRange
     @Published var commandRequest: LaTeXEditRequest?
+    var saveCount = 0
 
     init(text: String = "", selection: NSRange = NSRange(location: 0, length: 0), commandRequest: LaTeXEditRequest? = nil) {
         self.text = text
@@ -2502,6 +2518,7 @@ private func makeSourceEditorHost(
         editorTheme: .light,
         editorFontFamily: "Menlo",
         editorFontSize: 14,
+        onSave: { state.saveCount += 1 },
         onAskAI: {},
         onCommandApplied: { id in
             if state.commandRequest?.id == id { state.commandRequest = nil }

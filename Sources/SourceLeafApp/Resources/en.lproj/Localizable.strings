@@ -313,6 +313,12 @@
 "save.dontSave" = "Don't Save";
 "save.switchTitle" = "Save changes before switching files?";
 "save.switchMessage" = "The current source file contains changes that have not been saved.";
+"externalSource.title" = "Source file changed on disk";
+"externalSource.message" = "Another application changed %@. Load the disk version or keep the current SourceLeaf buffer?";
+"externalSource.loadDisk" = "Load Disk Version";
+"externalSource.keepCurrent" = "Keep Current Buffer";
+"status.externalSourceLoaded" = "Loaded the newer source from disk.";
+"status.externalSourceKept" = "Kept the current buffer; the disk version was not loaded.";
 "preview.zoomIn" = "Zoom in";
 "preview.zoomOut" = "Zoom out";
 "preview.center" = "Center image";

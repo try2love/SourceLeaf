@@ -18,6 +18,11 @@ enum ProviderHealthStatus: Equatable {
     case unavailable(String)
 }
 
+enum ExternalSourceChangeDecision: Equatable {
+    case keepCurrent
+    case loadDisk
+}
+
 @MainActor
 struct FloatingPanelFocusRequest: Equatable, Identifiable {
     let id = UUID()
@@ -46,6 +51,7 @@ final class AppModel: ObservableObject {
     @Published var configuration = ProjectConfiguration()
     @Published var layout = DockLayout()
     @Published var pdfURL: URL?
+    @Published private(set) var pdfContentRevision = 0
     @Published var pdfSelection = ""
     @Published var pdfPageIndex = 0
     @Published var pdfPageCount = 0
@@ -129,6 +135,11 @@ final class AppModel: ObservableObject {
     private var lastStreamingFlush = Date.distantPast
     private var restoreGuardTask: Task<Void, Never>?
     private var suppressTextChange = false
+    private var lastKnownDiskSourceText: String?
+    private let externalSourceChangeResolver: ((String, String) -> ExternalSourceChangeDecision)?
+    private lazy var sourceDirectoryMonitor = SourceDirectoryMonitor { [weak self] in
+        Task { @MainActor [weak self] in self?.checkCurrentSourceForExternalChanges() }
+    }
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
     private var historyStore: JSONFileStore<[AIEditHistoryEntry]>?
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
@@ -154,9 +165,11 @@ final class AppModel: ObservableObject {
         restoreLastProject: Bool = true,
         supportDirectory: URL? = nil,
         defaults: UserDefaults = .standard,
-        compiler: CompilerService = CompilerService()
+        compiler: CompilerService = CompilerService(),
+        externalSourceChangeResolver: ((String, String) -> ExternalSourceChangeDecision)? = nil
     ) {
         self.compiler = compiler
+        self.externalSourceChangeResolver = externalSourceChangeResolver
         supportDirectoryOverride = supportDirectory
         self.defaults = defaults
         projectOutlineExpanded = defaults.object(forKey: Self.projectOutlineExpandedKey) == nil
@@ -357,6 +370,8 @@ final class AppModel: ObservableObject {
     func openProject(_ root: URL) {
         do {
             guard try prepareToLeaveCurrentSource() else { return }
+            sourceDirectoryMonitor.stop()
+            lastKnownDiskSourceText = nil
             completionIndexRefreshTask?.cancel()
             selectedFile = nil
             selectedImageFile = nil
@@ -445,7 +460,7 @@ final class AppModel: ObservableObject {
                     rootDocument: rootDocument
                   ),
                   self.projectRoot == projectRoot else { return }
-            pdfURL = result.pdfURL
+            if let pdfURL = result.pdfURL { showPDF(at: pdfURL) }
             buildLog = result.log
             buildSucceeded = true
             buildPhase = .finished
@@ -471,11 +486,13 @@ final class AppModel: ObservableObject {
             suppressTextChange = true
             selectedFile = file
             sourceText = text
+            lastKnownDiskSourceText = text
             hasUnsavedChanges = false
             selectedRange = NSRange(location: 0, length: 0)
             refreshActiveFileOutline()
             scheduleCompletionIndexRefresh()
             suppressTextChange = false
+            sourceDirectoryMonitor.watch(fileURL: file.url)
             revealPanel(.source, in: .center)
             rememberLastOpenedFile(file)
         } catch {
@@ -496,7 +513,7 @@ final class AppModel: ObservableObject {
     func openPDF(_ file: ProjectFile) {
         do {
             guard try prepareToLeaveCurrentSource() else { return }
-            pdfURL = file.url
+            showPDF(at: file.url)
             pdfPageIndex = 0
             pdfSelection = ""
             syncTeXDocument = nil
@@ -550,7 +567,51 @@ final class AppModel: ObservableObject {
         if currentDisk != sourceText {
             try Data(sourceText.utf8).write(to: selectedFile.url, options: [.atomic])
         }
+        lastKnownDiskSourceText = sourceText
         hasUnsavedChanges = false
+    }
+
+    func checkCurrentSourceForExternalChanges() {
+        guard let selectedFile,
+              [.tex, .bibliography, .style].contains(selectedFile.kind),
+              let diskText = try? String(contentsOf: selectedFile.url, encoding: .utf8),
+              diskText != lastKnownDiskSourceText else { return }
+        lastKnownDiskSourceText = diskText
+        guard diskText != sourceText else {
+            hasUnsavedChanges = false
+            return
+        }
+        let decision = externalSourceChangeResolver?(sourceText, diskText)
+            ?? presentExternalSourceChangeAlert(fileName: selectedFile.relativePath)
+        switch decision {
+        case .keepCurrent:
+            hasUnsavedChanges = true
+            statusText = L10n.text("status.externalSourceKept")
+        case .loadDisk:
+            suppressTextChange = true
+            sourceText = diskText
+            selectedRange = NSRange(location: min(selectedRange.location, (diskText as NSString).length), length: 0)
+            hasUnsavedChanges = false
+            refreshActiveFileOutline()
+            scheduleCompletionIndexRefresh()
+            suppressTextChange = false
+            statusText = L10n.text("status.externalSourceLoaded")
+        }
+    }
+
+    private func presentExternalSourceChangeAlert(fileName: String) -> ExternalSourceChangeDecision {
+        let alert = NSAlert()
+        alert.messageText = L10n.text("externalSource.title")
+        alert.informativeText = String(format: L10n.text("externalSource.message"), fileName)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.text("externalSource.loadDisk"))
+        alert.addButton(withTitle: L10n.text("externalSource.keepCurrent"))
+        return alert.runModal() == .alertFirstButtonReturn ? .loadDisk : .keepCurrent
+    }
+
+    private func showPDF(at url: URL) {
+        pdfURL = url
+        pdfContentRevision &+= 1
     }
 
     private func prepareToLeaveCurrentSource() throws -> Bool {
@@ -1084,7 +1145,7 @@ final class AppModel: ObservableObject {
                 buildPhase = result.status == .succeeded ? .finished : BuildLogSummary(log: result.log).phase
                 buildSucceeded = result.status == .succeeded
                 if result.status == .succeeded {
-                    if let pdfURL = result.pdfURL { self.pdfURL = pdfURL }
+                    if let pdfURL = result.pdfURL { showPDF(at: pdfURL) }
                     if let syncTeXURL = result.syncTeXURL {
                         syncTeXDocument = try? await SyncTeXDocument.load(from: syncTeXURL)
                     } else {

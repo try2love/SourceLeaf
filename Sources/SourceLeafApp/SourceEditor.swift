@@ -724,6 +724,7 @@ struct SourcePanel: View {
                 editorTheme: model.editorTheme,
                 editorFontFamily: model.editorFontFamily,
                 editorFontSize: model.editorFontSize,
+                onSave: model.saveNow,
                 onAskAI: model.attachCurrentSelection,
                 onCommandApplied: model.acknowledgeLaTeXEdit
             )
@@ -1202,6 +1203,7 @@ struct SourceTextView: NSViewRepresentable {
     var editorTheme: EditorTheme = .system
     var editorFontFamily: String = EditorFontCatalog.systemMonospaced
     var editorFontSize: Double = 13
+    var onSave: () -> Void = {}
     var onAskAI: () -> Void
     var onCommandApplied: (UUID) -> Void = { _ in }
 
@@ -1466,8 +1468,16 @@ struct SourceTextView: NSViewRepresentable {
                   let textView,
                   event.window === textView.window,
                   textView.window?.firstResponder === textView,
-                  !textView.hasMarkedText(),
-                  let command = formatterCommand(forKeyEquivalent: event.charactersIgnoringModifiers, keyCode: event.keyCode) else { return false }
+                  !textView.hasMarkedText() else { return false }
+            if event.charactersIgnoringModifiers?.lowercased() == "s" || event.keyCode == 1 {
+                hideCompletionOverlay()
+                parent.onSave()
+                return true
+            }
+            guard let command = formatterCommand(
+                forKeyEquivalent: event.charactersIgnoringModifiers,
+                keyCode: event.keyCode
+            ) else { return false }
             hideCompletionOverlay()
             return applyFormatterCommand(command, in: textView)
         }
