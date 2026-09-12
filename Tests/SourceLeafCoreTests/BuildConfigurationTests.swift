@@ -2,6 +2,15 @@ import Foundation
 import Testing
 @testable import SourceLeafCore
 
+@Test func automaticEngineRecognizesUnicodePackagesAndMagicComments() {
+    #expect(CompilerService.automaticLatexmkEngine(source: #"\documentclass[UTF8,fontset=fandol]{ctexart}"#) == .latexmkXeLaTeX)
+    #expect(CompilerService.automaticLatexmkEngine(source: #"\usepackage{amsmath, fontspec}"#) == .latexmkXeLaTeX)
+    #expect(CompilerService.automaticLatexmkEngine(source: "% !TeX program = lualatex\n\\documentclass{ctexbook}") == .latexmkLuaLaTeX)
+    #expect(CompilerService.automaticLatexmkEngine(source: "% !TeX program = pdflatex\n\\usepackage{ctex}") == .latexmkPDFLaTeX)
+    #expect(CompilerService.automaticLatexmkEngine(source: "% \\usepackage{fontspec}\n\\documentclass{article}") == .latexmkPDFLaTeX)
+    #expect(CompilerService.automaticLatexmkEngine(source: #"\documentclass{IEEEtran}"#) == .latexmkPDFLaTeX)
+}
+
 @Test func legacyBuildConfigurationDefaultsToTrialCompilation() throws {
     let legacy = """
     {

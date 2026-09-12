@@ -226,6 +226,36 @@ import Testing
 }
 
 @MainActor
+@Test func projectTreeTracksNestedAddRenameDeleteWithoutLosingEdits() async throws {
+    let fixture = try ExternalSourceFixture(decision: .keepCurrent)
+    let root = fixture.sourceURL.deletingLastPathComponent()
+    fixture.model.sourceChanged("unsaved buffer")
+    let nested = root.appendingPathComponent("new/deep")
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    let added = nested.appendingPathComponent("added.tex")
+    try "new file".write(to: added, atomically: true, encoding: .utf8)
+    for _ in 0..<60 where !fixture.model.projectFiles.contains(where: { $0.relativePath == "new/deep/added.tex" }) {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(fixture.model.projectFiles.contains { $0.relativePath == "new/deep/added.tex" })
+    let renamed = nested.appendingPathComponent("renamed.tex")
+    try FileManager.default.moveItem(at: added, to: renamed)
+    for _ in 0..<60 where !fixture.model.projectFiles.contains(where: { $0.relativePath == "new/deep/renamed.tex" }) {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(fixture.model.projectFiles.contains { $0.relativePath == "new/deep/renamed.tex" })
+    #expect(!fixture.model.projectFiles.contains { $0.relativePath == "new/deep/added.tex" })
+    try FileManager.default.removeItem(at: renamed)
+    for _ in 0..<60 where fixture.model.projectFiles.contains(where: { $0.relativePath == "new/deep/renamed.tex" }) {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(!fixture.model.projectFiles.contains { $0.relativePath == "new/deep/renamed.tex" })
+    #expect(fixture.model.sourceText == "unsaved buffer")
+    #expect(fixture.model.hasUnsavedChanges)
+    #expect(fixture.model.selectedFile?.url.resolvingSymlinksInPath() == fixture.sourceURL.resolvingSymlinksInPath())
+}
+
+@MainActor
 private struct ExternalSourceFixture {
     let model: AppModel
     let sourceURL: URL

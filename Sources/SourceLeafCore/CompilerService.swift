@@ -315,7 +315,8 @@ public actor CompilerService {
 
         let engine: BuildEngine = {
             guard configuration.engine == .automatic else { return configuration.engine }
-            return latexmk != nil ? .latexmkPDFLaTeX : .tectonic
+            guard latexmk != nil else { return .tectonic }
+            return Self.automaticLatexmkEngine(source: (try? String(contentsOf: rootURL, encoding: .utf8)) ?? "")
         }()
 
         switch engine {
@@ -350,6 +351,20 @@ public actor CompilerService {
                 .replacingOccurrences(of: "{{output}}", with: shellQuoted(outputDirectory.path))
             return (URL(fileURLWithPath: "/bin/zsh"), ["-lc", expanded])
         }
+    }
+
+    static func automaticLatexmkEngine(source: String) -> BuildEngine {
+        // Explicit editor directives take precedence over package detection.
+        if let directive = source.range(of: #"(?im)^\s*%\s*!\s*tex\s+program\s*=\s*(xelatex|lualatex|pdflatex)\b"#, options: .regularExpression) {
+            let value = source[directive].lowercased()
+            if value.hasSuffix("xelatex") { return .latexmkXeLaTeX }
+            if value.hasSuffix("lualatex") { return .latexmkLuaLaTeX }
+            return .latexmkPDFLaTeX
+        }
+        let uncommented = source.replacingOccurrences(of: #"(?m)(?<!\\)%[^\n]*"#, with: "", options: .regularExpression)
+        let unicodePackages = #"\\(?:documentclass|usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{[^}]*\b(?:ctex(?:art|book|rep)?|xeCJK|fontspec|unicode-math)\b[^}]*\}"#
+        return uncommented.range(of: unicodePackages, options: .regularExpression) != nil
+            ? .latexmkXeLaTeX : .latexmkPDFLaTeX
     }
 
     private func buildDirectory(for projectRoot: URL) throws -> URL {

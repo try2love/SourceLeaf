@@ -140,6 +140,9 @@ final class AppModel: ObservableObject {
     private lazy var sourceDirectoryMonitor = SourceDirectoryMonitor { [weak self] in
         Task { @MainActor [weak self] in self?.checkCurrentSourceForExternalChanges() }
     }
+    private lazy var projectDirectoryMonitor = ProjectDirectoryMonitor { [weak self] in
+        self?.refreshProjectFilesFromDisk()
+    }
     private var projectConfigStore: JSONFileStore<ProjectConfiguration>?
     private var historyStore: JSONFileStore<[AIEditHistoryEntry]>?
     private var profilesStore: JSONFileStore<[ProviderProfile]>?
@@ -367,10 +370,21 @@ final class AppModel: ObservableObject {
         openProject(url)
     }
 
+    private func refreshProjectFilesFromDisk() {
+        guard let projectRoot else { return }
+        let files = ProjectIndexer.discoverFiles(root: projectRoot)
+        guard files != projectFiles else { return }
+        projectFiles = files
+        projectTree = ProjectIndexer.tree(files: files)
+        refreshProjectOutline()
+        refreshCompletionIndex()
+    }
+
     func openProject(_ root: URL) {
         do {
             guard try prepareToLeaveCurrentSource() else { return }
             sourceDirectoryMonitor.stop()
+            projectDirectoryMonitor.stop()
             lastKnownDiskSourceText = nil
             completionIndexRefreshTask?.cancel()
             selectedFile = nil
@@ -393,6 +407,7 @@ final class AppModel: ObservableObject {
             projectRoot = root.standardizedFileURL
             projectFiles = ProjectIndexer.discoverFiles(root: root)
             projectTree = ProjectIndexer.tree(files: projectFiles)
+            projectDirectoryMonitor.watch(root: root)
             let support = try resolvedSupportDirectory()
             let key = String(SourceTargetService.hash(root.standardizedFileURL.path).prefix(16))
             currentProjectStateKey = key
